@@ -11,4 +11,4 @@ pip install -e .
 
 ## Tutorial
 
-[Jupyter Notebook](notebook/tutorial.ipynb
+[Jupyter Notebook](notebook/tutorial.ipynb)
