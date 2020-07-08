@@ -183,6 +183,22 @@ class DynRecognizer(Recognizer):
         return mu, logvar
 
 
+class BootstrapRecognizer(Recognizer):
+    def __init__(self, config, system):
+        super().__init__(config)
+        self.system = system
+
+    def recognize(self, y, u, q):
+        mu0, logvar0 = q
+        inputs = torch.cat((y, u), dim=-1)
+        h = torch.tanh(self.hidden(inputs))
+
+        mu = self.system.predict(mu0, u)
+        logvar = logvar0 + self.system.noise.logvar
+
+        return mu, logvar
+
+
 class Encoder(Component, metaclass=ABCMeta):
     def __init__(self):
         super().__init__()
