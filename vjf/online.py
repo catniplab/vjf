@@ -6,11 +6,11 @@ from . import observation, decoder, dynamics, recognition, metric
 from .base import Model
 from .metric import gaussian_entropy
 
-__all__ = ["VAF"]
+__all__ = ["VJF"]
 logger = logging.getLogger(__name__)
 
 
-class VAF(Model):
+class VJF(Model):
     def __init__(self, config):
         super().__init__(config)
 
