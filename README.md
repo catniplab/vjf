@@ -1,14 +1,15 @@
-Variational Joint Filtering
+VJF: Variational Joint Filtering
 ---
+Online learning algorithm for state space models. 
+
+[Zhao, Y. and Park, I.M. Variational Online Learning of Neural Dynamics. Front. Comput. Neurosci., 14 October 2020](https://doi.org/10.3389/fncom.2020.00071)
 
 ## Installation
 
 ```bash
-git clone https://github.com/catniplab/vjf.git 
-cd vjf
-pip install -e .
+pip install git+https://github.com/catniplab/vjf.git
 ```
 
-## Tutorial
+## Usage
+[See the tutorial](notebook/tutorial.ipynb)
 
-[Jupyter Notebook](notebook/tutorial.ipynb)
