@@ -1,0 +1,2 @@
+lorenz_216_1500_10_200_gaussian_s0.npz filter=lfs diff=lfs merge=lfs -text
+*.npz filter=lfs diff=lfs merge=lfs -text
