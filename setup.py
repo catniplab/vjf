@@ -7,7 +7,7 @@ setup(
     url="",
     license="MIT",
     author="yuan",
-    author_email="yuan.zhao@stonybrook.edu",
+    author_email="yuanz271@gmail.com",
     description="",
     requires=["scipy", "numpy", "torch"],
 )
