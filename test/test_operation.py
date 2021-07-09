@@ -8,10 +8,10 @@ def test_solve():
     A = np.dot(A.T, A)
     b = np.random.randn(m, p)
 
-    x = solve(A, b, "chol")
+    x = solve(A, b, "chol").numpy()
 
     assert np.allclose(A @ x, b)
 
-    x = solve(A, b, "qr")
+    x = solve(A, b, "qr").numpy()
 
     assert np.allclose(A @ x, b)

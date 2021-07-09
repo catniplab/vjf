@@ -2,18 +2,20 @@ import torch
 
 
 def chol_solve(A, B):
-    L = A.potrf(upper=False)  # A = LL'
+    L = torch.linalg.cholesky(A)  # .cholesky()  # A = LL'
     # X = B.potrs(L, upper=False)  # gradient not implemented
     # A^{-1} B = (LL')^{-1} B = (L')^{-1} L^{-1} B = (L')^{-1} (L^{-1} B)
-    C = B.trtrs(L, upper=False, transpose=False)[0]
-    X = C.trtrs(L, upper=False, transpose=True)[0]
+    # C = B.trtrs(L, upper=False, transpose=False)[0]
+    # X = C.trtrs(L, upper=False, transpose=True)[0]
+    X = B.cholesky_solve(L)
     return X
 
 
 def qr_solve(A, B):
     # QRx = b => x = R^{-1} Q'b
-    Q, R = torch.qr(A)
-    X = (Q.t() @ B).trtrs(R)[0]
+    # Q, R = torch.qr(A)
+    # X = (Q.t() @ B).trtrs(R)[0]
+    X = torch.linalg.solve(A, B)
     return X
 
 
