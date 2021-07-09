@@ -474,3 +474,6 @@ class VJF(Model):
                 loss = new_loss
 
         return mu, logvar, loss
+
+    def forecast(self, q, step=1):
+        raise NotImplementedError
