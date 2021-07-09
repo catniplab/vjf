@@ -1,6 +1,8 @@
 import logging
 
+import numpy as np
 import torch
+from tqdm import trange
 
 from . import observation, decoder, dynamics, recognition, metric
 from .base import Model
@@ -75,17 +77,17 @@ class VJF(Model):
         )
 
     def filter(
-        self,
-        y,
-        u,
-        q0=None,
-        time_major=False,
-        decoder=True,
-        encoder=True,
-        dynamics=True,
-        noise=True,
-        sample=True,
-        regularize=False,
+            self,
+            y,
+            u,
+            q0=None,
+            time_major=False,
+            decoder=True,
+            encoder=True,
+            dynamics=True,
+            noise=True,
+            sample=True,
+            regularize=False,
     ):
         ys, us = (
             torch.as_tensor(y, dtype=torch.float),
@@ -117,15 +119,15 @@ class VJF(Model):
         return mu, logvar, losses
 
     def feed(
-        self,
-        obs,
-        q0=None,
-        decoder=True,
-        encoder=True,
-        dynamics=True,
-        noise=True,
-        sample=True,
-        regularize=False,
+            self,
+            obs,
+            q0=None,
+            decoder=True,
+            encoder=True,
+            dynamics=True,
+            noise=True,
+            sample=True,
+            regularize=False,
     ):
         y, u = obs
         batch = y.shape[0]
@@ -208,227 +210,264 @@ class VJF(Model):
 
         return ys, us, mus, logvars
 
-    def train_dynamics(
-        self, y, u, mu, logvar, time_major=False, n_iter=1000, sample=False, rtol=1e-4
-    ):
-        y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
+    # def train_dynamics(
+    #     self, y, u, mu, logvar, time_major=False, n_iter=1000, sample=False, rtol=1e-4
+    # ):
+    #     y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
+    #
+    #     y = torch.reshape(y, (-1, self.ydim))
+    #     u = torch.reshape(u, (-1, self.udim))
+    #     q0 = (
+    #         torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
+    #         torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
+    #     )
+    #     q1 = (
+    #         torch.reshape(mu[1:, :, :], (-1, self.xdim)),
+    #         torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
+    #     )
+    #
+    #     old_loss = 0.0
+    #     for i in range(n_iter):
+    #         loss = self.system.loss(q0, q1, u, sample=sample)
+    #
+    #         if abs((loss - old_loss) / loss) < rtol:
+    #             break
+    #         old_loss = loss
+    #
+    #         self.dynamics_optimizer.zero_grad()
+    #         loss.backward()
+    #         self.dynamics_optimizer.step()
+    #
+    # def mstep(
+    #     self,
+    #     y,
+    #     u,
+    #     mu,
+    #     logvar,
+    #     time_major=False,
+    #     n_iter=1000,
+    #     sample=False,
+    #     rtol=1e-4,
+    #     decoder=True,
+    #     dynamics=True,
+    #     regularize=True,
+    # ):
+    #     y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
+    #
+    #     y = torch.reshape(y, (-1, self.ydim))
+    #     u = torch.reshape(u, (-1, self.udim))
+    #     q0 = (
+    #         torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
+    #         torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
+    #     )
+    #     q1 = (
+    #         torch.reshape(mu[1:, :, :], (-1, self.xdim)),
+    #         torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
+    #     )
+    #
+    #     old_loss = 0.0
+    #     for i in range(n_iter):
+    #         loss = 0.0
+    #         if decoder:
+    #             loss += self.decoder.loss(q1, y, norm=False)
+    #
+    #         loss += self.system.loss(q0, q1, u, sample=sample, regularize=regularize)
+    #
+    #         if abs((loss - old_loss) / loss) < rtol:
+    #             break
+    #         old_loss = loss
+    #
+    #         self.decoder_optimizer.zero_grad()
+    #         self.dynamics_optimizer.zero_grad()
+    #         self.noise_optimizer.zero_grad()
+    #         loss.backward()
+    #         self.decoder_optimizer.step()
+    #         if dynamics:
+    #             self.dynamics_optimizer.step()
+    #         else:
+    #             self.noise_optimizer.step()
+    #
+    #     return loss
+    #
+    # def estep(self, y, u, mu, logvar, time_major=False, n_iter=1000, rtol=1e-4):
+    #     if time_major:
+    #         T, B, _ = y.shape
+    #     else:
+    #         B, T, _ = y.shape
+    #
+    #     y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
+    #
+    #     y = torch.reshape(y, (-1, self.ydim))
+    #     u = torch.reshape(u, (-1, self.udim))
+    #
+    #     mu.requires_grad_()
+    #     logvar.requires_grad_()
+    #
+    #     state_optimizer = torch.optim.Adam([mu, logvar], lr=1e-3, amsgrad=False)
+    #
+    #     old_loss = 0.0
+    #     for i in range(n_iter):
+    #         q0 = (
+    #             torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
+    #             torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
+    #         )
+    #         q1 = (
+    #             torch.reshape(mu[1:, :, :], (-1, self.xdim)),
+    #             torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
+    #         )
+    #         # print(y.shape, u.shape, q1[0].shape, q1[1].shape, q0[0].shape, q0[0].shape)
+    #         loss = (
+    #             self.decoder.loss(q1, y, norm=False)
+    #             + self.system.loss(q0, q1, u)
+    #             + gaussian_entropy(q1[1])
+    #         )
+    #
+    #         if abs((loss - old_loss) / loss) < rtol:
+    #             break
+    #         old_loss = loss
+    #
+    #         state_optimizer.zero_grad()
+    #         loss.backward()
+    #         # print(mu.grad)
+    #         state_optimizer.step()
+    #
+    #     mu = torch.reshape(mu, (T + 1, B, self.xdim))
+    #     logvar = torch.reshape(logvar, (T + 1, B, self.xdim))
+    #     mu = mu[1:, :, :]
+    #     logvar = logvar[1:, :, :]
+    #
+    #     if not time_major:
+    #         mu = torch.transpose(mu, 1, 0)
+    #         logvar = torch.transpose(logvar, 1, 0)
+    #     mu = mu.detach().numpy()
+    #     logvar = logvar.detach().numpy()
+    #
+    #     return mu, logvar
+    #
+    # def em(
+    #     self,
+    #     y,
+    #     u,
+    #     mu,
+    #     logvar,
+    #     time_major=False,
+    #     n_iter=20,
+    #     m_iter=100,
+    #     e_iter=100,
+    #     rtol=1e-4,
+    #     decoder=True,
+    #     dynamics=True,
+    # ):
+    #     old_loss = 0.0
+    #     for k in range(n_iter):
+    #         # M step
+    #         if m_iter > 0:
+    #             loss = self.mstep(
+    #                 y,
+    #                 u,
+    #                 mu,
+    #                 logvar,
+    #                 time_major,
+    #                 m_iter,
+    #                 decoder=decoder,
+    #                 dynamics=dynamics,
+    #             )
+    #
+    #             if abs((loss - old_loss) / loss) < rtol:
+    #                 break
+    #             old_loss = loss
+    #
+    #         # E step
+    #         if e_iter > 0:
+    #             mu, logvar = self.estep(y, u, mu, logvar, time_major, e_iter)
+    #
+    #     return mu, logvar
 
-        y = torch.reshape(y, (-1, self.ydim))
-        u = torch.reshape(u, (-1, self.udim))
-        q0 = (
-            torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
-            torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
-        )
-        q1 = (
-            torch.reshape(mu[1:, :, :], (-1, self.xdim)),
-            torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
-        )
+    # def fit(
+    #     self,
+    #     y,
+    #     u,
+    #     mu,
+    #     logvar,
+    #     time_major=False,
+    #     n_iter=50,
+    #     n_iter1=1000,
+    #     decoder=True,
+    #     encoder=True,
+    #     dynamics=True,
+    #     noise=True,
+    #     regularize=True,
+    # ):
+    #     y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
+    #
+    #     for i in range(n_iter1):
+    #         mu1, logvar1 = self.recognizer(
+    #             torch.reshape(y, (-1, self.ydim)),
+    #             torch.reshape(u, (-1, self.udim)),
+    #             (
+    #                 torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
+    #                 torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
+    #             ),
+    #         )
+    #         loss = torch.mean((torch.reshape(mu[1:, :, :], (-1, self.xdim)) - mu1) ** 2)
+    #         loss += torch.mean(
+    #             (torch.reshape(logvar[1:, :, :], (-1, self.xdim)) - logvar1) ** 2
+    #         )
+    #         self.encoder_optimizer.zero_grad()
+    #         loss.backward()
+    #         self.encoder_optimizer.step()
+    #
+    #     for i in range(n_iter):
+    #         mu, logvar, _ = self.filter(
+    #             y,
+    #             u,
+    #             True,
+    #             decoder=decoder,
+    #             encoder=encoder,
+    #             dynamics=dynamics,
+    #             noise=noise,
+    #             regularize=regularize,
+    #         )
+    #
+    #     if not time_major:
+    #         mu = torch.transpose(mu, 1, 0)
+    #         logvar = torch.transpose(logvar, 1, 0)
+    #
+    #     return mu.detach().numpy(), logvar.detach().numpy()
 
-        old_loss = 0.0
-        for i in range(n_iter):
-            loss = self.system.loss(q0, q1, u, sample=sample)
+    def fit(self,
+            y,
+            u,
+            q0=None,
+            *,
+            max_iter=1000,
+            time_major=False,
+            decoder=True,
+            encoder=True,
+            dynamics=True,
+            noise=True,
+            sample=True,
+            regularize=False,
+            ):
 
-            if abs((loss - old_loss) / loss) < rtol:
-                break
-            old_loss = loss
-
-            self.dynamics_optimizer.zero_grad()
-            loss.backward()
-            self.dynamics_optimizer.step()
-
-    def mstep(
-        self,
-        y,
-        u,
-        mu,
-        logvar,
-        time_major=False,
-        n_iter=1000,
-        sample=False,
-        rtol=1e-4,
-        decoder=True,
-        dynamics=True,
-        regularize=True,
-    ):
-        y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
-
-        y = torch.reshape(y, (-1, self.ydim))
-        u = torch.reshape(u, (-1, self.udim))
-        q0 = (
-            torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
-            torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
-        )
-        q1 = (
-            torch.reshape(mu[1:, :, :], (-1, self.xdim)),
-            torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
-        )
-
-        old_loss = 0.0
-        for i in range(n_iter):
-            loss = 0.0
-            if decoder:
-                loss += self.decoder.loss(q1, y, norm=False)
-
-            loss += self.system.loss(q0, q1, u, sample=sample, regularize=regularize)
-
-            if abs((loss - old_loss) / loss) < rtol:
-                break
-            old_loss = loss
-
-            self.decoder_optimizer.zero_grad()
-            self.dynamics_optimizer.zero_grad()
-            self.noise_optimizer.zero_grad()
-            loss.backward()
-            self.decoder_optimizer.step()
-            if dynamics:
-                self.dynamics_optimizer.step()
-            else:
-                self.noise_optimizer.step()
-
-        return loss
-
-    def estep(self, y, u, mu, logvar, time_major=False, n_iter=1000, rtol=1e-4):
-        if time_major:
-            T, B, _ = y.shape
-        else:
-            B, T, _ = y.shape
-
-        y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
-
-        y = torch.reshape(y, (-1, self.ydim))
-        u = torch.reshape(u, (-1, self.udim))
-
-        mu.requires_grad_()
-        logvar.requires_grad_()
-
-        state_optimizer = torch.optim.Adam([mu, logvar], lr=1e-3, amsgrad=False)
-
-        old_loss = 0.0
-        for i in range(n_iter):
-            q0 = (
-                torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
-                torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
-            )
-            q1 = (
-                torch.reshape(mu[1:, :, :], (-1, self.xdim)),
-                torch.reshape(logvar[1:, :, :], (-1, self.xdim)),
-            )
-            # print(y.shape, u.shape, q1[0].shape, q1[1].shape, q0[0].shape, q0[0].shape)
-            loss = (
-                self.decoder.loss(q1, y, norm=False)
-                + self.system.loss(q0, q1, u)
-                + gaussian_entropy(q1[1])
-            )
-
-            if abs((loss - old_loss) / loss) < rtol:
-                break
-            old_loss = loss
-
-            state_optimizer.zero_grad()
-            loss.backward()
-            # print(mu.grad)
-            state_optimizer.step()
-
-        mu = torch.reshape(mu, (T + 1, B, self.xdim))
-        logvar = torch.reshape(logvar, (T + 1, B, self.xdim))
-        mu = mu[1:, :, :]
-        logvar = logvar[1:, :, :]
-
-        if not time_major:
-            mu = torch.transpose(mu, 1, 0)
-            logvar = torch.transpose(logvar, 1, 0)
-        mu = mu.detach().numpy()
-        logvar = logvar.detach().numpy()
-
-        return mu, logvar
-
-    def em(
-        self,
-        y,
-        u,
-        mu,
-        logvar,
-        time_major=False,
-        n_iter=20,
-        m_iter=100,
-        e_iter=100,
-        rtol=1e-4,
-        decoder=True,
-        dynamics=True,
-    ):
-        old_loss = 0.0
-        for k in range(n_iter):
-            # M step
-            if m_iter > 0:
-                loss = self.mstep(
-                    y,
-                    u,
-                    mu,
-                    logvar,
-                    time_major,
-                    m_iter,
-                    decoder=decoder,
-                    dynamics=dynamics,
-                )
-
-                if abs((loss - old_loss) / loss) < rtol:
+        loss = torch.tensor(np.nan)
+        with trange(max_iter) as progress:
+            for i in progress:
+                mu, logvar, losses = self.filter(y,
+                                                 u,
+                                                 q0=q0,
+                                                 time_major=time_major,
+                                                 decoder=decoder,
+                                                 encoder=encoder,
+                                                 dynamics=dynamics,
+                                                 noise=noise,
+                                                 sample=sample,
+                                                 regularize=regularize,
+                                                 )
+                new_loss = -torch.tensor(losses).sum()
+                progress.set_postfix({'Loss': new_loss.item()})
+                if torch.isclose(loss, new_loss):
                     break
-                old_loss = loss
+                loss = new_loss
 
-            # E step
-            if e_iter > 0:
-                mu, logvar = self.estep(y, u, mu, logvar, time_major, e_iter)
-
-        return mu, logvar
-
-    def fit(
-        self,
-        y,
-        u,
-        mu,
-        logvar,
-        time_major=False,
-        n_iter=50,
-        n_iter1=1000,
-        decoder=True,
-        encoder=True,
-        dynamics=True,
-        noise=True,
-        regularize=True,
-    ):
-        y, u, mu, logvar = self.preprocess(y, u, mu, logvar, time_major)
-
-        for i in range(n_iter1):
-            mu1, logvar1 = self.recognizer(
-                torch.reshape(y, (-1, self.ydim)),
-                torch.reshape(u, (-1, self.udim)),
-                (
-                    torch.reshape(mu[:-1, :, :], (-1, self.xdim)),
-                    torch.reshape(logvar[:-1, :, :], (-1, self.xdim)),
-                ),
-            )
-            loss = torch.mean((torch.reshape(mu[1:, :, :], (-1, self.xdim)) - mu1) ** 2)
-            loss += torch.mean(
-                (torch.reshape(logvar[1:, :, :], (-1, self.xdim)) - logvar1) ** 2
-            )
-            self.encoder_optimizer.zero_grad()
-            loss.backward()
-            self.encoder_optimizer.step()
-
-        for i in range(n_iter):
-            mu, logvar, _ = self.filter(
-                y,
-                u,
-                True,
-                decoder=decoder,
-                encoder=encoder,
-                dynamics=dynamics,
-                noise=noise,
-                regularize=regularize,
-            )
-
-        if not time_major:
-            mu = torch.transpose(mu, 1, 0)
-            logvar = torch.transpose(logvar, 1, 0)
-
-        return mu.detach().numpy(), logvar.detach().numpy()
+        return mu, logvar, loss
