@@ -129,9 +129,9 @@ mdl = online.VJF(
 # mu = mu.transpose(1, 0, 2)
 
 # pseudo offline training
-mu, logvar, loss = mdl.fit(ys, us, max_iter=50)  # posterior mean, variance and loss (negative ELBO)
-mu = torch.detach(mu).numpy().squeeze()  # convert to numpy array
-mu = mu.transpose(1, 0, 2)  # move batch to leading axis
+print(ys.shape)
+mu, logvar, loss = mdl.fit(ys, us, max_iter=5)  # posterior mean, variance and loss (negative ELBO)
+mu = mu.detach().numpy().squeeze()  # convert to numpy array
 
 #%% md
 

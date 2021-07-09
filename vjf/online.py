@@ -116,6 +116,9 @@ class VJF(Model):
             q0 = q
             losses.append(loss)
 
+        if not time_major:
+            mu = torch.transpose(mu, 1, 0)
+            logvar = torch.transpose(logvar, 1, 0)
         return mu, logvar, losses
 
     def feed(
