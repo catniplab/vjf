@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import torch
 from tqdm import trange
+from torch.optim.lr_scheduler import ExponentialLR
 
 from . import observation, decoder, dynamics, recognition, metric
 from .base import Model
@@ -57,6 +58,10 @@ class VJF(Model):
             self.recognizer.parameters(), lr=self.config["lr"], amsgrad=False
         )
 
+        self.decoder_scheduler = ExponentialLR(self.decoder_optimizer, gamma=0.9)
+        self.encoder_scheduler = ExponentialLR(self.encoder_optimizer, gamma=0.9)
+        self.dynamics_scheduler = ExponentialLR(self.dynamics_optimizer, gamma=0.9)
+
         # self.smoother_optimizer = torch.optim.Adam(
         #     self.smoother.parameters(), lr=self.config["lr"], amsgrad=False
         # )
@@ -99,7 +104,7 @@ class VJF(Model):
         :param decoder: True to optimize decoder, default=True
         :param encoder: True to optimize encoder, default=True
         :param dynamics: True to optimize dynamic model, default=True
-        :param noise: True to optimize state noise, default=True
+        :param noise: True to optimize state noise, default=False
         :param sample: True to use stochastic VI, default=True
         :param regularize: True to regularize parameters, default=False
         :return:
@@ -465,11 +470,11 @@ class VJF(Model):
             q0=None,
             *,
             time_major=False,
-            max_iter=1000,
+            max_iter=10,
             decoder=True,
             encoder=True,
             dynamics=True,
-            noise=True,
+            noise=False,
             ):
         """
         Pseudo offline mode
@@ -512,16 +517,22 @@ class VJF(Model):
                     break
                 loss = new_loss
                 loss.backward()
+                torch.nn.utils.clip_grad_value_(
+                    self.parameters(), self.config["clip_gradients"]
+                )
                 if decoder:
                     self.decoder_optimizer.step()
+                    self.decoder_scheduler.step()
                 if dynamics:
                     self.dynamics_optimizer.step()
+                    self.dynamics_scheduler.step()
                 if encoder:
                     self.encoder_optimizer.step()
+                    self.encoder_scheduler.step()
                 if noise:
                     self.noise_optimizer.step()
             else:
-                print('Maximum iteration reached')
+                print('Maximum iteration reached.')
         return mu, logvar, loss
 
     def forecast(self, x0, *, step=1, inclusive=True):

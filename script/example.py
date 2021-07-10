@@ -27,6 +27,7 @@ from functools import partial
 # %%
 
 import torch
+from torch.nn import functional
 import vjf
 from vjf import online
 
@@ -149,4 +150,4 @@ plt.close()
 
 # %% Sample future trajectory
 x_future, y_future = mdl.forecast(x0=torch.zeros(5, 3), step=10)
-print(x_future.shape, y_future.shape)
+# print(x_future.shape, y_future.shape)

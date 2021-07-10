@@ -44,7 +44,7 @@ class GLMDecoder(Decoder):
     def forward(self, x):
         return self.decode(x)
 
-    def decode(self, x, norm=False):
+    def decode(self, x, norm=True):
         if norm:
             return self.normed_linear(x)
         else:

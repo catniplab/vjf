@@ -69,13 +69,13 @@ class Gaussian(Likelihood):
 
 
 class Poisson(Likelihood):
-    def __init__(self, dim):
+    def __init__(self, dim, activation=torch.exp):
         super().__init__()
         self.dim = dim
-        self.link = torch.exp
+        self.activation = activation
 
     def loss(self, y, eta, q, decoder, sample=True):
-        loss = torch.mean(torch.sum(torch.exp(eta) - eta * y, dim=-1))
+        loss = torch.mean(torch.sum(self.activation(eta) - eta * y, dim=-1))
         if not sample:
             # analytical Poisson loss only supports canonical link
             loss = torch.mean(
@@ -85,7 +85,7 @@ class Poisson(Likelihood):
         return loss
 
     def forward(self, eta):
-        return self.link(eta)
+        return self.activation(eta)
 
 
 class Bernoulli(Likelihood):
