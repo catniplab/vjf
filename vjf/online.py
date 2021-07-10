@@ -508,6 +508,7 @@ class VJF(Model):
                 new_loss = -sum([sum(e) for e in elbos]) / T
                 progress.set_postfix({'Loss': new_loss.item()})
                 if torch.isclose(loss, new_loss):
+                    print('Converged')
                     break
                 loss = new_loss
                 loss.backward()
@@ -519,7 +520,8 @@ class VJF(Model):
                     self.encoder_optimizer.step()
                 if noise:
                     self.noise_optimizer.step()
-
+            else:
+                print('Maximum iteration reached')
         return mu, logvar, loss
 
     def forecast(self, x0, *, step=1, inclusive=True):
