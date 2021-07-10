@@ -81,6 +81,7 @@ class VJF(Model):
             y,
             u,
             q0=None,
+            *,
             time_major=False,
             decoder=True,
             encoder=True,
@@ -89,6 +90,23 @@ class VJF(Model):
             sample=True,
             regularize=False,
     ):
+        """
+        Filter a sequence of observations
+        :param y: observation, (time, batch, obs dim) or (batch, time, obs dim) see time_major
+        :param u: control input corresponding to observation
+        :param q0: initial state mean and log variance, Tuple[Tensor(batch, state dim), Tensor(batch, state dim)], default=None
+        :param time_major: True if time is the leading axis of y and u, default=False
+        :param decoder: True to optimize decoder, default=True
+        :param encoder: True to optimize encoder, default=True
+        :param dynamics: True to optimize dynamic model, default=True
+        :param noise: True to optimize state noise, default=True
+        :param sample: True to use stochastic VI, default=True
+        :param regularize: True to regularize parameters, default=False
+        :return:
+            mu: posterior mean, Tensor, same shape as observation
+            logvar: log posterior variance, Tensor
+            elbos: elbos of all steps, List[Tuple(reconsctuction, dynamics, entropy)]
+        """
         ys, us = (
             torch.as_tensor(y, dtype=torch.float),
             torch.as_tensor(u, dtype=torch.float),
@@ -452,7 +470,15 @@ class VJF(Model):
             sample=True,
             regularize=False,
             ):
-
+        """
+        Pseudo offline mode
+        Run VJF.filter multiple times to train the model
+        See VJF.filter for arguments
+        :return:
+            mu: posterior mean, Tensor, same shape as observation
+            logvar: log posterior variance, Tensor
+            loss: total loss of all steps
+        """
         loss = torch.tensor(np.nan)
         with trange(max_iter) as progress:
             for i in progress:
@@ -476,4 +502,5 @@ class VJF(Model):
         return mu, logvar, loss
 
     def forecast(self, q, step=1):
+        # TODO: multistep simulated trajectory
         raise NotImplementedError
