@@ -6,7 +6,6 @@ from tqdm import trange
 
 from . import observation, decoder, dynamics, recognition, metric
 from .base import Model
-from .metric import gaussian_entropy
 
 __all__ = ["VJF"]
 logger = logging.getLogger(__name__)
@@ -89,6 +88,7 @@ class VJF(Model):
             noise=True,
             sample=True,
             regularize=False,
+            optim=True
     ):
         """
         Filter a sequence of observations
@@ -129,6 +129,7 @@ class VJF(Model):
                 noise=noise,
                 sample=sample,
                 regularize=regularize,
+                optim=optim,
             )
             mu[i, :, :], logvar[i, :, :] = q
             q0 = q
@@ -149,6 +150,7 @@ class VJF(Model):
             noise=True,
             sample=True,
             regularize=False,
+            optim=True
     ):
         y, u = obs
         batch = y.shape[0]
@@ -166,26 +168,27 @@ class VJF(Model):
         ll_recon, ll_dyn, entropy = self.elbo(
             (mu0, logvar0), (mu1, logvar1), (y, u), sample, regularize
         )
-        cost = torch.neg(ll_recon + ll_dyn + entropy)  # + torch.sum(
-        # torch.exp(self.system.noise.logvar)
-        # ) * torch.exp(self.logdecay)
 
-        self.decoder_optimizer.zero_grad()
-        self.dynamics_optimizer.zero_grad()
-        self.encoder_optimizer.zero_grad()
-        self.noise_optimizer.zero_grad()
-        cost.backward()
-        torch.nn.utils.clip_grad_value_(
-            self.parameters(), self.config["clip_gradients"]
-        )
-        if decoder:
-            self.decoder_optimizer.step()
-        if dynamics:
-            self.dynamics_optimizer.step()
-        if encoder:
-            self.encoder_optimizer.step()
-        if noise:
-            self.noise_optimizer.step()
+        if optim:
+            cost = torch.neg(ll_recon + ll_dyn + entropy)  # + torch.sum(
+            # torch.exp(self.system.noise.logvar)
+            # ) * torch.exp(self.logdecay)
+            self.decoder_optimizer.zero_grad()
+            self.dynamics_optimizer.zero_grad()
+            self.encoder_optimizer.zero_grad()
+            self.noise_optimizer.zero_grad()
+            cost.backward()
+            torch.nn.utils.clip_grad_value_(
+                self.parameters(), self.config["clip_gradients"]
+            )
+            if decoder:
+                self.decoder_optimizer.step()
+            if dynamics:
+                self.dynamics_optimizer.step()
+            if encoder:
+                self.encoder_optimizer.step()
+            if noise:
+                self.noise_optimizer.step()
 
         mu1, logvar1 = self.recognizer(y, u, (mu0.detach(), logvar0.detach()))
         # self.system.fit(mu0.detach(), mu1.detach())
@@ -461,43 +464,61 @@ class VJF(Model):
             u,
             q0=None,
             *,
-            max_iter=1000,
             time_major=False,
+            max_iter=1000,
             decoder=True,
             encoder=True,
             dynamics=True,
             noise=True,
-            sample=True,
-            regularize=False,
             ):
         """
         Pseudo offline mode
         Run VJF.filter multiple times to train the model
         See VJF.filter for arguments
+        :param y: observation, (time, batch, obs dim) or (batch, time, obs dim) see time_major
+        :param u: control input corresponding to observation
+        :param q0: initial state mean and log variance, Tuple[Tensor(batch, state dim), Tensor(batch, state dim)], default=None
+        :param time_major: True if time is the leading axis of y and u, default=False
+        :param max_iter: number of iterations
         :return:
             mu: posterior mean, Tensor, same shape as observation
             logvar: log posterior variance, Tensor
             loss: total loss of all steps
         """
+        T = y.shape[0] if time_major else y.shape[1]
         loss = torch.tensor(np.nan)
         with trange(max_iter) as progress:
             for i in progress:
-                mu, logvar, losses = self.filter(y,
-                                                 u,
-                                                 q0=q0,
-                                                 time_major=time_major,
-                                                 decoder=decoder,
-                                                 encoder=encoder,
-                                                 dynamics=dynamics,
-                                                 noise=noise,
-                                                 sample=sample,
-                                                 regularize=regularize,
-                                                 )
-                new_loss = -torch.tensor(losses).sum()
+                self.decoder_optimizer.zero_grad()
+                self.dynamics_optimizer.zero_grad()
+                self.encoder_optimizer.zero_grad()
+                self.noise_optimizer.zero_grad()
+                mu, logvar, elbos = self.filter(y,
+                                                u,
+                                                q0=q0,
+                                                time_major=time_major,
+                                                decoder=False,
+                                                encoder=False,
+                                                dynamics=False,
+                                                noise=False,
+                                                sample=True,
+                                                regularize=False,
+                                                optim=False
+                                                )
+                new_loss = -sum([sum(e) for e in elbos]) / T
                 progress.set_postfix({'Loss': new_loss.item()})
                 if torch.isclose(loss, new_loss):
                     break
                 loss = new_loss
+                loss.backward()
+                if decoder:
+                    self.decoder_optimizer.step()
+                if dynamics:
+                    self.dynamics_optimizer.step()
+                if encoder:
+                    self.encoder_optimizer.step()
+                if noise:
+                    self.noise_optimizer.step()
 
         return mu, logvar, loss
 
