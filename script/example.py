@@ -120,16 +120,14 @@ mdl = online.VJF(
 
 # We feed the data multiple times to help the training
 # This may take some time
-n_epoch = 10
-
-for i in range(n_epoch):
-    mu, logvar, losses = mdl.filter(ys, us)
-
-mu = torch.detach(mu).numpy().squeeze()
-# mu = mu.transpose(1, 0, 2)
+# n_epoch = 10
+#
+# for i in range(n_epoch):
+#     mu, logvar, losses = mdl.filter(ys, us)
+#
+# mu = torch.detach(mu).numpy().squeeze()
 
 # pseudo offline training
-print(ys.shape)
 mu, logvar, loss = mdl.fit(ys, us, max_iter=50)  # posterior mean, variance and loss (negative ELBO)
 mu = mu.detach().numpy().squeeze()  # convert to numpy array
 
