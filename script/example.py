@@ -1,4 +1,4 @@
-#%%
+# %%
 
 import matplotlib as mpl
 # mpl.use("pgf")
@@ -10,7 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-#%%
+# %%
 
 import time
 
@@ -20,25 +20,25 @@ from sklearn import decomposition
 from sklearn.linear_model import LinearRegression
 from functools import partial
 
-#%% md
+# %% md
 
 # Let's load the packages
 
-#%%
+# %%
 
 import torch
 import vjf
 from vjf import online
 
-#%% md
+# %% md
 
 # We have synthesized some data from Lorenz attractor, 3D state, 200D observation, 216 realizations, each lasts 1500 steps. Let's load the data first. ([download here](https://doi.org/10.6084/m9.figshare.14588469))
 
-#%%
+# %%
 
 data = np.load('../notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
 
-#%%
+# %%
 
 xs = data['x']  # state
 ys = data['y']  # observation
@@ -47,11 +47,11 @@ xdim = xs.shape[-1]
 ydim = ys.shape[-1]
 udim = us.shape[-1]
 
-#%% md
+# %% md
 
 # Firstly we draw some of the latent trajectories.
 
-#%%
+# %%
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -64,13 +64,13 @@ for x in xs[::50, ...]:
 plt.show()
 plt.close()
 
-#%% md
+# %% md
 
 # One can see the two wings. The green/red dots are the initial/final states.
 
 # Secondly we draw one series of observation.
 
-#%%
+# %%
 
 fig = plt.figure()
 ax = fig.add_subplot(111)
@@ -79,11 +79,11 @@ ax.matshow(ys[0, :, :].T, aspect='auto')
 plt.show()
 plt.close()
 
-#%% md
+# %% md
 
 # Now we fit the model.
 
-#%%
+# %%
 
 likelihood = 'gaussian'  # Gaussian observation
 dynamics = 'rbf'  # RBF network dynamic model
@@ -116,7 +116,7 @@ mdl = online.VJF(
     )
 )
 
-#%%
+# %%
 
 # We feed the data multiple times to help the training
 # This may take some time
@@ -131,11 +131,9 @@ mdl = online.VJF(
 mu, logvar, loss = mdl.fit(ys, us, max_iter=50)  # posterior mean, variance and loss (negative ELBO)
 mu = mu.detach().numpy().squeeze()  # convert to numpy array
 
-#%% md
 
-# Then we draw the estimated states. You can see the manifold. Note that the states are subject to an arbitrary affine transformation.
-
-#%%
+# %% Then we draw the estimated states. You can see the manifold. Note that the states are subject to an arbitrary
+# affine transformation.
 
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -148,6 +146,6 @@ for x in mu[::50, ...]:
 plt.show()
 plt.close()
 
-#%%
-
-
+# %% Sample future trajectory
+x_future, y_future = mdl.forecast(x0=torch.zeros(5, 3), step=10)
+print(x_future.shape, y_future.shape)

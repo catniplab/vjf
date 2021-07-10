@@ -483,7 +483,7 @@ class VJF(Model):
         :return:
             mu: posterior mean, Tensor, same shape as observation
             logvar: log posterior variance, Tensor
-            loss: total loss of all steps
+            loss: total loss of all steps (normalized by number of time steps)
         """
         T = y.shape[0] if time_major else y.shape[1]
         loss = torch.tensor(np.nan)
@@ -522,6 +522,27 @@ class VJF(Model):
 
         return mu, logvar, loss
 
-    def forecast(self, q, step=1):
-        # TODO: multistep simulated trajectory
-        raise NotImplementedError
+    def forecast(self, x0, *, step=1, inclusive=True):
+        """
+        Sample future trajectories
+        :param x0: initial state, Tensor(xdim,) or Tensor(size, xdim)
+        :param step: number of steps, default=1
+        :param inclusive: trajectory includes initial state if True, default=True
+        :return:
+            x: sampled latent trajectory, Tensor(step, state dim)
+            y: sampled rate, Tensor(step, obs dim)
+        """
+        x0 = torch.atleast_2d(x0)
+        size = x0.shape[0]
+        x = torch.empty(step + 1, size, self.xdim)
+        u = torch.zeros(size, self.udim)  # autonomous
+        x[0, ...] = x0
+        for i in range(step):
+            m = self.system(x[i], u)
+            x[i+1] = m + torch.randn_like(m) * self.state_noise.std
+        y = self.decoder.likelihood(self.decoder(x))
+        if not inclusive:
+            x = x[1:]
+            y = y[1:]
+
+        return x, y

@@ -32,7 +32,7 @@ class Posterior(Module):
     def cov(self, value):
         self._cov.data = value
 
-    def forward(self, *input):
+    def forward(self, *inputs):
         raise NotImplementedError
 
 
@@ -52,7 +52,7 @@ class SGP(GP):
         :param f_cov: prior covariance between dimensions of f
         :param inducing: inducing variables, row vectors
         """
-        super().__init__(in_features, out_features, mean_func, cov_func, noise_var, f_cov)
+        super().__init__(in_features, out_features, mean_func, cov_func, noise_var, f_cov=None)
         self.register_parameter("inducing", Parameter(torch.as_tensor(inducing), requires_grad=False))
         self.initialize()
 
@@ -90,7 +90,7 @@ class SGP(GP):
         fmean = A @ mu
 
         if sampling:
-            L = torch.potrf(fcov, upper=False)
+            L = torch.linalg.cholesky(fcov)
             f = fmean + L @ torch.normal(torch.zeros_like(fmean))
         else:
             f = fmean

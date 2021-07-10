@@ -72,6 +72,7 @@ class Poisson(Likelihood):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
+        self.link = torch.exp
 
     def loss(self, y, eta, q, decoder, sample=True):
         loss = torch.mean(torch.sum(torch.exp(eta) - eta * y, dim=-1))
@@ -84,7 +85,7 @@ class Poisson(Likelihood):
         return loss
 
     def forward(self, eta):
-        return torch.exp(eta)
+        return self.link(eta)
 
 
 class Bernoulli(Likelihood):

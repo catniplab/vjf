@@ -34,17 +34,17 @@ class GLMDecoder(Decoder):
         self.linear.weight.requires_grad = config["C"][1]
         self.linear.bias.requires_grad = config["b"][1]
 
-        if self.linear.weight.requires_grad and "gnorm" in config:
-            self.normed_linear = nn.utils.weight_norm(self.linear, dim=config["gnorm"])
-        else:
-            self.normed_linear = self.linear
+        # if self.linear.weight.requires_grad and "gnorm" in config:
+        #     self.normed_linear = nn.utils.weight_norm(self.linear, dim=config["gnorm"])
+        # else:
+        self.normed_linear = self.linear
 
         self.add_module("likelihood", self._family)
 
     def forward(self, x):
         return self.decode(x)
 
-    def decode(self, x, norm=True):
+    def decode(self, x, norm=False):
         if norm:
             return self.normed_linear(x)
         else:

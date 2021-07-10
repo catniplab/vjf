@@ -49,6 +49,10 @@ class GaussianNoise(Noise):
     def var(self):
         return torch.exp(self.logvar)
 
+    @property
+    def std(self):
+        return torch.exp(0.5 * self.logvar)
+
 
 class System(nn.Module, metaclass=ABCMeta):
     def __init__(self, noise):
@@ -231,11 +235,11 @@ class SGPS(System):
 
         q = torch.exp(0.5 * noise.logvar)
         self.sgp = SGP(
-            ydim=xdim,
-            xdim=xdim + udim,
+            in_features=xdim + udim,
+            out_features=xdim,
             inducing=inducing,
-            mean=None,
-            cov=SquaredExponential(1.0, 1.0, jitter=1e-5),
+            mean_func=None,
+            cov_func=SquaredExponential(1.0, 1.0, jitter=1e-5),
             noise_var=q,
         )
         self.sgp.initialize()
