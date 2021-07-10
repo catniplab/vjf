@@ -42,6 +42,7 @@ data = np.load('../notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
 
 xs = data['x']  # state
 ys = data['y']  # observation
+ys = np.exp(ys)
 us = data['u']  # control input
 xdim = xs.shape[-1]
 ydim = ys.shape[-1]
@@ -85,7 +86,7 @@ plt.close()
 
 # %%
 
-likelihood = 'gaussian'  # Gaussian observation
+likelihood = 'poisson'  # Poisson observation
 dynamics = 'rbf'  # RBF network dynamic model
 recognizer = "mlp"  # MLP recognitiom model
 rdim = 50  # number of RBFs
