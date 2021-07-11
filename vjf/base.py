@@ -15,7 +15,7 @@ class Component(nn.Module, metaclass=ABCMeta):
     @abstractmethod
     def loss(*args, **kwargs):
         """
-        This is a contract that all the concrete subclasses should implement a loss function on their own. The loss
+        This is a contract that all the subclasses should implement a loss function on their own. The loss
         function is supposed to be static since the loss should not depend on the state of an instance.
 
         The purpose is deferring the implementation of loss to the concrete components of the model, i.e. generative,
@@ -44,9 +44,6 @@ class Model(nn.Module, metaclass=ABCMeta):
         self.random_seed = self.config.setdefault("random_seed", None)
         self.max_iter = self.config.get("max_iter")
         self.lr = self.config["lr"]
-
-        if self.config["debug"]:
-            pprint.pprint(self.config)
 
     @abstractmethod
     def set_props(self):

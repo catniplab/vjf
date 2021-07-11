@@ -105,14 +105,11 @@ mdl = online.VJF(
         hdim=hdim,
         lr=1e-3,
         clip_gradients=5.0,
-        debug=True,
         likelihood=likelihood,  #
         system=dynamics,
         recognizer=recognizer,
         C=(None, True),  # loading matrix: (initial, estimate)
         b=(None, True),  # bias: (initial, estimate)
-        A=(None, False),  # transition matrix if LDS
-        B=(np.zeros((xdim, udim)), False),  # interaction matrix
         Q=(1.0, True),  # state noise
         R=(1.0, True),  # observation noise
     )

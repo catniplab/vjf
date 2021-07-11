@@ -173,7 +173,7 @@ class RBFS(System):
         self.control = nn.Linear(in_features=udim, out_features=xdim, bias=False)
         self.control.weight.requires_grad_(B[1])
         if B[0] is not None:
-            self.control.weight.data = torch.from_numpy(B[0]).float()
+            self.control.weight.data = torch.as_tensor(B[0]).float()
 
         self.add_module("RBFN", self.rbfn)
         self.add_module("transition", self.transition)

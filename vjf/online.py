@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 class VJF(Model):
     def __init__(self, config):
-        super().__init__(config)
+        self.ydim = config["ydim"]
+        self.xdim = config["xdim"]
+        self.udim = config["udim"]
 
-        self.ydim = self.config["ydim"]
-        self.xdim = self.config["xdim"]
-        self.udim = self.config["udim"]
+        super().__init__(config)
 
         self.add_module(
             "likelihood", observation.Likelihood.get_likelihood(self.config)
@@ -201,6 +201,8 @@ class VJF(Model):
         return (mu1, logvar1), (ll_recon, ll_dyn, entropy)
 
     def set_props(self):
+        self.config.setdefault("A", (None, False))
+        self.config.setdefault("B", (torch.zeros(self.xdim, self.udim), False))
         self.config.setdefault("R", 1.0)
         self.config.setdefault("Q", 1.0)
         self.config.setdefault("likelihood", "poisson")
