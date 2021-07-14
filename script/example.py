@@ -29,7 +29,7 @@ from functools import partial
 import torch
 from torch.nn import functional
 import vjf
-from vjf import online
+from vjf import model
 
 # %% md
 
@@ -37,7 +37,7 @@ from vjf import online
 
 # %%
 
-data = np.load('../notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
+data = np.load('notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
 
 # %%
 
@@ -49,22 +49,26 @@ xdim = xs.shape[-1]
 ydim = ys.shape[-1]
 udim = us.shape[-1]
 
+xs = xs[:5, ...]
+ys = ys[:5, ...]
+us = us[:5, ...]
+
 # %% md
 
 # Firstly we draw some of the latent trajectories.
 
 # %%
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-# ax.set_aspect('equal')
-for x in xs[::50, ...]:
-    ax.plot(*x.T, color='b', alpha=0.1, zorder=1)
-    ax.scatter(*x[0, :], color='g', s=50, zorder=2)
-    ax.scatter(*x[-1, :], color='r', s=50, zorder=2)
-# plt.axis('off')
-plt.show()
-plt.close()
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+# # ax.set_aspect('equal')
+# for x in xs[::50, ...]:
+#     ax.plot(*x.T, color='b', alpha=0.1, zorder=1)
+#     ax.scatter(*x[0, :], color='g', s=50, zorder=2)
+#     ax.scatter(*x[-1, :], color='r', s=50, zorder=2)
+# # plt.axis('off')
+# plt.show()
+# plt.close()
 
 # %% md
 
@@ -74,12 +78,12 @@ plt.close()
 
 # %%
 
-fig = plt.figure()
-ax = fig.add_subplot(111)
-ax.matshow(ys[0, :, :].T, aspect='auto')
-# plt.axis('off')
-plt.show()
-plt.close()
+# fig = plt.figure()
+# ax = fig.add_subplot(111)
+# ax.matshow(ys[0, :, :].T, aspect='auto')
+# # plt.axis('off')
+# plt.show()
+# plt.close()
 
 # %% md
 
@@ -87,50 +91,15 @@ plt.close()
 
 # %%
 
-likelihood = 'poisson'  # Poisson observation
-dynamics = 'rbf'  # RBF network dynamic model
-recognizer = "mlp"  # MLP recognitiom model
-rdim = 50  # number of RBFs
-hdim = 100  # number of MLP hidden units
-
-mdl = online.VJF(
-    config=dict(
-        resume=False,
-        xdim=xdim,
-        ydim=ydim,
-        udim=udim,
-        Ydim=udim,
-        Udim=udim,
-        rdim=rdim,
-        hdim=hdim,
-        lr=1e-3,
-        clip_gradients=5.0,
-        likelihood=likelihood,  #
-        system=dynamics,
-        recognizer=recognizer,
-        C=(None, True),  # loading matrix: (initial, estimate)
-        b=(None, True),  # bias: (initial, estimate)
-        Q=(1.0, True),  # state noise
-        R=(1.0, True),  # observation noise
-    )
-)
+mdl = model.VJF(ydim=ydim, udim=udim, xdim=xdim, mlp_sizes=[10], n_rbfs=10)
 
 # %%
+ys = np.transpose(ys, (1, 0, 2))
+us = np.transpose(us, (1, 0, 2))
 
-# We feed the data multiple times to help the training
-# This may take some time
-# n_epoch = 10
-#
-# for i in range(n_epoch):
-#     mu, logvar, losses = mdl.filter(ys, us)
-#
-# mu = torch.detach(mu).numpy().squeeze()
-
-# pseudo offline training
-mu, logvar, loss = mdl.fit(ys, us, max_iter=50)  # posterior mean, variance and loss (negative ELBO)
-mu = mu.detach().numpy().squeeze()  # convert to numpy array
-
-
+print(ys.shape, us.shape)
+ms, lnvs = model.fit(mdl, ys, us)
+mu = ms.transpose(0, 1).numpy()
 # %% Then we draw the estimated states. You can see the manifold. Note that the states are subject to an arbitrary
 # affine transformation.
 
