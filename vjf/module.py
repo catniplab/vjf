@@ -10,7 +10,7 @@ class RBFN(nn.Module):
         # centers
         self.register_parameter(
             "c",
-            Parameter(torch.empty(rdim, xdim, dtype=torch.float), requires_grad=True),
+            Parameter(torch.empty(rdim, xdim, dtype=torch.float), requires_grad=False),
         )
         if center is not None:
             self.c.data = torch.tensor(center, dtype=torch.float)
