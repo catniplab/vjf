@@ -831,3 +831,4 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/python,macos,windows,linux,pycharm+all,pycharm+iml,visualstudiocode,vim,emacs,latex,virtualenv,jupyternotebooks,matlab,git,microsoftoffice
 poetry.lock
 .python-version
+.vscode

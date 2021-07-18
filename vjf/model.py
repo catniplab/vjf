@@ -107,7 +107,7 @@ class RBFN(Module):
             Parameter(logwidth),
         )
 
-        self.add_module('output', Linear(n_bases, n_outputs))
+        self.add_module('output', Linear(n_bases, n_outputs, bias=False))
 
     def forward(self, x):
         x = torch.unsqueeze(x, dim=1)  # (?, xdim) -> (?, 1, xdim)
