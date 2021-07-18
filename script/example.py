@@ -5,6 +5,7 @@ import matplotlib as mpl
 # %matplotlib inline
 # %matplotlib notebook
 import matplotlib.pyplot as plt
+plt.ion()
 from matplotlib import colors
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.gridspec as gridspec
@@ -36,8 +37,8 @@ from vjf import online
 # We have synthesized some data from Lorenz attractor, 3D state, 200D observation, 216 realizations, each lasts 1500 steps. Let's load the data first. ([download here](https://doi.org/10.6084/m9.figshare.14588469))
 
 # %%
-
-data = np.load('../notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
+# Download from figshare [https://doi.org/10.6084/m9.figshare.14588469]
+data = np.load('lorenz_216_1500_10_200_gaussian_s0.npz')
 
 # %%
 
@@ -142,6 +143,7 @@ for x in mu[::50, ...]:
     ax.scatter(*x[0, :], color='g', s=50, zorder=2)
     ax.scatter(*x[-1, :], color='r', s=50, zorder=2)
 # plt.axis('off')
+plt.savefig('example.pdf')
 plt.show()
 plt.close()
 
