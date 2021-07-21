@@ -260,7 +260,7 @@ class VJF(Model):
             q0=None,
             *,
             time_major=False,
-            max_iter=10,
+            max_iter=500,
             decoder=True,
             encoder=True,
             dynamics=True,
@@ -269,7 +269,7 @@ class VJF(Model):
         """
         Batch mode training: jointly optimize all the parameters.
         See VJF.filter for arguments
-        :param y: observation, (time, batch, obs dim) or (batch, time, obs dim) see time_major
+        :param y: observation, (batch, time, obs dim) or (time, batch, obs dim) see time_major
         :param u: control input corresponding to observation
         :param q0: initial state mean and log variance, Tuple[Tensor(batch, state dim), Tensor(batch, state dim)], default=None
         :param time_major: True if time is the leading axis of y and u, default=False
