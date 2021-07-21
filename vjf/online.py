@@ -13,7 +13,20 @@ logger = logging.getLogger(__name__)
 
 
 class VJF(Model):
+    """
+    Variational Joint Filtering
+    """
     def __init__(self, config):
+        """
+        :param config: dict containing the settings
+            :key ydim: int, dimensionality of observation
+            :key xdim: int, dimensionality of latent state
+            :key udim: int, dimensionality of control input. for autonomous dynamics, use 1D zero arrays
+            :key likelihood: str, 'gaussian' or 'poisson'
+            :key system: str, dynamical model, default is 'rbf'
+            :key recognizer: str, recognition model (encoder), default is 'mlp'
+            :key lr: float, learning rate
+        """
         self.ydim = config["ydim"]
         self.xdim = config["xdim"]
         self.udim = config["udim"]
