@@ -1,10 +1,10 @@
 import math
 import torch
-from torch import nn
-from torch.nn import Parameter
+from torch import nn, Tensor
+from torch.nn import Parameter, Module, functional
 
 
-class RBFN(nn.Module):
+class RBFN(Module):
     def __init__(self, xdim, rdim, center=None, logwidth=None):
         super().__init__()
 
@@ -80,3 +80,53 @@ class IGRU(nn.Module):
         g = torch.tanh(self.i2g(inputs) + self.h2g(r * hidden))
         h = u * hidden + (1 - u) * self.g2h(g)
         return h
+
+
+class bLR(Module):
+    def __init__(self, feature: Module, n_output: int):
+        super().__init__()
+        self.feature = feature
+        self.n_output = n_output
+        # self.bias = torch.zeros(n_outputs)
+        self.w_mean = torch.zeros(n_output, self.feature.n_feature)
+        self.w_icov = torch.tile(torch.eye(self.feature.n_feature), (n_output, 1, 1))
+
+    def predict(self, x, u=None) -> Tensor:
+        if u is not None:
+            x = torch.cat((x, u), dim=-1)
+        feat = self.feature(x)
+        return nn.functional.linear(feat, self.w_mean)  # do we need the intercept?
+
+    def cov(self, q, u):
+        raise NotImplementedError
+
+    def expect(self, q, u):
+        raise NotImplementedError
+
+    def update(self, target, x, u, p):
+        """
+        :param target: (sample, dim)
+        :param x: (sample, dim)
+        :param u: (sample, dim) or None
+        :param p: noise precision (out,) or (sample, out)
+        :return:
+        """
+        p = torch.atleast_2d(p)
+        if u is not None:
+            x = torch.cat((x, u), dim=-1)
+        feat = self.feature(x)  # (1, sample, feature)
+        ft = feat.t()
+        f3d = feat[None, ...]  # (1, sample, feature)
+        ft3d = ft[None, ...]  # (1, feature, sample)
+        # target = target.T[..., None]  # (output, sample, 1)
+        xty = ft @ (p * target)  # (feature, sample) (sample, out) (sample, out) => (feature, out)
+        G = self.w_icov @ self.w_mean[..., None] + xty.T[..., None]
+        # (output, feature, feature) (output, feature, 1) + (output, feature, 1)
+        # => (output, feature, 1) + (output, feature, 1)
+        # => (output, feature, 1)
+        self.w_icov = self.w_icov + ft3d @ torch.block_diag(p.t()) @ f3d
+        # (output, feature, feature) + (1, feature, sample) (out, sample, sample) (1, sample, feature)
+        # => (output, feature, feature) + (output, feature, feature)
+        # => (output, feature, feature)
+        self.w_mean = torch.squeeze(self.w_icov @ G)
+        # (output, feature, feature) (output, feature, 1) => (output, feature, 1)

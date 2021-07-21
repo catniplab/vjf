@@ -291,13 +291,13 @@ class VJF(Model):
                                                 u,
                                                 q0=q0,
                                                 time_major=time_major,
-                                                decoder=False,
-                                                encoder=False,
-                                                dynamics=False,
+                                                decoder=True,
+                                                encoder=True,
+                                                dynamics=True,
                                                 noise=False,
                                                 sample=True,
                                                 regularize=False,
-                                                optim=False
+                                                optim=True
                                                 )
                 new_loss = -sum([sum(e) for e in elbos]) / T
                 progress.set_postfix({'Loss': new_loss.item()})
@@ -305,21 +305,21 @@ class VJF(Model):
                     print('Converged')
                     break
                 loss = new_loss
-                loss.backward()
-                torch.nn.utils.clip_grad_value_(
-                    self.parameters(), self.config["clip_gradients"]
-                )
-                if decoder:
-                    self.decoder_optimizer.step()
-                    self.decoder_scheduler.step()
-                if dynamics:
-                    self.dynamics_optimizer.step()
-                    self.dynamics_scheduler.step()
-                if encoder:
-                    self.encoder_optimizer.step()
-                    self.encoder_scheduler.step()
-                if noise:
-                    self.noise_optimizer.step()
+                # loss.backward()
+                # torch.nn.utils.clip_grad_value_(
+                #     self.parameters(), self.config["clip_gradients"]
+                # )
+                # if decoder:
+                #     self.decoder_optimizer.step()
+                #     self.decoder_scheduler.step()
+                # if dynamics:
+                #     self.dynamics_optimizer.step()
+                #     self.dynamics_scheduler.step()
+                # if encoder:
+                #     self.encoder_optimizer.step()
+                #     self.encoder_scheduler.step()
+                # if noise:
+                #     self.noise_optimizer.step()
             else:
                 print('Maximum iteration reached.')
         return mu, logvar, loss
