@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 from torch.nn import Parameter
@@ -10,17 +11,20 @@ class RBFN(nn.Module):
         # centers
         self.register_parameter(
             "c",
-            Parameter(torch.empty(rdim, xdim, dtype=torch.float), requires_grad=True),
+            Parameter(torch.empty(rdim, xdim, dtype=torch.float), requires_grad=False),
         )
         if center is not None:
             self.c.data = torch.tensor(center, dtype=torch.float)
         else:
-            nn.init.normal_(self.c)
+            nn.init.uniform_(self.c, -0.5, 0.5)
 
         # kernel widths
         self.register_parameter(
             "logwidth",
-            Parameter(torch.zeros(rdim, dtype=torch.float), requires_grad=True),
+            Parameter(torch.full((rdim, 1),
+                                 fill_value=0.5*math.log(xdim) - 0.5*math.log(rdim),
+                                 dtype=torch.float),
+                      requires_grad=False),
         )
         if logwidth is not None:
             self.logwidth.data = torch.tensor(logwidth, dtype=torch.float)
@@ -28,9 +32,9 @@ class RBFN(nn.Module):
     def forward(self, x):
         x = torch.unsqueeze(x, dim=1)  # (?, xdim) -> (?, 1, xdim)
         c = torch.unsqueeze(self.c, dim=0)  # (1, rdim, xdim)
-        w = torch.unsqueeze(torch.exp(self.logwidth), dim=0)  # (1, rdim, 1)
+        iw = torch.unsqueeze(torch.exp(-self.logwidth), dim=0)  # (1, rdim, 1)
         # (?, 1, xdim) - (1, rdim, xdim) -> (?, rdim, xdim) -> (?, rdim)
-        return torch.exp(-0.5 * torch.sum((x - c) ** 2, dim=-1) * w)
+        return torch.exp(-0.5 * torch.sum((x * iw - c * iw) ** 2, dim=-1))
 
 
 class SGP(nn.Module):
