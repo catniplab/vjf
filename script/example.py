@@ -128,7 +128,7 @@ mdl = online.VJF(
 # mu = torch.detach(mu).numpy().squeeze()
 
 # pseudo offline training
-mu, logvar, loss = mdl.fit(ys, us, max_iter=50)  # posterior mean, variance and loss (negative ELBO)
+mu, logvar, loss = mdl.fit(ys, us, max_iter=100)  # posterior mean, variance and loss (negative ELBO)
 mu = mu.detach().numpy().squeeze()  # convert to numpy array
 
 
@@ -150,3 +150,4 @@ plt.close()
 # %% Sample future trajectory
 x_future, y_future = mdl.forecast(x0=torch.zeros(5, 3), step=10)
 # print(x_future.shape, y_future.shape)
+
