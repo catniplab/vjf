@@ -274,6 +274,10 @@ class VJF(Model):
         :param q0: initial state mean and log variance, Tuple[Tensor(batch, state dim), Tensor(batch, state dim)], default=None
         :param time_major: True if time is the leading axis of y and u, default=False
         :param max_iter: number of iterations
+        :param decoder: flag to train decoder
+        :param encoder:  flag to train encoder
+        :param dynamics:  flag to train dynamical model
+        :param noise:  flag to train state noise
         :return:
             mu: posterior mean, Tensor, same shape as observation
             logvar: log posterior variance, Tensor
@@ -291,10 +295,10 @@ class VJF(Model):
                                                 u,
                                                 q0=q0,
                                                 time_major=time_major,
-                                                decoder=True,
-                                                encoder=True,
-                                                dynamics=True,
-                                                noise=False,
+                                                decoder=decoder,
+                                                encoder=encoder,
+                                                dynamics=dynamics,
+                                                noise=noise,
                                                 sample=True,
                                                 regularize=False,
                                                 optim=True
