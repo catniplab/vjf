@@ -328,12 +328,13 @@ class VJF(Model):
                 print('Maximum iteration reached.')
         return mu, logvar, loss
 
-    def forecast(self, x0, *, step=1, inclusive=True):
+    def forecast(self, x0, *, step=1, inclusive=True, state_noise=False):
         """
         Sample future trajectories
         :param x0: initial state, Tensor(xdim,) or Tensor(size, xdim)
         :param step: number of steps, default=1
         :param inclusive: trajectory includes initial state if True, default=True
+        :param state_noise: flag to sample state noise
         :return:
             x: sampled latent trajectory, Tensor(step, state dim)
             y: sampled rate, Tensor(step, obs dim)
@@ -345,7 +346,9 @@ class VJF(Model):
         x[0, ...] = x0
         for i in range(step):
             m = self.system(x[i], u)
-            x[i+1] = m + torch.randn_like(m) * self.state_noise.std
+            if state_noise:
+                m += torch.randn_like(m) * self.state_noise.std
+            x[i+1] = m
         y = self.decoder.likelihood(self.decoder(x))
         if not inclusive:
             x = x[1:]
