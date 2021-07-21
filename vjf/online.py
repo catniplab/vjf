@@ -267,8 +267,7 @@ class VJF(Model):
             noise=False,
             ):
         """
-        Pseudo offline mode
-        Run VJF.filter multiple times to train the model
+        Batch mode training: jointly optimize all the parameters.
         See VJF.filter for arguments
         :param y: observation, (time, batch, obs dim) or (batch, time, obs dim) see time_major
         :param u: control input corresponding to observation
