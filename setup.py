@@ -9,5 +9,5 @@ setup(
     author="yuan",
     author_email="yuanz271@gmail.com",
     description="",
-    requires=["scipy", "numpy", "torch"],
+    requires=["scipy", "numpy", "torch", "tqdm"],
 )
