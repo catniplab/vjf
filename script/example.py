@@ -29,7 +29,7 @@ from functools import partial
 import torch
 from torch.nn import functional
 import vjf
-from vjf import model
+from vjf.model import VJF
 
 # %% md
 
@@ -37,21 +37,18 @@ from vjf import model
 
 # %%
 
-data = np.load('notebook/lorenz_216_1500_10_200_gaussian_s0.npz')
+data = np.load('lorenz_216_1500_10_200_gaussian_s0.npz')
 
 # %%
 
 xs = data['x']  # state
 ys = data['y']  # observation
 ys = np.exp(ys)
-us = data['u']  # control input
 xdim = xs.shape[-1]
 ydim = ys.shape[-1]
-udim = us.shape[-1]
 
 xs = xs[:5, ...]
 ys = ys[:5, ...]
-us = us[:5, ...]
 
 # %% md
 
@@ -90,16 +87,17 @@ us = us[:5, ...]
 # Now we fit the model.
 
 # %%
-
-mdl = model.VJF(ydim=ydim, udim=udim, xdim=xdim, mlp_sizes=[10], n_rbfs=10)
+udim = 0
+model = VJF.make_model(ydim, xdim, udim, n_rbf=10, hidden_sizes=[10, 10])
 
 # %%
 ys = np.transpose(ys, (1, 0, 2))
-us = np.transpose(us, (1, 0, 2))
 
-print(ys.shape, us.shape)
-ms, lnvs = model.fit(mdl, ys, us)
-mu = ms.transpose(0, 1).numpy()
+print(ys.shape)
+for i in range(100):
+    qs = model.filter(ys)
+    mu = torch.stack([q[0] for q in qs])
+    mu = mu.detach().numpy()
 # %% Then we draw the estimated states. You can see the manifold. Note that the states are subject to an arbitrary
 # affine transformation.
 
@@ -115,5 +113,5 @@ plt.show()
 plt.close()
 
 # %% Sample future trajectory
-x_future, y_future = mdl.forecast(x0=torch.zeros(5, 3), step=10)
+# x_future, y_future = mdl.forecast(x0=torch.zeros(5, 3), step=10)
 # print(x_future.shape, y_future.shape)

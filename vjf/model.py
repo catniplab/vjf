@@ -7,6 +7,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 
 from .module import bLinReg, RBF
+from .functional import gaussian_entropy as entropy
 from .util import complete_shape, reparametrize
 
 
@@ -118,7 +119,7 @@ class VJF(Module):
         return xs, pt, qt, xt, py
 
     def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor,
-             components: bool = False, full: bool = False) -> Tensor:
+             components: bool = False, full: bool = False) -> Union[Tensor, Tuple]:
         if full:
             raise NotImplementedError
         # recon
@@ -154,9 +155,13 @@ class VJF(Module):
             q: posterior
             loss: negative eblo
         """
+        y = torch.as_tensor(y, dtype=torch.get_default_dtype())
         y = complete_shape(y)  # (time, batch, dim)
         if u is not None:
+            u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = complete_shape(u)
+        else:
+            u = [None] * y.shape[0]
 
         q = self.check_q(q, y)
 
@@ -165,6 +170,7 @@ class VJF(Module):
         for yt, ut in zip(y, u):
             output = self.forward(yt, q, ut)
             loss = self.loss(yt, *output)
+            print(loss.item())
             if update:
                 self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
@@ -196,6 +202,9 @@ class RBFLDS(Module):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
         self.register_parameter('logvar', Parameter(torch.zeros(1)))
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.linreg(x)
 
     @torch.no_grad()
     def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor):
