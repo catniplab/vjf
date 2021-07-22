@@ -35,31 +35,6 @@ def solve(A, B, method="qr"):
         raise ValueError(f"Unknown method {method}")
 
 
-#
-# def imm(A, B):
-#     """A^{-1} b
-#     Use Cholesky decomposition
-#     :param A: a symmetric positive definite matrix
-#     :param B: a vector or matrix
-#     :return:
-#         x: the product
-#     """
-#
-#     A = torch.as_tensor(A)
-#     B = torch.as_tensor(B)
-#
-#     # b is required to be 2D
-#     if B.dim() == 1:
-#         B = B.unsqueeze(1)
-#
-#     U = A.potrf()  # A = U'U
-#     # X = B.potrs(U)  # gradient not implemented
-#     # A^{-1} B = (U'U)^{-1} B = (U)^{-1} (U')^{-1} B = (U)^{-1} ((U')^{-1} B)
-#     C = B.trtrs(U, transpose=True)[0]
-#     X = C.trtrs(U, transpose=False)[0]
-#     return X
-
-
 def sqrt(x, eps=1e-12):
     """Safe-gradient square root"""
     return torch.sqrt(x + eps)
