@@ -27,9 +27,10 @@ class GaussianLikelihood(Module):
         :return:
         """
         dim = target.shape[-1]
-        mse = functional.mse_loss(eta, target, reduction='sum')
+        mse = functional.mse_loss(eta, target, reduction='none')
         v = self.logvar.exp()
-        return .5 * (mse / v + dim * self.logvar)
+        nll = .5 * (mse / v + dim * self.logvar)
+        return nll.sum(-1).mean()
 
 
 class PoissonLikelihood(Module):
@@ -47,7 +48,8 @@ class PoissonLikelihood(Module):
         :param target: observation
         :return:
         """
-        return functional.poisson_nll_loss(eta, target, log_input=True, reduction='sum')
+        nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
+        return nll.sum(-1).mean()
 
 
 def detach(qs: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
@@ -104,10 +106,7 @@ class VJF(Module):
         # encode
         qs = detach(qs)
         xs = reparametrize(qs)
-        if u is not None:
-            u = torch.atleast_2d(u)
-            xs = torch.cat((xs, u), dim=-1)  # TODO: xs is [xs, u] now, find an unambiguous name
-        pt = self.transition(xs)
+        pt = self.transition(xs, u)
 
         y = torch.atleast_2d(y)
         qt = self.recognition(y, pt)
@@ -144,7 +143,7 @@ class VJF(Module):
         # non gradient
         self.transition.update(y, xs, pt, qt, xt, py)
 
-    def filter(self, y: Tensor, u: Tensor = None, q: Tuple[Tensor, Tensor] = None, update: bool = True) -> Sequence:
+    def filter(self, y: Tensor, u: Tensor = None, q: Tuple[Tensor, Tensor] = None, update: bool = True):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -166,11 +165,10 @@ class VJF(Module):
         q = self.check_q(q, y)
 
         q_seq = []  # maybe deque is better?
-
+        losses = []
         for yt, ut in zip(y, u):
             output = self.forward(yt, q, ut)
             loss = self.loss(yt, *output)
-            print(loss.item())
             if update:
                 self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
@@ -178,8 +176,10 @@ class VJF(Module):
                 self.optimizer.step()
                 self.update(yt, *output)  # non-gradient step
             q = output[2]  # TODO: ugly
+            # collect
+            losses.append(loss)
             q_seq.append(q)
-        return q_seq
+        return q_seq, losses
 
     def fit(self):
         """offline"""
@@ -201,17 +201,24 @@ class RBFLDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.zeros(1)))
+        self.register_parameter('logvar', Parameter(torch.ones(1) * 5., requires_grad=False))  # act like a regularizer
 
-    def forward(self, x: Tensor) -> Tensor:
-        return self.linreg(x)
+    def forward(self, x: Tensor, u: Tensor = None) -> Tensor:
+        if u is None:
+            xu = x
+        else:
+            u = torch.atleast_2d(u)
+            xu = torch.cat((x, u), dim=-1)  # TODO: xs is [xs, u] now, find an unambiguous name
+
+        return x + self.linreg(xu)
 
     @torch.no_grad()
     def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor):
-        self.linreg.update(xt, xs, torch.exp(-self.logvar))
+        self.linreg.update(xt - xs, xs, torch.exp(-self.logvar))
+        self.logvar *= 0.99
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
-        return 0.5 * torch.sum((pt - xt).pow(2) * torch.exp(-self.logvar) + self.logvar)
+        return 0.5 * torch.mean(torch.sum((pt - xt).pow(2) * torch.exp(-self.logvar) + self.logvar, dim=-1))
 
 
 class Recognition(Module):

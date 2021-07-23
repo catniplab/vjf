@@ -9,18 +9,25 @@ from .functional import rbf
 
 class RBF(Module):
     """Radial basis functions"""
-    def __init__(self, n_dim: int, n_basis: int):
+    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False):
         super().__init__()
         self.n_basis = n_basis
+        self.intercept = intercept
         self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) - .5, requires_grad=False))
         self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
 
     @property
     def n_feature(self):
-        return self.n_basis
+        if self.intercept:
+            return self.n_basis + 1
+        else:
+            return self.n_basis
 
     def forward(self, x: Tensor) -> Tensor:
-        return rbf(x, self.centroid, self.logwidth.exp())
+        output = rbf(x, self.centroid, self.logwidth.exp())
+        if self.intercept:
+            output = torch.column_stack((torch.ones(output.shape[0]), output))
+        return output
 
 
 class bLinReg(Module):
