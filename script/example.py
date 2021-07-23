@@ -94,11 +94,9 @@ model = VJF.make_model(ydim, xdim, udim, n_rbf=100, hidden_sizes=[50, 50, 50])
 ys = np.transpose(ys, (1, 0, 2))
 
 print(ys.shape)
-for i in range(20):
-    qs, losses = model.filter(ys)
-    print(sum(losses))
-    mu = torch.stack([q[0] for q in qs])
-    mu = mu.detach().numpy()
+qs = model.fit(ys, max_iter=10)
+mu = torch.stack([q[0] for q in qs])
+mu = mu.detach().numpy()
 # %% Then we draw the estimated states. You can see the manifold. Note that the states are subject to an arbitrary
 # affine transformation.
 

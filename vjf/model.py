@@ -1,3 +1,5 @@
+from collections import namedtuple
+from itertools import zip_longest
 from typing import Tuple, Sequence, Union
 
 import torch
@@ -5,10 +7,14 @@ from torch import Tensor
 from torch.nn import Module, Linear, functional, Parameter, Sequential, ReLU
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
+from tqdm import trange
 
 from .module import bLinReg, RBF
 from .functional import gaussian_entropy as entropy
 from .util import complete_shape, reparametrize
+
+
+DiagonalGaussian = namedtuple('DiagonalGaussian', ['mean', 'logvar'])
 
 
 class GaussianLikelihood(Module):
@@ -52,9 +58,9 @@ class PoissonLikelihood(Module):
         return nll.sum(-1).mean()
 
 
-def detach(qs: Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]:
-    mean, logvar = qs
-    return mean.detach(), logvar.detach()
+def detach(q: DiagonalGaussian) -> DiagonalGaussian:
+    mean, logvar = q
+    return DiagonalGaussian(mean.detach(), logvar.detach())
 
 
 class VJF(Module):
@@ -72,29 +78,26 @@ class VJF(Module):
 
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
-        self.q = (self.mean, self.logvar)
 
         self.optimizer = Adam(self.parameters())
         self.scheduler = ExponentialLR(self.optimizer, 0.95)  # TODO: argument gamma
 
-    def check_q(self, q: Union[Tuple[Tensor, Tensor], None], y: Tensor) -> Tuple[Tensor, Tensor]:
-        if q is None:
-            q = self.q
+    def prior(self, y: Tensor) -> DiagonalGaussian:
+        assert y.ndim == 2
+        n_batch = y.shape[0]
+        mean = torch.atleast_2d(self.mean)
+        logvar = torch.atleast_2d(self.logvar)
 
-        mean, logvar = q
-        n_batch = y.shape[1]
-        mean = torch.atleast_2d(mean)
-        logvar = torch.atleast_2d(logvar)
-
-        if mean.size(0) == 1:
+        if mean.shape[0] == 1:
             mean = mean.tile((n_batch, 1))
-        if logvar.size(0) == 1:
+        if logvar.shape[0] == 1:
             logvar = logvar.tile((n_batch, 1))
+
         assert mean.size(0) == n_batch and logvar.size(0) == n_batch
 
-        return mean, logvar
+        return DiagonalGaussian(mean, logvar)
 
-    def forward(self, y: Tensor, qs: Tuple[Tensor, Tensor], u: Tensor = None) -> Tuple:
+    def forward(self, y: Tensor, qs: DiagonalGaussian, u: Tensor = None) -> Tuple:
         """
         :param y: new observation
         :param qs: posterior before new observation
@@ -117,7 +120,7 @@ class VJF(Module):
 
         return xs, pt, qt, xt, py
 
-    def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor,
+    def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor,
              components: bool = False, full: bool = False) -> Union[Tensor, Tuple]:
         if full:
             raise NotImplementedError
@@ -139,51 +142,67 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor):
+    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor):
         # non gradient
         self.transition.update(y, xs, pt, qt, xt, py)
 
-    def filter(self, y: Tensor, u: Tensor = None, q: Tuple[Tensor, Tensor] = None, update: bool = True):
+    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, update: bool = True):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
         :param u: control
-        :param q: previos posterior
+        :param qs: previos posterior. use prior if None, otherwise detached.
         :param update: flag to learn the parameters
         :return:
-            q: posterior
+            qt: posterior
             loss: negative eblo
         """
         y = torch.as_tensor(y, dtype=torch.get_default_dtype())
-        y = complete_shape(y)  # (time, batch, dim)
+        y = torch.atleast_2d(y)  # (batch, dim)
         if u is not None:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
-            u = complete_shape(u)
+            u = torch.atleast_2d(u)
+
+        if qs is None:
+            qs = self.prior(y)
         else:
-            u = [None] * y.shape[0]
+            detach(qs)
 
-        q = self.check_q(q, y)
+        xs, pt, qt, xt, py = self.forward(y, qs, u)
+        loss = self.loss(y, xs, pt, qt, xt, py)
+        if update:
+            self.optimizer.zero_grad()
+        loss.backward()  # accumulate grad if not trained
+        if update:
+            self.optimizer.step()
+            self.update(y, xs, pt, qt, xt, py)  # non-gradient step
 
-        q_seq = []  # maybe deque is better?
-        losses = []
-        for yt, ut in zip(y, u):
-            output = self.forward(yt, q, ut)
-            loss = self.loss(yt, *output)
-            if update:
-                self.optimizer.zero_grad()
-            loss.backward()  # accumulate grad if not trained
-            if update:
-                self.optimizer.step()
-                self.update(yt, *output)  # non-gradient step
-            q = output[2]  # TODO: ugly
-            # collect
-            losses.append(loss)
-            q_seq.append(q)
-        return q_seq, losses
+        return qt, loss
 
-    def fit(self):
+    def fit(self, y, u=None, *, max_iter=1):
         """offline"""
-        raise NotImplementedError
+        y = torch.as_tensor(y)
+        y = torch.atleast_2d(y)
+        if u is None:
+            u = [None]
+        else:
+            u = torch.as_tensor(u)
+
+        with trange(max_iter) as progress:
+            for i in progress:
+                # collections
+                q_seq = []  # maybe deque is better than list?
+                losses = []
+
+                q = None  # use prior
+                for yt, ut in zip_longest(y, u):
+                    q, loss = self.filter(yt, ut, q)
+                    losses.append(loss)
+                    q_seq.append(q)
+                total_loss = sum(losses)
+                progress.set_postfix({'Loss': total_loss.item()})
+
+        return q_seq
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
@@ -213,7 +232,7 @@ class RBFLDS(Module):
         return x + self.linreg(xu)
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Tuple[Tensor, Tensor], xt: Tensor, py: Tensor):
+    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor):
         self.linreg.update(xt - xs, xs, torch.exp(-self.logvar))
         self.logvar *= 0.99
 
@@ -233,9 +252,9 @@ class Recognition(Module):
 
         self.add_module('mlp', Sequential(*layers))
 
-    def forward(self, y: Tensor, pt: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, y: Tensor, pt: Tensor) -> DiagonalGaussian:
         output = self.mlp(torch.cat((y, pt), dim=-1))
-        return output.chunk(2, dim=-1)
+        return DiagonalGaussian(*output.chunk(2, dim=-1))
 
 
 # TODO: factory function for VJF
