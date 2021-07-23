@@ -1,6 +1,7 @@
 import torch
 
-from vjf.model import RBFLDS, Recognition, VJF
+from vjf.model import RBFLDS, VJF
+from vjf.recognition import Recognition
 
 
 def test_RBFLDS():

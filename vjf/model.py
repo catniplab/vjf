@@ -1,20 +1,17 @@
-from collections import namedtuple
 from itertools import zip_longest
 from typing import Tuple, Sequence, Union
 
 import torch
 from torch import Tensor
-from torch.nn import Module, Linear, functional, Parameter, Sequential, ReLU
+from torch.nn import Module, Linear, functional, Parameter
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
-from .module import bLinReg, RBF
 from .functional import gaussian_entropy as entropy
-from .util import complete_shape, reparametrize
-
-
-DiagonalGaussian = namedtuple('DiagonalGaussian', ['mean', 'logvar'])
+from .module import bLinReg, RBF
+from .recognition import DiagonalGaussian, Recognition
+from .util import reparametrize
 
 
 class GaussianLikelihood(Module):
@@ -32,10 +29,10 @@ class GaussianLikelihood(Module):
         :param target: observation
         :return:
         """
-        dim = target.shape[-1]
         mse = functional.mse_loss(eta, target, reduction='none')
-        v = self.logvar.exp()
-        nll = .5 * (mse / v + dim * self.logvar)
+        assert mse.ndim == 2
+        p = torch.exp(-self.logvar)
+        nll = .5 * (mse * p + self.logvar)
         return nll.sum(-1).mean()
 
 
@@ -55,6 +52,7 @@ class PoissonLikelihood(Module):
         :return:
         """
         nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
+        assert nll.ndim == 2
         return nll.sum(-1).mean()
 
 
@@ -110,6 +108,7 @@ class VJF(Module):
         qs = detach(qs)
         xs = reparametrize(qs)
         pt = self.transition(xs, u)
+        # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
         qt = self.recognition(y, pt)
@@ -124,17 +123,17 @@ class VJF(Module):
              components: bool = False, full: bool = False) -> Union[Tensor, Tuple]:
         if full:
             raise NotImplementedError
+
         # recon
-
         l_recon = self.likelihood.loss(py, y)
-
         # dynamics
         l_dynamics = self.transition.loss(pt, xt)
-
         # entropy
         h = entropy(qt)
 
-        loss = l_recon + l_dynamics - h
+        loss = l_recon - h + l_dynamics
+
+        # print(l_recon.item(), l_dynamics.item(), h.item())
 
         if components:
             return loss, -l_recon, -l_dynamics, h
@@ -144,9 +143,9 @@ class VJF(Module):
     @torch.no_grad()
     def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor):
         # non gradient
-        self.transition.update(y, xs, pt, qt, xt, py)
+        self.transition.update(xs, xt)
 
-    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, update: bool = True):
+    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *, update: bool = True):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -172,10 +171,9 @@ class VJF(Module):
         loss = self.loss(y, xs, pt, qt, xt, py)
         if update:
             self.optimizer.zero_grad()
-        loss.backward()  # accumulate grad if not trained
-        if update:
+            loss.backward()  # accumulate grad if not trained
             self.optimizer.step()
-            self.update(y, xs, pt, qt, xt, py)  # non-gradient step
+            # self.update(y, xs, pt, qt, xt, py)  # non-gradient step
 
         return qt, loss
 
@@ -190,16 +188,21 @@ class VJF(Module):
 
         with trange(max_iter) as progress:
             for i in progress:
+                self.optimizer.zero_grad()
+
                 # collections
                 q_seq = []  # maybe deque is better than list?
                 losses = []
 
                 q = None  # use prior
                 for yt, ut in zip_longest(y, u):
-                    q, loss = self.filter(yt, ut, q)
+                    q, loss = self.filter(yt, ut, q, update=False)
                     losses.append(loss)
                     q_seq.append(q)
-                total_loss = sum(losses)
+                total_loss = sum(losses) / len(losses)
+                total_loss.backward()
+                self.optimizer.step()
+
                 progress.set_postfix({'Loss': total_loss.item()})
 
         return q_seq
@@ -220,41 +223,38 @@ class RBFLDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.ones(1) * 5., requires_grad=False))  # act like a regularizer
+        self.register_parameter('logvar', Parameter(torch.ones(1), requires_grad=False))  # act like a regularizer
 
-    def forward(self, x: Tensor, u: Tensor = None) -> Tensor:
+    def forward(self, x: Tensor, u: Tensor = None, sampling=False) -> Tensor:
         if u is None:
             xu = x
         else:
             u = torch.atleast_2d(u)
-            xu = torch.cat((x, u), dim=-1)  # TODO: xs is [xs, u] now, find an unambiguous name
+            xu = torch.cat((x, u), dim=-1)
 
-        return x + self.linreg(xu)
+        return x + self.linreg(xu, sampling=sampling)  # model dx
+        # return self.linreg(xu, sampling=sampling)  # model f(x)
+
+    def simulate(self, x0: Tensor, step=1) -> Tensor:
+        x = torch.empty(step + 1, *x0.shape)
+        x[0] = x0
+        s = torch.exp(.5 * self.logvar)
+
+        for t in range(step):
+            x[t + 1] = self.forward(x[t], sampling=True)
+            x[t + 1] = x[t + 1] + torch.randn_like(x[t+1]) * s
+
+        return x
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor):
-        self.linreg.update(xt - xs, xs, torch.exp(-self.logvar))
-        self.logvar *= 0.99
+    def update(self, xs: Tensor, xt: Tensor):
+        self.linreg.update(xs, xt - xs, torch.exp(-self.logvar))  # model dx
+        # self.linreg.update(xs, xt, torch.exp(-self.logvar))
+        # self.logvar *= 0.99
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
-        return 0.5 * torch.mean(torch.sum((pt - xt).pow(2) * torch.exp(-self.logvar) + self.logvar, dim=-1))
-
-
-class Recognition(Module):
-    def __init__(self, ydim: int, xdim: int, hidden_sizes: Sequence[int]):
-        super().__init__()
-
-        layers = [Linear(ydim + xdim, hidden_sizes[0]), ReLU()]  # input layer
-        for k in range(len(hidden_sizes) - 1):
-            layers.append(Linear(hidden_sizes[k], hidden_sizes[k + 1]))
-            layers.append(ReLU())
-        layers.append(Linear(hidden_sizes[-1], xdim * 2))
-
-        self.add_module('mlp', Sequential(*layers))
-
-    def forward(self, y: Tensor, pt: Tensor) -> DiagonalGaussian:
-        output = self.mlp(torch.cat((y, pt), dim=-1))
-        return DiagonalGaussian(*output.chunk(2, dim=-1))
-
-
-# TODO: factory function for VJF
+        mse = functional.mse_loss(pt, xt, reduction='none')
+        p = torch.exp(-self.logvar)  # precision
+        nll = .5 * (mse * p + self.logvar)
+        assert nll.ndim == 2
+        return nll.sum(-1).mean()
