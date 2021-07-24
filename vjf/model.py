@@ -21,7 +21,7 @@ class GaussianLikelihood(Module):
 
     def __init__(self):
         super().__init__()
-        self.register_parameter('logvar', Parameter(torch.zeros(1)))
+        self.register_parameter('logvar', Parameter(torch.tensor(0.)))
 
     def loss(self, eta: Tensor, target: Tensor) -> Tensor:
         """
@@ -77,19 +77,21 @@ class VJF(Module):
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
-        self.optimizer = Adam(self.parameters())
+        self.optimizer = Adam(self.parameters(), lr=1e-2)
         self.scheduler = ExponentialLR(self.optimizer, 0.95)  # TODO: argument gamma
 
     def prior(self, y: Tensor) -> DiagonalGaussian:
         assert y.ndim == 2
         n_batch = y.shape[0]
+        xdim = self.mean.shape[-1]
+
         mean = torch.atleast_2d(self.mean)
         logvar = torch.atleast_2d(self.logvar)
 
-        if mean.shape[0] == 1:
-            mean = mean.tile((n_batch, 1))
-        if logvar.shape[0] == 1:
-            logvar = logvar.tile((n_batch, 1))
+        one = torch.ones(n_batch, xdim)
+
+        mean = one * mean
+        logvar = one * logvar
 
         assert mean.size(0) == n_batch and logvar.size(0) == n_batch
 
@@ -105,7 +107,11 @@ class VJF(Module):
             qt: posterior after observation
         """
         # encode
+        if qs is None:
+            qs = self.prior(y)
+        # else:
         qs = detach(qs)
+
         xs = reparametrize(qs)
         pt = self.transition(xs, u)
         # print(torch.linalg.norm(xs - pt).item())
@@ -131,7 +137,7 @@ class VJF(Module):
         # entropy
         h = entropy(qt)
 
-        loss = l_recon - h + l_dynamics
+        loss = l_recon #- h  # + l_dynamics
 
         # print(l_recon.item(), l_dynamics.item(), h.item())
 
@@ -161,11 +167,6 @@ class VJF(Module):
         if u is not None:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
-
-        if qs is None:
-            qs = self.prior(y)
-        else:
-            detach(qs)
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
         loss = self.loss(y, xs, pt, qt, xt, py)
@@ -223,7 +224,7 @@ class RBFLDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.ones(1), requires_grad=False))  # act like a regularizer
+        self.register_parameter('logvar', Parameter(torch.tensor(0.)))  # act like a regularizer
 
     def forward(self, x: Tensor, u: Tensor = None, sampling=False) -> Tensor:
         if u is None:

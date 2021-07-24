@@ -40,10 +40,10 @@ class Recognition(Module):
 
         layers = [Linear(ydim, hidden_sizes[0]), ReLU()]  # input layer
         for k in range(len(hidden_sizes) - 1):
-            layers.append(Dropout(p=0.2))
+            # layers.append(Dropout(p=0.2))
             layers.append(Linear(hidden_sizes[k], hidden_sizes[k + 1]))
             layers.append(ReLU())
-        layers.append(Linear(hidden_sizes[-1], xdim * 2))
+        layers.append(Linear(hidden_sizes[-1], xdim * 2, bias=False))
         self.add_module('mlp', Sequential(*layers))
 
         # nn.init.zeros_(self.input_x.weight)
@@ -55,5 +55,5 @@ class Recognition(Module):
         # output = self.mlp(torch.cat((y, pt), dim=-1))
         output = self.mlp(y)
         mean, logvar = output.chunk(2, dim=-1)
-        mean = mean + pt
+        # mean = mean + pt
         return DiagonalGaussian(mean, logvar)

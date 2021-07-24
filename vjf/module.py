@@ -70,3 +70,8 @@ class bLinReg(Module):
         self.w_cholesky = self.w_cholesky.float()
         # (feature, feature) (feature, output) => (feature, output)
         # print(self.w_precision.diagonal())
+
+
+# TODO: Kalman filter for weight estimation
+# w(t) = w(t-1) + e
+# y(t) = X(t) w(t) + v
