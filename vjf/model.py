@@ -2,13 +2,13 @@ from itertools import zip_longest
 from typing import Tuple, Sequence, Union
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import Module, Linear, functional, Parameter
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
-from .functional import gaussian_entropy as entropy
+from .functional import gaussian_entropy as entropy, gaussian_loss
 from .module import bLinReg, RBF
 from .recognition import DiagonalGaussian, Recognition
 from .util import reparametrize
@@ -21,7 +21,7 @@ class GaussianLikelihood(Module):
 
     def __init__(self):
         super().__init__()
-        self.register_parameter('logvar', Parameter(torch.tensor(0.)))
+        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=True))
 
     def loss(self, eta: Tensor, target: Tensor) -> Tensor:
         """
@@ -119,11 +119,12 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, pt)
+        qt = self.recognition(y, xs * 0)
 
         # decode
         xt = reparametrize(qt)
         py = self.decoder(xt)
+        # py = self.decoder(qt.mean)
 
         return xs, pt, qt, xt, py
 
@@ -139,9 +140,13 @@ class VJF(Module):
         # entropy
         h = entropy(qt)
 
-        loss = l_recon #- h  # + l_dynamics
+        loss = l_recon - h + l_dynamics
 
-        # print(l_recon.item(), l_dynamics.item(), h.item())
+        # print(-l_recon, -l_dynamics, h)
+        # print('loss', loss.item())
+        # print('recon', l_recon.item(), py)
+        # print('dyn', l_dynamics.item(), pt)
+        # print('ent', h.item(), xt)
 
         if components:
             return loss, -l_recon, -l_dynamics, h
@@ -153,13 +158,14 @@ class VJF(Module):
         # non gradient
         self.transition.update(xs, xt)
 
-    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *, update: bool = True):
+    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *, update: bool = True, debug=False):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
         :param u: control
         :param qs: previos posterior. use prior if None, otherwise detached.
         :param update: flag to learn the parameters
+        :param debug:
         :return:
             qt: posterior
             loss: negative eblo
@@ -171,16 +177,18 @@ class VJF(Module):
             u = torch.atleast_2d(u)
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
-        loss = self.loss(y, xs, pt, qt, xt, py)
+        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug)
+        assert torch.isfinite(loss)
         if update:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
+            nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
             # self.update(y, xs, pt, qt, xt, py)  # non-gradient step
 
-        return qt, loss
+        return qt, loss, *elbos
 
-    def fit(self, y, u=None, *, max_iter=1, offline=False):
+    def fit(self, y, u=None, *, max_iter=1, offline=False, debug=True):
         y = torch.as_tensor(y)
         y = torch.atleast_2d(y)
         if u is None:
@@ -189,7 +197,7 @@ class VJF(Module):
             u = torch.as_tensor(u)
 
         with trange(max_iter) as progress:
-            loss = torch.tensor(float('nan'))
+            prev_loss = torch.tensor(float('nan'))
             for i in progress:
                 # collections
                 q_seq = []  # maybe deque is better than list?
@@ -197,19 +205,25 @@ class VJF(Module):
 
                 q = None  # use prior
                 for yt, ut in zip_longest(y, u):
-                    q, loss = self.filter(yt, ut, q, update=not offline)
+                    q, loss, *elbos = self.filter(yt, ut, q, update=not offline, debug=debug)
                     losses.append(loss)
                     q_seq.append(q)
+                    if debug:
+                        progress.set_postfix({'Loss': prev_loss.item(),
+                                              'Recon': elbos[0].item(),
+                                              'Dynamics': elbos[1].item(),
+                                              'Entropy': elbos[2].item()})
+
                 total_loss = sum(losses) / len(losses)
-                if torch.isclose(loss, total_loss):
+                if torch.isclose(prev_loss, total_loss):
                     break
                 if offline:
                     self.optimizer.zero_grad()
                     total_loss.backward()
                     self.optimizer.step()
 
-                progress.set_postfix({'Loss': total_loss.item()})
-                loss = total_loss
+                # progress.set_postfix({'Loss': total_loss.item()})
+                prev_loss = total_loss
 
         return q_seq
 
@@ -229,9 +243,9 @@ class RBFLDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.)))  # act like a regularizer
+        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise, act like a nob
 
-    def forward(self, x: Tensor, u: Tensor = None, sampling=False) -> Tensor:
+    def forward(self, x: Tensor, u: Tensor = None, sampling=True) -> Tensor:
         if u is None:
             xu = x
         else:
@@ -253,8 +267,11 @@ class RBFLDS(Module):
         return x
 
     @torch.no_grad()
-    def update(self, xs: Tensor, xt: Tensor):
-        self.linreg.update(xs, xt - xs, torch.exp(-self.logvar))  # model dx
+    def update(self, xs: Tensor, xt: Tensor, kalman=False):
+        if kalman:
+            self.linreg.kalman_update(xs, xt - xs, torch.exp(self.logvar))
+        else:
+            self.linreg.update(xs, xt - xs, torch.exp(-self.logvar))  # model dx
         # self.linreg.update(xs, xt, torch.exp(-self.logvar))
         # self.logvar *= 0.99
 

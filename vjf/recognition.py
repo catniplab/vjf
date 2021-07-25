@@ -35,15 +35,15 @@ class DumbRecognition(Module):
 class Recognition(Module):
     def __init__(self, ydim: int, xdim: int, hidden_sizes: Sequence[int]):
         super().__init__()
-
+        activation = Tanh
         # self.add_module('input_y', Linear(ydim, hidden_sizes[0]))
         # self.add_module('input_x', Linear(xdim, hidden_sizes[0], bias=False))
 
-        layers = [Linear(ydim + xdim, hidden_sizes[0]), ReLU()]  # input layer
+        layers = [Linear(ydim + xdim, hidden_sizes[0]), activation()]  # input layer
         for k in range(len(hidden_sizes) - 1):
-            layers.append(Dropout(p=0.5))
+            # layers.append(Dropout(p=0.5))
             layers.append(Linear(hidden_sizes[k], hidden_sizes[k + 1]))
-            layers.append(ReLU())
+            layers.append(activation())
         layers.append(Linear(hidden_sizes[-1], xdim * 2, bias=False))
         self.add_module('mlp', Sequential(*layers))
 
