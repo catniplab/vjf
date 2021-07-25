@@ -267,11 +267,8 @@ class RBFLDS(Module):
         return x
 
     @torch.no_grad()
-    def update(self, xs: Tensor, xt: Tensor, kalman=False):
-        if kalman:
-            self.linreg.kalman_update(xs, xt - xs, torch.exp(self.logvar))
-        else:
-            self.linreg.update(xs, xt - xs, torch.exp(-self.logvar))  # model dx
+    def update(self, xs: Tensor, xt: Tensor):
+        self.linreg.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
         # self.linreg.update(xs, xt, torch.exp(-self.logvar))
         # self.logvar *= 0.99
 
