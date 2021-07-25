@@ -1,6 +1,7 @@
 from collections import namedtuple
 from typing import Sequence
 
+import torch
 from torch import Tensor
 from torch.nn import Module, Linear, Tanh, Sequential, ReLU, Dropout
 
@@ -38,9 +39,9 @@ class Recognition(Module):
         # self.add_module('input_y', Linear(ydim, hidden_sizes[0]))
         # self.add_module('input_x', Linear(xdim, hidden_sizes[0], bias=False))
 
-        layers = [Linear(ydim, hidden_sizes[0]), ReLU()]  # input layer
+        layers = [Linear(ydim + xdim, hidden_sizes[0]), ReLU()]  # input layer
         for k in range(len(hidden_sizes) - 1):
-            # layers.append(Dropout(p=0.2))
+            layers.append(Dropout(p=0.5))
             layers.append(Linear(hidden_sizes[k], hidden_sizes[k + 1]))
             layers.append(ReLU())
         layers.append(Linear(hidden_sizes[-1], xdim * 2, bias=False))
@@ -53,7 +54,8 @@ class Recognition(Module):
         # x = self.input_x(pt)
         # output = self.mlp(y + x)
         # output = self.mlp(torch.cat((y, pt), dim=-1))
-        output = self.mlp(y)
+        inputs = torch.cat((y, pt), dim=-1)
+        output = self.mlp(inputs)
         mean, logvar = output.chunk(2, dim=-1)
         # mean = mean + pt
         return DiagonalGaussian(mean, logvar)

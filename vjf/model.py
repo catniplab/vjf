@@ -178,8 +178,7 @@ class VJF(Module):
 
         return qt, loss
 
-    def fit(self, y, u=None, *, max_iter=1):
-        """offline"""
+    def fit(self, y, u=None, *, max_iter=1, offline=False):
         y = torch.as_tensor(y)
         y = torch.atleast_2d(y)
         if u is None:
@@ -188,23 +187,27 @@ class VJF(Module):
             u = torch.as_tensor(u)
 
         with trange(max_iter) as progress:
+            loss = torch.tensor(float('nan'))
             for i in progress:
-                self.optimizer.zero_grad()
-
                 # collections
                 q_seq = []  # maybe deque is better than list?
                 losses = []
 
                 q = None  # use prior
                 for yt, ut in zip_longest(y, u):
-                    q, loss = self.filter(yt, ut, q, update=False)
+                    q, loss = self.filter(yt, ut, q, update=not offline)
                     losses.append(loss)
                     q_seq.append(q)
                 total_loss = sum(losses) / len(losses)
-                total_loss.backward()
-                self.optimizer.step()
+                if torch.isclose(loss, total_loss):
+                    break
+                if offline:
+                    self.optimizer.zero_grad()
+                    total_loss.backward()
+                    self.optimizer.step()
 
                 progress.set_postfix({'Loss': total_loss.item()})
+                loss = total_loss
 
         return q_seq
 
