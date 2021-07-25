@@ -29,11 +29,7 @@ class GaussianLikelihood(Module):
         :param target: observation
         :return:
         """
-        mse = functional.mse_loss(eta, target, reduction='none')
-        assert mse.ndim == 2
-        p = torch.exp(-self.logvar)
-        nll = .5 * (mse * p + self.logvar)
-        return nll.sum(-1).mean()
+        return gaussian_loss(target, eta, self.logvar)
 
 
 class PoissonLikelihood(Module):
@@ -257,8 +253,4 @@ class RBFLDS(Module):
         # self.logvar *= 0.99
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
-        mse = functional.mse_loss(pt, xt, reduction='none')
-        p = torch.exp(-self.logvar)  # precision
-        nll = .5 * (mse * p + self.logvar)
-        assert nll.ndim == 2
-        return nll.sum(-1).mean()
+        return gaussian_loss(xt, pt, self.logvar)
