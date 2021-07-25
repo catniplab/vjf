@@ -5,6 +5,7 @@ from torch import Tensor
 from torch.nn import Parameter, Module, functional
 
 from .functional import rbf
+from . import kalman
 
 
 class RBF(Module):
@@ -38,15 +39,18 @@ class bLinReg(Module):
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
         self.w_mean = torch.zeros(self.feature.n_feature, n_output)
+        self.w_cov = torch.eye(self.feature.n_feature)
         self.w_precision = torch.eye(self.feature.n_feature)
         self.w_cholesky = torch.linalg.cholesky(self.w_precision)
+        self.Q = torch.eye(self.feature.n_feature)   # for Kalman
         # It turns out that the precision is independent of the output, and hence only one matrix is needed.
 
     def forward(self, x: Tensor, sampling=False) -> Tensor:
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
-            w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
+            # w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
+            w = w + torch.linalg.cholesky(self.w_cov).mm(torch.randn_like(w))  # sampling
         return functional.linear(feat, w.t())  # do we need the intercept?
 
     def update(self, x: Tensor, target: Tensor, precision: Union[Tensor, float], jitter: float = 1e-5):
@@ -71,6 +75,16 @@ class bLinReg(Module):
         # (feature, feature) (feature, output) => (feature, output)
         # print(self.w_precision.diagonal())
 
+    def kalman_update(self, x: Tensor, target: Tensor, v: Union[Tensor, float]):
+        A = torch.eye(self.w_mean.shape[0])  # (feature, feature)
+        H = self.feature(x)  # (sample, feature)
+        R = torch.eye(H.shape[0]) * v  # (feature, feature)
+        m = self.w_mean
+        P = self.w_cov
+        yhat, mhat, Phat = kalman.predict(m, P, A, self.Q, H, R)
+        m, P = kalman.update(target, yhat, mhat, Phat, H, R)
+        self.w_mean = m
+        self.w_cov = P
 
 # TODO: Kalman filter for weight estimation
 # w(t) = w(t-1) + e
