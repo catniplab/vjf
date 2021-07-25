@@ -73,7 +73,13 @@ class VJF(Module):
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
-        self.optimizer = Adam(self.parameters(), lr=1e-2)
+        self.optimizer = Adam([
+            {'params': self.likelihood.parameters(), 'lr': 1e-3},
+            {'params': self.decoder.parameters(), 'lr': 1e-3},
+            {'params': self.transition.parameters(), 'lr': 1e-3},
+            {'params': self.recognition.parameters(), 'lr': 1e-3},
+            ]
+        )
         self.scheduler = ExponentialLR(self.optimizer, 0.95)  # TODO: argument gamma
 
     def prior(self, y: Tensor) -> DiagonalGaussian:
