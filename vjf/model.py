@@ -119,7 +119,7 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, xs * 0)
+        qt = self.recognition(y, xs)
 
         # decode
         xt = reparametrize(qt)
@@ -184,7 +184,7 @@ class VJF(Module):
             loss.backward()  # accumulate grad if not trained
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
-            # self.update(y, xs, pt, qt, xt, py)  # non-gradient step
+            self.update(y, xs, pt, qt, xt, py)  # non-gradient step
 
         return qt, loss, *elbos
 
@@ -243,7 +243,7 @@ class RBFLDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise, act like a nob
+        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=True))  # state noise
 
     def forward(self, x: Tensor, u: Tensor = None, sampling=True) -> Tensor:
         if u is None:
