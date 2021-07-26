@@ -1,13 +1,13 @@
 import torch
 
-from vjf.model import RBFLDS, VJF
+from vjf.model import RBFDS, VJF
 from vjf.recognition import Recognition
 
 
 def test_RBFLDS():
     n_rbf = 10
     xdim, udim = 3, 1
-    lds = RBFLDS(n_rbf, xdim, udim)
+    lds = RBFDS(n_rbf, xdim, udim)
 
     N = 20
     xu = torch.randn(N, xdim + udim)

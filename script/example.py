@@ -29,7 +29,7 @@ from functools import partial
 import torch
 from torch.nn import functional
 import vjf
-from vjf.model import VJF, RBFLDS
+from vjf.model import VJF, RBFDS
 
 # %% md
 
@@ -73,7 +73,7 @@ dx = x1 - x0
 print(x0.shape, dx.shape)
 # blr = bLinReg(RBF(3, 10), 3)
 
-lds = RBFLDS(100, 3, 0)
+lds = RBFDS(100, 3, 0)
 
 # p = x + blr(x)
 # p = lds(x0)
