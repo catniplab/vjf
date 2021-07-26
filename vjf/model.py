@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
 from .functional import gaussian_entropy as entropy, gaussian_loss
-from .module import bLinReg, RBF
+from .module import LinearRegression, RBF
 from .recognition import DiagonalGaussian, Recognition
 from .util import reparametrize
 
@@ -119,7 +119,7 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, xs)
+        qt = self.recognition(y, pt)
 
         # decode
         xt = reparametrize(qt)
@@ -158,13 +158,15 @@ class VJF(Module):
         # non gradient
         self.transition.update(xs, xt)
 
-    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *, update: bool = True, debug=False):
+    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *,
+               sgd: bool = True, update: bool = True, debug=False):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
         :param u: control
         :param qs: previos posterior. use prior if None, otherwise detached.
-        :param update: flag to learn the parameters
+        :param sgd: flag to enable gradient step
+        :param update: flag to update DS
         :param debug:
         :return:
             qt: posterior
@@ -179,11 +181,12 @@ class VJF(Module):
         xs, pt, qt, xt, py = self.forward(y, qs, u)
         loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug)
         assert torch.isfinite(loss)
-        if update:
+        if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
+        if update:
             self.update(y, xs, pt, qt, xt, py)  # non-gradient step
 
         return qt, loss, *elbos
@@ -197,6 +200,7 @@ class VJF(Module):
             u = torch.as_tensor(u)
 
         with trange(max_iter) as progress:
+            update_ds = False
             prev_loss = torch.tensor(float('nan'))
             for i in progress:
                 # collections
@@ -205,18 +209,30 @@ class VJF(Module):
 
                 q = None  # use prior
                 for yt, ut in zip_longest(y, u):
-                    q, loss, *elbos = self.filter(yt, ut, q, update=not offline, debug=debug)
+                    q, loss, *elbos = self.filter(yt, ut, q,
+                                                  sgd=not update_ds,
+                                                  update=update_ds, debug=debug)
                     losses.append(loss)
                     q_seq.append(q)
                     if debug:
-                        progress.set_postfix({'Loss': prev_loss.item(),
+                        progress.set_postfix({'Update': update_ds,
+                                              'Loss': prev_loss.item(),
                                               'Recon': elbos[0].item(),
                                               'Dynamics': elbos[1].item(),
                                               'Entropy': elbos[2].item()})
 
+                if update_ds:
+                    update_ds = False
+
                 total_loss = sum(losses) / len(losses)
+                print(f'{total_loss.item():.4f}')
                 if torch.isclose(prev_loss, total_loss):
-                    break
+                    if update_ds:
+                        break
+                    else:
+                        update_ds = True
+                        self.transition.reset()
+
                 if offline:
                     self.optimizer.zero_grad()
                     total_loss.backward()
@@ -242,35 +258,43 @@ class VJF(Module):
 class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
-        self.add_module('linreg', bLinReg(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=True))  # state noise
+        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
 
-    def forward(self, x: Tensor, u: Tensor = None, sampling=True) -> Tensor:
+    def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 1e-3) -> Tensor:
         if u is None:
             xu = x
         else:
             u = torch.atleast_2d(u)
             xu = torch.cat((x, u), dim=-1)
 
-        return x + self.linreg(xu, sampling=sampling)  # model dx
+        return (1 - leak) * x + self.linreg(xu, sampling=sampling)  # model dx
         # return self.linreg(xu, sampling=sampling)  # model f(x)
 
-    def simulate(self, x0: Tensor, step=1) -> Tensor:
+    def simulate(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
+        x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
+        x0 = torch.atleast_2d(x0)
         x = torch.empty(step + 1, *x0.shape)
         x[0] = x0
         s = torch.exp(.5 * self.logvar)
 
         for t in range(step):
             x[t + 1] = self.forward(x[t], sampling=True)
-            x[t + 1] = x[t + 1] + torch.randn_like(x[t+1]) * s
+            if noise:
+                x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
 
         return x
 
     @torch.no_grad()
     def update(self, xs: Tensor, xt: Tensor):
         self.linreg.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        # self.linreg.Q *= 0.9
         # self.linreg.update(xs, xt, torch.exp(-self.logvar))
         # self.logvar *= 0.99
+
+    @torch.no_grad()
+    def reset(self):
+        self.linreg.reset()
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
         return gaussian_loss(xt, pt, self.logvar)

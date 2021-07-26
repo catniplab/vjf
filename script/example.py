@@ -36,7 +36,7 @@ from vjf.model import VJF, RBFDS
 # We have synthesized some data from Lorenz attractor, 3D state, 200D observation, 216 realizations, each lasts 1500 steps. Let's load the data first. ([download here](https://doi.org/10.6084/m9.figshare.14588469))
 
 # %%
-from vjf.module import RBF, bLinReg
+from vjf.module import RBF, LinearRegression
 
 data = np.load('lorenz_216_1500_10_200_gaussian_s0.npz')
 
