@@ -14,7 +14,7 @@ def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
     :return:
     """
     d = cdist(x, c)  # ||x - c||, (batch, basis)
-    d /= w  # ||x - c||/w
+    d = d / w  # ||x - c||/w
     return torch.exp(-.5 * d.pow(2))
 
 
