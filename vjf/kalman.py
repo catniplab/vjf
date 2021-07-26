@@ -9,6 +9,8 @@ from typing import Tuple
 import torch
 from torch import Tensor
 
+from vjf.util import symmetric, symmetrize
+
 
 def predict(
         x: Tensor,
@@ -31,7 +33,7 @@ def predict(
         Phat: predicted covariance, (xdim, xdim)  # only depends on A
     """
     xhat = A.mm(x)  # Ax
-    Phat = Q.addmm(A.mm(P), A.t())  # APA' + Q
+    Phat = torch.linalg.multi_dot((A, P, A.t())) + Q  # APA' + Q
     yhat = H.mm(xhat)
     return yhat, xhat, Phat
 
@@ -55,10 +57,13 @@ def update(y: Tensor,
     """
     eye = torch.eye(Phat.shape[0])
     e = y - yhat
-    S = R.addmm(H.mm(Phat), H.t())  # HPH' + R
+    S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
+    assert symmetric(S)
     L = torch.linalg.cholesky(S)
     K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}
-    # G = Phat.mm(torch.linalg.solve(S, H).t())
+    # K = Phat.mm(torch.linalg.solve(S, H).t())
     x = xhat + K.mm(e)  # x + Ke
     P = (eye - K.mm(H)).mm(Phat)  # (I - KH)P
+    P = symmetrize(P)
+    assert symmetric(P)
     return x, P
