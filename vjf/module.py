@@ -6,6 +6,7 @@ from torch.nn import Parameter, Module, functional
 
 from .functional import rbf
 from . import kalman
+from .util import symmetric
 
 
 class RBF(Module):
@@ -14,7 +15,7 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim) - 0.5, requires_grad=False))
         self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
 
     @property
@@ -31,7 +32,7 @@ class RBF(Module):
         return output
 
 
-class bLinReg(Module):
+class LinearRegression(Module):
     """Bayesian linear regression"""
     def __init__(self, feature: Module, n_output: int):
         super().__init__()
@@ -42,7 +43,7 @@ class bLinReg(Module):
         self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         # self.w_precision = torch.eye(self.feature.n_feature)
-        self.Q = torch.eye(self.feature.n_feature)   # for Kalman
+        self.Q = torch.eye(self.feature.n_feature) * 0  # for Kalman
 
     def forward(self, x: Tensor, sampling=False) -> Tensor:
         feat = self.feature(x)
@@ -73,6 +74,7 @@ class bLinReg(Module):
     #     self.w_cholesky = self.w_cholesky.float()
     #     # (feature, feature) (feature, output) => (feature, output)
 
+    @torch.no_grad()
     def update(self, x: Tensor, target: Tensor, v: Union[Tensor, float]):
         A = torch.eye(self.w_mean.shape[0])  # (feature, feature)
         H = self.feature(x)  # (sample, feature)
@@ -80,7 +82,16 @@ class bLinReg(Module):
         m = self.w_mean
         S = self.w_cov
         yhat, mhat, Phat = kalman.predict(m, S, A, self.Q, H, R)
+        assert symmetric(Phat)
         m, S = kalman.update(target, yhat, mhat, Phat, H, R)
+        assert symmetric(S)
         self.w_mean = m
         self.w_cov = S
-        self.w_chol = torch.linalg.cholesky(S)
+        U, s, Vh = torch.linalg.svd(S)
+        self.w_chol = U.mm(torch.diag(s.sqrt())).mm(Vh)
+
+    @torch.no_grad()
+    def reset(self):
+        self.w_mean = torch.zeros_like(self.w_mean)
+        self.w_cov = torch.eye(self.feature.n_feature)
+        self.w_chol = torch.eye(self.feature.n_feature)
