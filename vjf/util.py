@@ -11,7 +11,3 @@ def reparametrize(q: Tuple[Tensor, Tensor]) -> Tensor:
 
 def symmetric(a: Tensor) -> bool:
     return torch.allclose(a, a.t())
-
-
-def symmetrize(a: Tensor) -> Tensor:
-    return (a + a.t()) / 2
