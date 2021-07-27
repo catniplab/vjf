@@ -4,6 +4,8 @@ import torch
 from torch import Tensor, cdist
 from torch.nn import functional
 
+from vjf.recognition import Gaussian
+
 
 def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
     """
@@ -26,11 +28,29 @@ def gaussian_entropy(q: Tuple[Tensor, Tensor]) -> Tensor:
 
 def gaussian_loss(x, mu, logvar):
     x = torch.atleast_2d(x)
-    mu = torch.atleast_2d(mu)
-
     p = torch.exp(-.5 * logvar)
+
+    if isinstance(mu, Tensor):
+        mu = torch.atleast_2d(mu)
+        logv = None
+    elif isinstance(mu, Gaussian):
+        mu, logv = mu
+    else:
+        raise TypeError
+
+    # print(mu, logv)
     mse = functional.mse_loss(x * p, mu * p, reduction='none')
     assert mse.ndim == 2
+    assert torch.all(torch.isfinite(mse)), mse
 
-    nll = .5 * (mse + logvar)
+    if logv is None:
+        nll = .5 * (mse + logvar)
+    else:
+        if logv.ndim == 2:
+            trace = torch.exp(logv - logvar)
+            assert torch.all(torch.isfinite(logv)), logv
+            assert torch.all(torch.isfinite(trace)), trace
+        else:
+            raise RuntimeError
+        nll = .5 * (mse + logvar + trace)
     return nll.sum(-1).mean()
