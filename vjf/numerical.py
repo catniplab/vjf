@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 
 
-def PSD(a: Tensor, eps: float = 1e-5) -> Tensor:
+def positivize(a: Tensor, eps: float = 1e-5) -> Tensor:
     a = symmetrize(a)
     d1 = a.diagonal(dim1=-2, dim2=-1)
     d2 = d1.clamp(min=eps)
