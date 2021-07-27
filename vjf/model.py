@@ -4,14 +4,15 @@ from typing import Tuple, Sequence, Union
 import torch
 from torch import Tensor, nn
 from torch.nn import Module, Linear, functional, Parameter
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
 from .functional import gaussian_entropy as entropy, gaussian_loss
 from .module import LinearRegression, RBF
-from .recognition import DiagonalGaussian, Recognition, DumbRecognition
-from .util import reparametrize
+from .recognition import Gaussian, Recognition, DumbRecognition, DiffusionRecognition
+from .util import reparametrize, symmetric
+from .numerical import symmetrize, positivize
 
 
 class GaussianLikelihood(Module):
@@ -21,7 +22,7 @@ class GaussianLikelihood(Module):
 
     def __init__(self):
         super().__init__()
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=True))
+        self.register_parameter('logvar', Parameter(2 * torch.tensor(.1).log(), requires_grad=False))
 
     def loss(self, eta: Tensor, target: Tensor) -> Tensor:
         """
@@ -47,14 +48,37 @@ class PoissonLikelihood(Module):
         :param target: observation
         :return:
         """
+        if not isinstance(eta, Tensor):
+            raise NotImplementedError
         nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
         assert nll.ndim == 2
         return nll.sum(-1).mean()
 
 
-def detach(q: DiagonalGaussian) -> DiagonalGaussian:
+class LinearDecoder(Module):
+    def __init__(self, xdim: int, ydim: int):
+        super().__init__()
+        self.add_module('decode', Linear(xdim, ydim))
+
+    def forward(self, x):
+        if isinstance(x, Tensor):
+            return self.decode(x)
+        elif isinstance(x, Gaussian):
+            mean, logvar = x
+            mean = self.decode(mean)
+            C = self.decode.weight
+            S = torch.diag_embed(logvar).exp()
+            V = C.unsqueeze(0) @ S @ C.t().unsqueeze(0)
+            V = positivize(V)
+            v = V.diagonal(dim1=-2, dim2=-1)
+            return Gaussian(mean, v.log())
+        else:
+            raise NotImplementedError
+
+
+def detach(q: Gaussian) -> Gaussian:
     mean, logvar = q
-    return DiagonalGaussian(mean.detach(), logvar.detach())
+    return Gaussian(mean.detach(), logvar.detach())
 
 
 class VJF(Module):
@@ -68,21 +92,22 @@ class VJF(Module):
         self.add_module('likelihood', likelihood)
         self.add_module('transition', transition)
         self.add_module('recognition', recognition)
-        self.add_module('decoder', Linear(xdim, ydim))
+        # self.add_module('decoder', Linear(xdim, ydim))
+        self.add_module('decoder', LinearDecoder(xdim, ydim))
 
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
-        self.optimizer = Adam([
-            {'params': self.likelihood.parameters(), 'lr': 1e-3},
-            {'params': self.decoder.parameters(), 'lr': 1e-3},
-            {'params': self.transition.parameters(), 'lr': 1e-3},
-            {'params': self.recognition.parameters(), 'lr': 1e-3},
-            ]
-        )
+        lr = 1e-4
+        self.optimizer = SGD([
+            {'params': self.likelihood.parameters(), 'lr': lr},
+            {'params': self.decoder.parameters(), 'lr': lr},
+            {'params': self.transition.parameters(), 'lr': lr},
+            {'params': self.recognition.parameters(), 'lr': lr},
+        ])
         self.scheduler = ExponentialLR(self.optimizer, 0.95)  # TODO: argument gamma
 
-    def prior(self, y: Tensor) -> DiagonalGaussian:
+    def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
         n_batch = y.shape[0]
         xdim = self.mean.shape[-1]
@@ -97,9 +122,9 @@ class VJF(Module):
 
         assert mean.size(0) == n_batch and logvar.size(0) == n_batch
 
-        return DiagonalGaussian(mean, logvar)
+        return Gaussian(mean, logvar)
 
-    def forward(self, y: Tensor, qs: DiagonalGaussian, u: Tensor = None) -> Tuple:
+    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None) -> Tuple:
         """
         :param y: new observation
         :param qs: posterior before new observation
@@ -119,16 +144,16 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, pt*0)
+        qt = self.recognition(y, qs)  # TODO: qs
 
         # decode
         xt = reparametrize(qt)
-        py = self.decoder(xt)
+        py = self.decoder(qt)
         # py = self.decoder(qt.mean)
 
         return xs, pt, qt, xt, py
 
-    def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor,
+    def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor,
              components: bool = False, full: bool = False) -> Union[Tensor, Tuple]:
         if full:
             raise NotImplementedError
@@ -140,7 +165,11 @@ class VJF(Module):
         # entropy
         h = entropy(qt)
 
-        loss = l_recon - h + l_dynamics
+        assert torch.isfinite(l_recon), l_recon.item()
+        assert torch.isfinite(l_dynamics), l_dynamics.item()
+        assert torch.isfinite(h), h.item()
+
+        loss = l_recon - h  # + l_dynamics
 
         # print(-l_recon, -l_dynamics, h)
         # print('loss', loss.item())
@@ -154,11 +183,11 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: DiagonalGaussian, xt: Tensor, py: Tensor):
+    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor):
         # non gradient
         self.transition.update(xs, xt)
 
-    def filter(self, y: Tensor, u: Tensor = None, qs: DiagonalGaussian = None, *,
+    def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, debug=False):
         """
         Filter a step or a sequence
@@ -180,7 +209,6 @@ class VJF(Module):
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
         loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug)
-        assert torch.isfinite(loss)
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
@@ -191,7 +219,7 @@ class VJF(Module):
 
         return qt, loss, *elbos
 
-    def fit(self, y, u=None, *, max_iter=1, offline=False, debug=True):
+    def fit(self, y, u=None, *, max_iter=1, beta=0.1, offline=False, debug=True):
         y = torch.as_tensor(y)
         y = torch.atleast_2d(y)
         if u is None:
@@ -201,7 +229,7 @@ class VJF(Module):
 
         with trange(max_iter) as progress:
             update_ds = False
-            prev_loss = torch.tensor(float('nan'))
+            running_loss = torch.tensor(float('nan'))
             for i in progress:
                 # collections
                 q_seq = []  # maybe deque is better than list?
@@ -216,24 +244,27 @@ class VJF(Module):
                     q_seq.append(q)
                     if debug:
                         progress.set_postfix({'Update': str(update_ds),
-                                              'Loss': prev_loss.item(),
+                                              'Loss': running_loss.item(),
                                               'Recon': elbos[0].item(),
                                               'Dynamics': elbos[1].item(),
-                                              'Entropy': elbos[2].item()})
+                                              'Entropy': elbos[2].item(),
+                                              'q norm': torch.norm(q[0]).item(),
+                                              })
 
                 total_loss = sum(losses) / len(losses)
                 print(f'{update_ds}, {total_loss.item():.4f}, {self.transition.logvar.exp():.4f}')
 
-                if torch.isclose(prev_loss, total_loss, atol=1e-2, rtol=1e-2):
+                if torch.isclose(running_loss, total_loss, atol=1e-5, rtol=1e-3):
                     print('Converged.')
-                    if update_ds:
-                        break
-                    else:
-                        update_ds = True
-                else:
-                    if update_ds:
-                        update_ds = False
-                        # self.transition.reset()
+                    break
+                #     if update_ds:
+                #         break
+                #     else:
+                #         update_ds = True
+                # else:
+                #     if update_ds:
+                #         update_ds = False
+                #         # self.transition.reset()
 
                 if offline:
                     self.optimizer.zero_grad()
@@ -241,7 +272,8 @@ class VJF(Module):
                     self.optimizer.step()
 
                 # progress.set_postfix({'Loss': total_loss.item()})
-                prev_loss = total_loss
+                running_loss = beta * running_loss + (1 - beta) * total_loss if torch.isfinite(
+                    running_loss) else total_loss
 
         return q_seq
 
@@ -253,6 +285,7 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
+        # model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
         return model
 
@@ -261,7 +294,8 @@ class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
         self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=True))  # state noise
+        self.register_parameter('logvar',
+                                Parameter(2 * torch.tensor(.1).log(), requires_grad=False))  # state noise
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 1e-2) -> Tensor:
         if u is None:
