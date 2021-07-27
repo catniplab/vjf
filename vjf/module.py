@@ -15,8 +15,8 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) - 0.5, requires_grad=False))
-        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
+        self.register_parameter('logwidth', Parameter(torch.log(torch.ones(n_basis) * 2), requires_grad=False))
 
     @property
     def n_feature(self):
@@ -51,6 +51,8 @@ class LinearRegression(Module):
         if sampling:
             # w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
             w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
+        else:
+            V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
         return functional.linear(feat, w.t())  # do we need the intercept?
 
     # def update(self, x: Tensor, target: Tensor, precision: Union[Tensor, float], jitter: float = 1e-5):
