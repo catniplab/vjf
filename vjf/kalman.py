@@ -34,6 +34,8 @@ def predict(
     """
     xhat = A.mm(x)  # Ax
     Phat = torch.linalg.multi_dot((A, P, A.t())) + Q  # APA' + Q
+    Phat = symmetrize(Phat)
+    assert symmetric(Phat)
     yhat = H.mm(xhat)
     return yhat, xhat, Phat
 
@@ -58,6 +60,7 @@ def update(y: Tensor,
     eye = torch.eye(Phat.shape[0])
     e = y - yhat
     S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
+    S = symmetrize(S)
     assert symmetric(S)
     L = torch.linalg.cholesky(S)
     K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}

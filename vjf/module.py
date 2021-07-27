@@ -15,7 +15,7 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim) - 0.5, requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) - 0.5, requires_grad=False))
         self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
 
     @property
@@ -43,7 +43,7 @@ class LinearRegression(Module):
         self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         # self.w_precision = torch.eye(self.feature.n_feature)
-        self.Q = torch.eye(self.feature.n_feature) * 0  # for Kalman
+        self.Q = torch.eye(self.feature.n_feature)  # for Kalman
 
     def forward(self, x: Tensor, sampling=False) -> Tensor:
         feat = self.feature(x)
@@ -87,8 +87,9 @@ class LinearRegression(Module):
         assert symmetric(S)
         self.w_mean = m
         self.w_cov = S
-        U, s, Vh = torch.linalg.svd(S)
-        self.w_chol = U.mm(torch.diag(s.sqrt())).mm(Vh)
+        self.w_chol = torch.linalg.cholesky(S)
+        # U, s, Vh = torch.linalg.svd(S)
+        # self.w_chol = U.mm(torch.diag(s.sqrt())).mm(Vh)
 
     @torch.no_grad()
     def reset(self):

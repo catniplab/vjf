@@ -4,6 +4,7 @@ from typing import Sequence
 import torch
 from torch import Tensor
 from torch.nn import Module, Linear, Tanh, Sequential, ReLU, Dropout
+from torch.nn.functional import hardtanh, tanhshrink
 
 __all__ = ['DiagonalGaussian', 'DumbRecognition', 'Recognition']
 
@@ -44,7 +45,8 @@ class Recognition(Module):
             # layers.append(Dropout(p=0.5))
             layers.append(Linear(hidden_sizes[k], hidden_sizes[k + 1]))
             layers.append(activation())
-        layers.append(Linear(hidden_sizes[-1], xdim * 2, bias=False))
+        # layers.append(Linear(hidden_sizes[-1], xdim * 2, bias=False))
+        layers.append(Linear(hidden_sizes[-1], xdim * 2))
         self.add_module('mlp', Sequential(*layers))
 
         # nn.init.zeros_(self.input_x.weight)
@@ -57,5 +59,8 @@ class Recognition(Module):
         inputs = torch.cat((y, pt), dim=-1)
         output = self.mlp(inputs)
         mean, logvar = output.chunk(2, dim=-1)
+        mean = torch.tanh(mean)
+        # mean = hardtanh(mean)
+        # mean = tanhshrink(mean)
         # mean = mean + pt
         return DiagonalGaussian(mean, logvar)
