@@ -12,7 +12,7 @@ from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
 from .recognition import Gaussian, Recognition
-from .util import reparametrize
+from .util import reparametrize, symmetric
 from .numerical import positivize
 
 
@@ -28,9 +28,10 @@ class LinearDecoder(Module):
             mean, logvar = x
             mean = self.decode(mean)
             C = self.decode.weight
-            S = torch.diag_embed(logvar).exp()
-            V = C.unsqueeze(0) @ S @ C.t().unsqueeze(0)
-            V = positivize(V)
+            S = torch.diag_embed(torch.exp(.5 * logvar))  # sqrt of covariance
+            CS = C.unsqueeze(0) @ S
+            V = CS @ CS.transpose(-1, -2)
+            assert symmetric(V)
             v = V.diagonal(dim1=-2, dim2=-1)
             return Gaussian(mean, v.log())
         else:
@@ -66,7 +67,7 @@ class VJF(Module):
             {'params': self.transition.parameters(), 'lr': lr},
             {'params': self.recognition.parameters(), 'lr': lr},
         ])
-        self.scheduler = ExponentialLR(self.optimizer, 0.95)  # TODO: argument gamma
+        self.scheduler = ExponentialLR(self.optimizer, 0.9)  # TODO: argument gamma
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -210,12 +211,13 @@ class VJF(Module):
                                               'Dynamics': elbos[1].item(),
                                               'Entropy': elbos[2].item(),
                                               'q norm': torch.norm(q[0]).item(),
+                                              'obs noise': self.likelihood.logvar.exp().item(),
                                               })
 
                 total_loss = sum(losses) / len(losses)
                 print(f'{update_ds}, {total_loss.item():.4f}, {self.transition.logvar.exp():.4f}')
 
-                if torch.isclose(running_loss, total_loss, atol=1e-5, rtol=1e-3):
+                if total_loss.isclose(running_loss, rtol=1e-4):
                     print('Converged.')
                     break
                 #     if update_ds:
@@ -227,14 +229,15 @@ class VJF(Module):
                 #         update_ds = False
                 #         # self.transition.reset()
 
-                if offline:
-                    self.optimizer.zero_grad()
-                    total_loss.backward()
-                    self.optimizer.step()
+                # if offline:
+                #     self.optimizer.zero_grad()
+                #     total_loss.backward()
+                #     self.optimizer.step()
 
                 # progress.set_postfix({'Loss': total_loss.item()})
-                running_loss = beta * running_loss + (1 - beta) * total_loss if torch.isfinite(
-                    running_loss) else total_loss
+                running_loss = beta * running_loss + (1 - beta) * total_loss if i > 0 else total_loss
+
+                self.scheduler.step()
 
         return q_seq
 
