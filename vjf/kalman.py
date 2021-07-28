@@ -34,8 +34,11 @@ def predict(
         Phat: predicted covariance, (xdim, xdim)  # only depends on A
     """
     xhat = A.mm(x)  # Ax
-    Phat = torch.linalg.multi_dot((A, P, A.t())) + Q  # APA' + Q
-    Phat = positivize(Phat)
+    L = torch.linalg.cholesky(P)
+    AL = A @ L
+    Phat = AL @ AL.transpose(-1, -2) + Q  # APA' + Q
+    assert symmetric(Phat)
+    # Phat = positivize(Phat)
     yhat = H.mm(xhat)
     return yhat, xhat, Phat
 
@@ -57,14 +60,23 @@ def update(y: Tensor,
         x: posterior mean, (xdim, batch)
         P: posterior covariance, (xdim, xdim)
     """
-    eye = torch.eye(Phat.shape[0])
+    # eye = torch.eye(Phat.shape[0])
     e = y - yhat
-    S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
-    S = positivize(S)
+    L = torch.linalg.cholesky(Phat)
+    HL = H @ L
+    # S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
+    S = HL @ HL.transpose(-1, -2) + R
+    assert symmetric(S)
+    # S = positivize(S)
+    # L = torch.linalg.cholesky(S)
+    # K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}
+    # x = xhat + K.mm(e)  # x + Ke
+    # P = (eye - K.mm(H)).mm(Phat)  # (I - KH)P
+    # P = positivize(P)
+
     L = torch.linalg.cholesky(S)
-    K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}
-    # K = Phat.mm(torch.linalg.solve(S, H).t())
-    x = xhat + K.mm(e)  # x + Ke
-    P = (eye - K.mm(H)).mm(Phat)  # (I - KH)P
-    P = positivize(P)
+    K = H.mm(Phat).cholesky_solve(L)  # L^{-1}HP
+    x = xhat + K.t().mm(e.cholesky_solve(L))
+    P = Phat - K.t().mm(K)  #
+    assert symmetric(P)
     return x, P
