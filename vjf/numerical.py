@@ -5,12 +5,17 @@ import torch
 from torch import Tensor
 
 
-def positivize(a: Tensor, eps: float = 1e-3) -> Tensor:
-    assert a.ndim == 3
-    a = symmetrize(a)
-    d1 = a.diagonal(dim1=-2, dim2=-1)
-    d2 = d1.clamp(min=eps)
-    return a - torch.diag_embed(d1) + torch.diag_embed(d2)
+def positivize(a: Tensor, eps: float = 1e-6) -> Tensor:
+    assert a.ndim == 2
+    # U = a.triu(1)
+    # d = a.diagonal().clamp(min=0) + eps
+    # a = U.t() + U + torch.diag(d)
+    # a = a.triu() + a.triu(1).t()  # symmetrize
+    w, v = torch.linalg.eigh(a)
+    s = w.clamp(min=eps).sqrt()
+    sqrt = v.mm(s.diag_embed())
+    a = sqrt.mm(sqrt.t())
+    return a
 
 
 def symmetrize(a: Tensor) -> Tensor:
