@@ -40,10 +40,9 @@ class LinearRegression(Module):
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
         self.w_mean = torch.zeros(self.feature.n_feature, n_output)
-        self.w_cov = torch.eye(self.feature.n_feature)
+        # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         # self.w_precision = torch.eye(self.feature.n_feature)
-        self.Q = torch.eye(self.feature.n_feature)  # for Kalman
 
     def forward(self, x: Tensor, sampling=True) -> Tensor:
         feat = self.feature(x)
@@ -52,10 +51,11 @@ class LinearRegression(Module):
             # w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
             w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
         else:
-            V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
+            pass
+            # V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
         return functional.linear(feat, w.t())  # do we need the intercept?
 
-    # def update(self, x: Tensor, target: Tensor, precision: Union[Tensor, float], jitter: float = 1e-5):
+    # def RLS(self, x: Tensor, target: Tensor, precision: Union[Tensor, float], jitter: float = 1e-5):
     #     """
     #     :param x: (sample, dim)
     #     :param target: (sample, dim)
@@ -77,26 +77,37 @@ class LinearRegression(Module):
     #     # (feature, feature) (feature, output) => (feature, output)
 
     @torch.no_grad()
-    def update(self, x: Tensor, target: Tensor, v: Union[Tensor, float]):
-        eye = torch.eye(self.w_mean.shape[0])  # (feature, feature)
-        A = eye
+    def kalman(self, x: Tensor, target: Tensor, v: Union[Tensor, float], diffusion: float = 0.):
+        """Update weight using Kalman
+        w[t] = w[t-1] + Q
+        target[t] = f(x[t])'w[t] + v
+        f(x) is the features, e.g. RBF
+        Q is diffusion
+        :param x: model prediction
+        :param target: true x
+        :param v: noise variance
+        :param diffusion: Q = diffusion * I, default=0. (RLS)
+        :return:
+        """
+        assert diffusion >= 0., 'diffusion needs to be non-negative'
+        eye = torch.eye(self.w_mean.shape[0])  # identity matrix (feature, feature)
+
+        # Kalman naming:
+        # A: transition matrix
+        # Q: state noise
+        # H: loading matrix
+        # R: observation noise
+        Q = diffusion * eye
+        A = eye  # diffusion
         H = self.feature(x)  # (sample, feature)
         R = torch.eye(H.shape[0]) * v  # (feature, feature)
-        m = self.w_mean
-        S = self.w_cov
-        yhat, mhat, Phat = kalman.predict(m, S, A, self.Q, H, R)
-        m, S = kalman.update(target, yhat, mhat, Phat, H, R)
-        self.w_mean = m
-        try:
-            self.w_chol = torch.linalg.cholesky(S)
-            self.w_cov = S
-        except RuntimeError:
-            print('Singular covariance', torch.linalg.eigvalsh(S))
-        # U, s, Vh = torch.linalg.svd(S)
-        # self.w_chol = U.mm(torch.diag(s.sqrt())).mm(Vh)
+
+        yhat, mhat, Vhat = kalman.predict(self.w_mean, self.w_chol, A, Q, H, R)
+        # self.w_mean, self.w_chol = kalman.update(target, yhat, mhat, Vhat, H, R)
+        self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
 
     @torch.no_grad()
     def reset(self):
         self.w_mean = torch.zeros_like(self.w_mean)
-        self.w_cov = torch.eye(self.feature.n_feature)
+        # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)

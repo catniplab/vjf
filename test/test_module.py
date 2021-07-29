@@ -12,4 +12,4 @@ def test_RBF():
     x = torch.randn(N, n_dim)
     y = torch.randn(N, n_dim)
     blr(x)
-    blr.update(y, x, 1.)
+    blr.kalman(y, x, 1.)

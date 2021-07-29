@@ -7,80 +7,138 @@ y = Hx + v(R)
 from typing import Tuple
 
 import torch
-from torch import Tensor
+from torch import Tensor, linalg
 
 from .numerical import positivize
-from .util import symmetric
 
 
 @torch.no_grad()
 def predict(
         x: Tensor,
-        P: Tensor,
+        V: Tensor,
         A: Tensor,
         Q: Tensor,
         H: Tensor,
-        R: Tensor) -> Tuple:
+        R: Tensor,
+        cholesky=True,
+) -> Tuple:
     """
     x(t) | x(t-1), P(t-1), u(t), A, B, Q
     :param x: previous state, (xdim, batch)
-    :param P: previous posteriori covariance, (xdim, xdim)
+    :param V: previous posteriori covariance, (xdim, xdim)
     :param A: transition matrix, (xdim, xdim)
     :param Q: state noise covariance, (xdim, xdim)
     :param H: observation matrix, (ydim, xdim)
     :param R: observation noise covariance, (ydim, ydim)
+    :param cholesky: True if V is Cholesky form, default=True
     :return:
         yhat: predicted observation, (ydim, batch)
         xhat: predicted mean, (xdim, batch)
-        Phat: predicted covariance, (xdim, xdim)  # only depends on A
+        Vhat: predicted covariance or its Choleksy, (xdim, xdim)
     """
     n_sample = H.shape[0]
     xhat = A.mm(x)  # Ax
-    L = torch.linalg.cholesky(P)
+    if cholesky:
+        L = V
+    else:
+        L = linalg.cholesky(V)
     AL = A.mm(L)
-    Phat = AL.mm(AL.t()) + n_sample * Q  # APA' + Q, n samples one step equivalent to one sample n steps
-    # assert symmetric(Phat), 'Phat is asymmetric'
-    # Phat = positivize(Phat)
+    Vhat = AL.mm(AL.t()) + n_sample * Q  # APA' + Q, n samples one step equivalent to one sample n steps
     yhat = H.mm(xhat)
-    return yhat, xhat, Phat
+    if cholesky:
+        Vhat = linalg.cholesky(Vhat)
+    return yhat, xhat, Vhat
 
 
 @torch.no_grad()
 def update(y: Tensor,
            yhat: Tensor,
            xhat: Tensor,
-           Phat: Tensor,
+           Vhat: Tensor,
            H: Tensor,
-           R: Tensor) -> Tuple:
+           R: Tensor,
+           cholesky=True,
+           ) -> Tuple:
     """
     :param y: measurement, (ydim,)
     :param yhat: predicted measurement, (ydim,)
     :param xhat: predicted state, (xdim,)
-    :param Phat: predicted covariance, (xdim, xdim)
+    :param Vhat: predicted covariance, (xdim, xdim)
     :param H: measurement matrix, (ydim, xdim)
     :param R: measurement noise covariance, (ydim, ydim)
+    :param cholesky: True if Vhat is Cholesky form, default=True
     :return:
         x: posterior mean, (xdim, batch)
-        P: posterior covariance, (xdim, xdim)
+        V: posterior covariance or its Cholesky, (xdim, xdim)
     """
-    # eye = torch.eye(Phat.shape[0])
     e = y - yhat
-    L = torch.linalg.cholesky(Phat)
-    HL = H.mm(L)
-    # S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
-    S = HL.mm(HL.t()) + R
-    # assert symmetric(S), 'S is asymmetric'
-    # S = positivize(S)
-    # L = torch.linalg.cholesky(S)
-    # K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}
-    # x = xhat + K.mm(e)  # x + Ke
-    # P = (eye - K.mm(H)).mm(Phat)  # (I - KH)P
-    # P = positivize(P)
+    if cholesky:
+        Lhat = Vhat
+        Vhat = Lhat.mm(Lhat.t())
+    else:
+        Lhat = linalg.cholesky(Vhat)
+    HL = H.mm(Lhat)
+    S = HL.mm(HL.t()) + R  # HVH' + R
 
-    L = torch.linalg.cholesky(S)
-    K = H.cholesky_solve(L).mm(Phat)  # L^{-1}HP
-    x = xhat + K.t().mm(e.cholesky_solve(L))
-    P = Phat - K.t().mm(K)  # minus is dangerous
-    P = positivize(P)
-    # assert symmetric(P), 'P is asymmetric'
-    return x, P
+    L = linalg.cholesky(S)
+    # K = H.cholesky_solve(L).mm(Vhat)  # L^{-1}HV
+    # K = H.mm(Vhat).cholesky_solve(L)  # L^{-1}HV
+    G = H.mm(Vhat).cholesky_solve(L).t()  # L^{-1}HV, gain K = VH'S^{-1} = VH'(LL')^{-1} = VH'L'^{-1}L^{-1} = G L^{-1}
+
+    x = xhat + G.mm(e.cholesky_solve(L))
+    V = Vhat - G.mm(G.t())  # minus is dangerous
+    V = positivize(V)
+    # assert symmetric(V), 'V is asymmetric'
+    if cholesky:
+        try:
+            V = linalg.cholesky(V)
+        except RuntimeError:
+            print('Singular covariance', torch.linalg.eigvalsh(V))
+
+    return x, V
+
+
+@torch.no_grad()
+def joseph_update(y: Tensor,
+                  yhat: Tensor,
+                  xhat: Tensor,
+                  Vhat: Tensor,
+                  H: Tensor,
+                  R: Tensor,
+                  cholesky=True,
+                  ) -> Tuple:
+    """
+    :param y: measurement, (ydim,)
+    :param yhat: predicted measurement, (ydim,)
+    :param xhat: predicted state, (xdim,)
+    :param Vhat: predicted covariance, (xdim, xdim)
+    :param H: measurement matrix, (ydim, xdim)
+    :param R: measurement noise covariance, (ydim, ydim)
+    :param cholesky: True if Vhat is Cholesky form, default=True
+    :return:
+        x: posterior mean, (xdim, batch)
+        V: posterior covariance or its Cholesky, (xdim, xdim)
+    """
+    e = y - yhat
+    if cholesky:
+        Lhat = Vhat
+        Vhat = Lhat.mm(Lhat.t())
+    else:
+        Lhat = linalg.cholesky(Vhat)
+    HL = H.mm(Lhat)
+    S = HL.mm(HL.t()) + R  # HVH' + R
+
+    L = linalg.cholesky(S)
+    G = H.mm(Vhat).cholesky_solve(L).t()  # L^{-1}HV, gain K = VH'S^{-1} = VH'(LL')^{-1} = VH'L'^{-1}L^{-1} = G L^{-1}
+    x = xhat + G.mm(e.cholesky_solve(L))
+    # V = (I - KH) Vhat (I - KH)' + K R K'
+    eye = torch.eye(Vhat.shape[0])
+    IminusKH = eye - G.mm(H.cholesky_solve(L))
+    IminusKHLhat = IminusKH.mm(Lhat)
+    KR = G.mm(R.sqrt().cholesky_solve(L))  # R's supposed to be diagonal
+    V = IminusKHLhat.mm(IminusKHLhat.t()) + KR.mm(KR.t())
+    if cholesky:
+        V = linalg.cholesky(V)
+        print(torch.linalg.eigvalsh(V))
+
+    return x, V
