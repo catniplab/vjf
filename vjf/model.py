@@ -291,7 +291,8 @@ class RBFDS(Module):
     @torch.no_grad()
     def update(self, xs: Tensor, xt: Tensor):
         """Train regression"""
-        self.velocity.kalman(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        self.velocity.rls(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        # self.velocity.kalman(xs, xt - xs, torch.exp(self.logvar))  # model dx
 
     @torch.no_grad()
     def reset(self):

@@ -4,9 +4,8 @@ import torch
 from torch import Tensor, linalg
 from torch.nn import Parameter, Module, functional
 
-from .functional import rbf
 from . import kalman
-from .util import symmetric
+from .functional import rbf
 
 
 class RBF(Module):
@@ -43,32 +42,29 @@ class LinearRegression(Module):
         # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         self.w_precision = torch.eye(self.feature.n_feature)
+        self.w_pchol = torch.eye(self.feature.n_feature)
 
     def forward(self, x: Tensor, sampling=True) -> Tensor:
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
             # w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
-            w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
+            # w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
+            w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
         else:
             pass
             # V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
         return functional.linear(feat, w.t())  # do we need the intercept?
 
-    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], diffusion: float = 0.):
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], decay: float = 0.):
         """
         :param x: (sample, dim)
         :param target: (sample, dim)
         :param v: observation noise
-        :param diffusion: forgetfulness
+        :param decay: forgetfulness
         :return:
         """
-        eye = torch.eye(self.w_precision.shape[0])
-        P = self.w_precision
-        L = linalg.cholesky(P + 1 / diffusion * eye)
-        H = P.triangular_solve(L, upper=False).solution
-        P = P - H.t().mm(H)
-
+        P = self.w_precision * (1 - decay)
         feat = self.feature(x)  # (sample, feature)
         s = torch.sqrt(v)
         scaled_feat = feat / s
@@ -79,7 +75,8 @@ class LinearRegression(Module):
         assert torch.allclose(self.w_precision, self.w_precision.t())  # symmetric
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
         # self.w_precision = .5 * (self.w_precision + self.w_precision.t())  # make sure symmetric
-        self.w_mean = g.cholesky_solve(linalg.cholesky(self.w_precision))
+        self.w_pchol = linalg.cholesky(self.w_precision)
+        self.w_mean = g.cholesky_solve(self.w_pchol)
         # (feature, feature) (feature, output) => (feature, output)
 
     @torch.no_grad()
