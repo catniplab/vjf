@@ -12,7 +12,7 @@ from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
 from .recognition import Gaussian, Recognition
-from .util import reparametrize, symmetric
+from .util import reparametrize, symmetric, running_var
 from .numerical import positivize
 
 
@@ -150,7 +150,8 @@ class VJF(Module):
     @torch.no_grad()
     def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor):
         # non gradient
-        self.transition.update(xs, xt)
+        # self.transition.update(xs, xt)
+        self.likelihood.update(py, y)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, debug=False):
@@ -204,7 +205,7 @@ class VJF(Module):
                 for yt, ut in zip_longest(y, u):
                     q, loss, *elbos = self.filter(yt, ut, q,
                                                   sgd=True,
-                                                  update=False, debug=debug)
+                                                  update=True, debug=debug)
                     losses.append(loss)
                     q_seq.append(q)
                     if debug:
@@ -263,6 +264,7 @@ class RBFDS(Module):
         self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(-5.), requires_grad=False))  # state noise
+        self.n_sample = 0  # sample counter
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 1e-2) -> Tensor:
         if u is None:
@@ -290,8 +292,14 @@ class RBFDS(Module):
     @torch.no_grad()
     def update(self, xs: Tensor, xt: Tensor):
         """Train regression"""
-        self.velocity.rls(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        dx = xt - xs
+        self.velocity.rls(xs, dx, torch.exp(self.logvar))  # model dx
         # self.velocity.kalman(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        residual = dx - self.velocity(xs, sampling=False)
+        mse = residual.pow(2).mean()
+        var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0])
+        self.logvar.data = var.log()
+        self.n_sample = n_sample
 
     @torch.no_grad()
     def reset(self):

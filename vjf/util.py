@@ -11,3 +11,21 @@ def reparametrize(q: Tuple[Tensor, Tensor]) -> Tensor:
 
 def symmetric(a: Tensor) -> bool:
     return torch.allclose(a, a.transpose(-1, -2))
+
+
+def running_var(acc_var, acc_size, new_var, new_size, *, size_cap=1000):
+    """Running Variance
+    :param acc_var:
+    :param acc_size:
+    :param new_var:
+    :param new_size:
+    :param size_cap:
+    :return:
+    """
+    acc_size = min(acc_size, size_cap)
+    tot_size = acc_size + new_size
+    f1 = acc_size / tot_size
+    f2 = new_size / tot_size
+    acc_var = f1 * acc_var + f2 * new_var
+    # print(acc_var.item(), tot_size)
+    return acc_var, tot_size
