@@ -272,7 +272,6 @@ class RBFDS(Module):
             xu = torch.cat((x, u), dim=-1)
 
         return (1 - leak) * x + self.velocity(xu, sampling=sampling)  # model dx
-        # return self.velocity(xu, sampling=sampling)  # model f(x)
 
     def simulate(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())

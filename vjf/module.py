@@ -48,9 +48,8 @@ class LinearRegression(Module):
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
-            # w = w + torch.randn_like(w).cholesky_solve(self.w_cholesky)  # sampling
-            # w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
-            w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
+            w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
+            # w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
         else:
             pass
             # V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
@@ -77,6 +76,7 @@ class LinearRegression(Module):
         # self.w_precision = .5 * (self.w_precision + self.w_precision.t())  # make sure symmetric
         self.w_pchol = linalg.cholesky(self.w_precision)
         self.w_mean = g.cholesky_solve(self.w_pchol)
+        self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
         # (feature, feature) (feature, output) => (feature, output)
 
     @torch.no_grad()
