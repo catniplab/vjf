@@ -83,11 +83,12 @@ def update(y: Tensor,
     L = linalg.cholesky(S)
     # K = H.cholesky_solve(L).mm(Vhat)  # L^{-1}HV
     # K = H.mm(Vhat).cholesky_solve(L)  # L^{-1}HV
-    G = H.mm(Vhat).cholesky_solve(L).t()  # L^{-1}HV, gain K = VH'S^{-1} = VH'(LL')^{-1} = VH'L'^{-1}L^{-1} = G L^{-1}
+    G = H.mm(Vhat).triangular_solve(L, upper=False).solution.t()
+    # G' = L^{-1}HV, gain K = VH'S^{-1} = VH'(LL')^{-1} = VH'L'^{-1}L^{-1} = G L^{-1}
 
-    x = xhat + G.mm(e.cholesky_solve(L))
+    x = xhat + G.mm(e.triangular_solve(L, upper=False).solution)
     V = Vhat - G.mm(G.t())  # minus is dangerous
-    V = positivize(V)
+    # V = positivize(V)
     # assert symmetric(V), 'V is asymmetric'
     if cholesky:
         try:
