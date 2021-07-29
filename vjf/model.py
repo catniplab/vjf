@@ -61,12 +61,15 @@ class VJF(Module):
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
         lr = 1e-4
-        self.optimizer = SGD([
-            {'params': self.likelihood.parameters(), 'lr': lr},
-            {'params': self.decoder.parameters(), 'lr': lr},
-            {'params': self.transition.parameters(), 'lr': lr},
-            {'params': self.recognition.parameters(), 'lr': lr},
-        ])
+        self.optimizer = SGD(
+            [
+                {'params': self.likelihood.parameters(), 'lr': lr},
+                {'params': self.decoder.parameters(), 'lr': lr},
+                {'params': self.transition.parameters(), 'lr': lr},
+                {'params': self.recognition.parameters(), 'lr': lr},
+            ],
+            lr=lr,
+        )
         self.scheduler = ExponentialLR(self.optimizer, 0.9)  # TODO: argument gamma
 
     def prior(self, y: Tensor) -> Gaussian:
@@ -98,8 +101,8 @@ class VJF(Module):
         # encode
         if qs is None:
             qs = self.prior(y)
-        # else:
-        qs = detach(qs)
+        else:
+            qs = detach(qs)
 
         xs = reparametrize(qs)
         pt = self.transition(xs, u)
@@ -110,7 +113,7 @@ class VJF(Module):
 
         # decode
         xt = reparametrize(qt)
-        py = self.decoder(qt)
+        py = self.decoder(xt)
         # py = self.decoder(qt.mean)
 
         return xs, pt, qt, xt, py
@@ -259,7 +262,7 @@ class RBFDS(Module):
         super().__init__()
         self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
         self.register_parameter('logvar',
-                                Parameter(2 * torch.tensor(.1).log(), requires_grad=False))  # state noise
+                                Parameter(torch.tensor(-5.), requires_grad=False))  # state noise
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 1e-2) -> Tensor:
         if u is None:
@@ -287,13 +290,7 @@ class RBFDS(Module):
 
     @torch.no_grad()
     def update(self, xs: Tensor, xt: Tensor):
-        try:
-            self.linreg.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
-        except:
-            print('Update failed')
-        # self.linreg.Q *= 0.9
-        # self.linreg.update(xs, xt, torch.exp(-self.logvar))
-        # self.logvar *= 0.99
+        self.linreg.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
 
     @torch.no_grad()
     def reset(self):

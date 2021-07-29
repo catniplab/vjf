@@ -12,7 +12,7 @@ class GaussianLikelihood(Module):
 
     def __init__(self):
         super().__init__()
-        self.register_parameter('logvar', Parameter(torch.tensor(1.).log(), requires_grad=True))
+        self.register_parameter('logvar', Parameter(torch.tensor(.1).log(), requires_grad=False))
 
     def loss(self, eta: Tensor, target: Tensor) -> Tensor:
         """

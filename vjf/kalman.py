@@ -9,10 +9,11 @@ from typing import Tuple
 import torch
 from torch import Tensor
 
-from vjf.util import symmetric
-from vjf.numerical import symmetrize, positivize
+from .numerical import positivize
+from .util import symmetric
 
 
+@torch.no_grad()
 def predict(
         x: Tensor,
         P: Tensor,
@@ -35,14 +36,15 @@ def predict(
     """
     xhat = A.mm(x)  # Ax
     L = torch.linalg.cholesky(P)
-    AL = A @ L
-    Phat = AL @ AL.transpose(-1, -2) + Q  # APA' + Q
-    assert symmetric(Phat)
+    AL = A.mm(L)
+    Phat = AL.mm(AL.t()) + Q  # APA' + Q
+    # assert symmetric(Phat), 'Phat is asymmetric'
     # Phat = positivize(Phat)
     yhat = H.mm(xhat)
     return yhat, xhat, Phat
 
 
+@torch.no_grad()
 def update(y: Tensor,
            yhat: Tensor,
            xhat: Tensor,
@@ -63,10 +65,10 @@ def update(y: Tensor,
     # eye = torch.eye(Phat.shape[0])
     e = y - yhat
     L = torch.linalg.cholesky(Phat)
-    HL = H @ L
+    HL = H.mm(L)
     # S = torch.linalg.multi_dot((H, Phat, H.t())) + R  # HPH' + R
-    S = HL @ HL.transpose(-1, -2) + R
-    assert symmetric(S)
+    S = HL.mm(HL.t()) + R
+    # assert symmetric(S), 'S is asymmetric'
     # S = positivize(S)
     # L = torch.linalg.cholesky(S)
     # K = Phat.mm(H.cholesky_solve(L).t())  # filter gain, PH'S^{-1}
@@ -75,8 +77,9 @@ def update(y: Tensor,
     # P = positivize(P)
 
     L = torch.linalg.cholesky(S)
-    K = H.mm(Phat).cholesky_solve(L)  # L^{-1}HP
+    K = H.cholesky_solve(L).mm(Phat)  # L^{-1}HP
     x = xhat + K.t().mm(e.cholesky_solve(L))
-    P = Phat - K.t().mm(K)  #
-    assert symmetric(P)
+    P = Phat - K.t().mm(K)  # minus is dangerous
+    P = positivize(P)
+    # assert symmetric(P), 'P is asymmetric'
     return x, P

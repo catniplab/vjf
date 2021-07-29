@@ -16,7 +16,7 @@ class RBF(Module):
         self.n_basis = n_basis
         self.intercept = intercept
         self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
-        self.register_parameter('logwidth', Parameter(torch.log(torch.ones(n_basis) * 2), requires_grad=False))
+        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
 
     @property
     def n_feature(self):
@@ -45,7 +45,7 @@ class LinearRegression(Module):
         # self.w_precision = torch.eye(self.feature.n_feature)
         self.Q = torch.eye(self.feature.n_feature)  # for Kalman
 
-    def forward(self, x: Tensor, sampling=False) -> Tensor:
+    def forward(self, x: Tensor, sampling=True) -> Tensor:
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
@@ -78,18 +78,20 @@ class LinearRegression(Module):
 
     @torch.no_grad()
     def update(self, x: Tensor, target: Tensor, v: Union[Tensor, float]):
-        A = torch.eye(self.w_mean.shape[0])  # (feature, feature)
+        eye = torch.eye(self.w_mean.shape[0])  # (feature, feature)
+        A = eye
         H = self.feature(x)  # (sample, feature)
         R = torch.eye(H.shape[0]) * v  # (feature, feature)
         m = self.w_mean
         S = self.w_cov
         yhat, mhat, Phat = kalman.predict(m, S, A, self.Q, H, R)
-        assert symmetric(Phat)
         m, S = kalman.update(target, yhat, mhat, Phat, H, R)
-        assert symmetric(S)
         self.w_mean = m
-        self.w_cov = S
-        self.w_chol = torch.linalg.cholesky(S)
+        try:
+            self.w_chol = torch.linalg.cholesky(S)
+            self.w_cov = S
+        except RuntimeError:
+            print('Singular covariance', torch.linalg.eigvalsh(S))
         # U, s, Vh = torch.linalg.svd(S)
         # self.w_chol = U.mm(torch.diag(s.sqrt())).mm(Vh)
 
