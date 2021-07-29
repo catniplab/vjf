@@ -260,7 +260,7 @@ class VJF(Module):
 class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
-        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(-5.), requires_grad=False))  # state noise
 
@@ -271,8 +271,8 @@ class RBFDS(Module):
             u = torch.atleast_2d(u)
             xu = torch.cat((x, u), dim=-1)
 
-        return (1 - leak) * x + self.linreg(xu, sampling=sampling)  # model dx
-        # return self.linreg(xu, sampling=sampling)  # model f(x)
+        return (1 - leak) * x + self.velocity(xu, sampling=sampling)  # model dx
+        # return self.velocity(xu, sampling=sampling)  # model f(x)
 
     def simulate(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
@@ -290,11 +290,13 @@ class RBFDS(Module):
 
     @torch.no_grad()
     def update(self, xs: Tensor, xt: Tensor):
-        self.linreg.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
+        """Train regression"""
+        self.velocity.update(xs, xt - xs, torch.exp(self.logvar))  # model dx
 
     @torch.no_grad()
     def reset(self):
-        self.linreg.reset()
+        """Reset posterior"""
+        self.velocity.reset()
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
         return gaussian_loss(xt, pt, self.logvar)

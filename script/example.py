@@ -86,7 +86,7 @@ lds = RBFDS(100, 3, 0)
 # p = x + blr(x)
 for i in range(5):
     lds.update(x0, x1 + torch.randn_like(x1))
-    print(lds.linreg.w_precision.diagonal().mean())
+    print(lds.velocity.w_precision.diagonal().mean())
 
 p = lds(x0, sampling=True)
 p = p.detach().numpy().reshape(216, -1, 3)
