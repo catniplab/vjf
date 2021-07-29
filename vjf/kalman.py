@@ -34,10 +34,11 @@ def predict(
         xhat: predicted mean, (xdim, batch)
         Phat: predicted covariance, (xdim, xdim)  # only depends on A
     """
+    n_sample = H.shape[0]
     xhat = A.mm(x)  # Ax
     L = torch.linalg.cholesky(P)
     AL = A.mm(L)
-    Phat = AL.mm(AL.t()) + Q  # APA' + Q
+    Phat = AL.mm(AL.t()) + n_sample * Q  # APA' + Q, n samples one step equivalent to one sample n steps
     # assert symmetric(Phat), 'Phat is asymmetric'
     # Phat = positivize(Phat)
     yhat = H.mm(xhat)
