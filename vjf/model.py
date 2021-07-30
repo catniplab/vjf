@@ -2,7 +2,7 @@ from itertools import zip_longest
 from typing import Tuple, Sequence, Union
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor, nn, linalg
 from torch.nn import Module, Linear, Parameter
 from torch.optim import SGD
 from torch.optim.lr_scheduler import ExponentialLR
@@ -20,8 +20,10 @@ class LinearDecoder(Module):
     def __init__(self, xdim: int, ydim: int):
         super().__init__()
         self.add_module('decode', Linear(xdim, ydim))
+        self.XX = torch.zeros(xdim + 1, xdim + 1)
+        self.n_sample = 0
 
-    def forward(self, x):
+    def forward(self, x: Union[Tensor, Tuple]) -> Union[Tensor, Tuple]:
         if isinstance(x, Tensor):
             return self.decode(x)
         elif isinstance(x, Gaussian):
@@ -36,6 +38,22 @@ class LinearDecoder(Module):
             return Gaussian(mean, v.log())
         else:
             raise NotImplementedError
+
+    @torch.no_grad()
+    def update(self, x: Tensor, y: Tensor, *, decay=0.5):
+        w = torch.column_stack((self.decode.bias.data, self.decode.weight.data)).t()
+        n, xdim = x.shape
+        x = torch.column_stack((torch.ones(n), x))
+        xx = x.t().mm(x)
+        g = self.XX.mm(w * (1 - decay)) + x.t().mm(y)
+        self.XX += xx
+        if self.n_sample > xdim:
+            self.requires_grad_(False)
+            w = g.cholesky_solve(linalg.cholesky(self.XX))
+            b, C = w.split([1, xdim])
+            self.decode.bias.data = b.squeeze()
+            self.decode.weight.data = C.t()
+        self.n_sample += n
 
 
 def detach(q: Gaussian) -> Gaussian:
@@ -71,6 +89,14 @@ class VJF(Module):
             lr=lr,
         )
         self.scheduler = ExponentialLR(self.optimizer, 0.9)  # TODO: argument gamma
+
+        # if isinstance(self.likelihood, GaussianLikelihood):
+        #     self.decoder.requires_grad_(False)
+        #     # print(self.decoder.decode.weight.shape,
+        #     #       self.decoder.decode.bias.shape,
+        #     #       )
+        #     nn.init.zeros_(self.decoder.decode.weight)
+        #     nn.init.zeros_(self.decoder.decode.bias)
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -151,6 +177,8 @@ class VJF(Module):
     def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor):
         # non gradient
         # self.transition.update(xs, xt)
+        # if isinstance(self.likelihood, GaussianLikelihood):
+        #     self.decoder.update(qt.mean, y)
         self.likelihood.update(py, y)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
@@ -185,7 +213,7 @@ class VJF(Module):
 
         return qt, loss, *elbos
 
-    def fit(self, y, u=None, *, max_iter=1, beta=0.1, offline=False, debug=True):
+    def fit(self, y, u=None, *, max_iter=1, beta=0.1, offline=False, debug=True, warm_up=50):
         y = torch.as_tensor(y)
         y = torch.atleast_2d(y)
         if u is None:
