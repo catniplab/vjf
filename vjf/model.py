@@ -145,9 +145,7 @@ class VJF(Module):
         return xs, pt, qt, xt, py
 
     def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor,
-             components: bool = False, full: bool = False) -> Union[Tensor, Tuple]:
-        if full:
-            raise NotImplementedError
+             components: bool = False, warm_up: bool = False) -> Union[Tensor, Tuple]:
 
         # recon
         l_recon = self.likelihood.loss(py, y)
@@ -160,7 +158,9 @@ class VJF(Module):
         assert torch.isfinite(l_dynamics), l_dynamics.item()
         assert torch.isfinite(h), h.item()
 
-        loss = l_recon - h  # + l_dynamics
+        loss = l_recon - h
+        if not warm_up:
+            loss = loss + l_dynamics
 
         # print(-l_recon, -l_dynamics, h)
         # print('loss', loss.item())
@@ -174,15 +174,28 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor):
-        # non gradient
-        # self.transition.update(xs, xt)
-        # if isinstance(self.likelihood, GaussianLikelihood):
-        #     self.decoder.update(qt.mean, y)
-        self.likelihood.update(py, y)
+    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor, *,
+               likelhood=True, decoder=True, transition=True, recognition=True):
+        """Learning without gradient
+        :param y:
+        :param xs:
+        :param pt:
+        :param qt:
+        :param xt:
+        :param py:
+        :param likelhood:
+        :param decoder:
+        :param transition:
+        :param recognition:
+        :return:
+        """
+        if likelhood:
+            self.likelihood.update(py, y)
+        if transition:
+            self.transition.update(xs, xt)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, debug=False):
+               sgd: bool = True, update: bool = True, debug: bool = False, warm_up: bool = False):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -190,7 +203,8 @@ class VJF(Module):
         :param qs: previos posterior. use prior if None, otherwise detached.
         :param sgd: flag to enable gradient step
         :param update: flag to update DS
-        :param debug:
+        :param debug: verbose output
+        :param warm_up: do not learn dynamics if True, default=False
         :return:
             qt: posterior
             loss: negative eblo
@@ -202,19 +216,30 @@ class VJF(Module):
             u = torch.atleast_2d(u)
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
-        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug)
+        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug, warm_up=warm_up)
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
         if update:
-            self.update(y, xs, pt, qt, xt, py)  # non-gradient step
+            self.update(y, xs, pt, qt, xt, py, transition=not warm_up)  # non-gradient step
 
         return qt, loss, *elbos
 
-    def fit(self, y, u=None, *, max_iter=1, beta=0.1, offline=False, debug=True, warm_up=50):
-        y = torch.as_tensor(y)
+    def fit(self, y: Tensor, u: Union[None, Tensor] = None, *,
+            max_iter: int = 1, beta: float = 0.1, debug: bool = True, warm_up: int = 50):
+        """
+        :param y: observation, (time, ..., dim)
+        :param u: control input, None if
+        :param max_iter: maximum number of epochs
+        :param beta: discounting factor for running loss, large weight on current epoch loss for small value
+        :param debug: verbose output
+        :param warm_up: number of epochs for warm up (not learn dynamics)
+        :return:
+            q_seq: list of posterior each step
+        """
+        y = torch.as_tensor(y, dtype=torch.get_default_dtype())
         y = torch.atleast_2d(y)
         if u is None:
             u = [None]
@@ -233,11 +258,14 @@ class VJF(Module):
                 for yt, ut in zip_longest(y, u):
                     q, loss, *elbos = self.filter(yt, ut, q,
                                                   sgd=True,
-                                                  update=True, debug=debug)
+                                                  update=True,
+                                                  debug=debug,
+                                                  warm_up=not update_ds,
+                                                  )
                     losses.append(loss)
                     q_seq.append(q)
                     if debug:
-                        progress.set_postfix({'Update': str(update_ds),
+                        progress.set_postfix({'Warm up': str(not update_ds),
                                               'Loss': running_loss.item(),
                                               'Recon': elbos[0].item(),
                                               'Dynamics': elbos[1].item(),
@@ -246,28 +274,23 @@ class VJF(Module):
                                               'obs noise': self.likelihood.logvar.exp().item(),
                                               })
 
-                total_loss = sum(losses) / len(losses)
-                print(f'{update_ds}, {total_loss.item():.4f}, {self.transition.logvar.exp():.4f}')
+                epoch_loss = sum(losses) / len(losses)
+                print(f'Epoch loss: {epoch_loss.item():.4f}, State noise var: {self.transition.logvar.exp():.4f}')
 
-                if total_loss.isclose(running_loss, rtol=1e-4):
-                    print('Converged.')
-                    break
-                #     if update_ds:
-                #         break
-                #     else:
-                #         update_ds = True
-                # else:
-                #     if update_ds:
-                #         update_ds = False
-                #         # self.transition.reset()
+                if update_ds:
+                    if epoch_loss.isclose(running_loss, rtol=1e-4):
+                        print('Converged.')
+                        break
+                else:
+                    if i == warm_up or epoch_loss.isclose(running_loss, rtol=1e-4):
+                        print('Warm up stopped.')
+                        self.decoder.requires_grad_(False)  # freeze decoder after warm up
+                        update_ds = True
+                        m = torch.stack([q.mean for q in q_seq]).squeeze()
+                        self.transition.initialize(m)
+                        self.transition.update(m[:-1], m[1:])
 
-                # if offline:
-                #     self.optimizer.zero_grad()
-                #     total_loss.backward()
-                #     self.optimizer.step()
-
-                # progress.set_postfix({'Loss': total_loss.item()})
-                running_loss = beta * running_loss + (1 - beta) * total_loss if i > 0 else total_loss
+                running_loss = beta * running_loss + (1 - beta) * epoch_loss if i > 0 else epoch_loss
 
                 self.scheduler.step()
 
