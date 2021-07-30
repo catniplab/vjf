@@ -43,7 +43,7 @@ def predict(
     else:
         L = linalg.cholesky(V)
     AL = A.mm(L)
-    Vhat = AL.mm(AL.t()) + n_sample * Q  # APA' + Q, n samples one step equivalent to one sample n steps
+    Vhat = AL.mm(AL.t()) + Q  # APA' + Q, n samples one step equivalent to one sample n steps
     yhat = H.mm(xhat)
     if cholesky:
         Vhat = linalg.cholesky(Vhat)
@@ -140,6 +140,6 @@ def joseph_update(y: Tensor,
     V = IminusKHLhat.mm(IminusKHLhat.t()) + KR.mm(KR.t())
     if cholesky:
         V = linalg.cholesky(V)
-        print(torch.linalg.eigvalsh(V))
+        # print(torch.linalg.eigvalsh(V))
 
     return x, V

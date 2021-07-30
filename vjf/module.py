@@ -7,6 +7,7 @@ from torch.nn import Parameter, Module, functional
 
 from . import kalman
 from .functional import rbf
+from .recognition import Gaussian
 
 
 class RBF(Module):
@@ -43,18 +44,19 @@ class LinearRegression(Module):
         # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         self.w_precision = torch.eye(self.feature.n_feature)
-        self.w_pchol = torch.eye(self.feature.n_feature)
+        self.w_pchol = linalg.cholesky(self.w_precision)
 
-    def forward(self, x: Tensor, sampling=True) -> Tensor:
+    def forward(self, x: Tensor, sampling=True) -> Union[Tensor, Gaussian]:
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
             w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
             # w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
+            return functional.linear(feat, w.t())
         else:
-            pass
-            # V = torch.linalg.multi_dot((feat, self.w_cov, feat.t()))
-        return functional.linear(feat, w.t())  # do we need the intercept?
+            FL = feat.mm(self.w_chol)
+            logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
+            return Gaussian(functional.linear(feat, w.t()), logvar)
 
     def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], decay: float = 0.):
         """
@@ -64,7 +66,8 @@ class LinearRegression(Module):
         :param decay: forgetfulness
         :return:
         """
-        P = self.w_precision * (1 - decay)
+        # eye = torch.eye(self.w_precision.shape[0])
+        P = self.w_precision
         feat = self.feature(x)  # (sample, feature)
         s = torch.sqrt(v)
         scaled_feat = feat / s
@@ -107,15 +110,13 @@ class LinearRegression(Module):
         R = torch.eye(H.shape[0]) * v  # (feature, feature)
 
         yhat, mhat, Vhat = kalman.predict(self.w_mean, self.w_chol, A, Q, H, R)
-        self.w_mean, self.w_chol = kalman.update(target, yhat, mhat, Vhat, H, R)
-        # self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
+        # self.w_mean, self.w_chol = kalman.update(target, yhat, mhat, Vhat, H, R)
+        self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
 
     @torch.no_grad()
-    def initialize(self, x: Tensor):
-        self.w_mean = torch.zeros_like(self.w_mean)
-        # self.w_cov = torch.eye(self.feature.n_feature)
-        self.w_chol = torch.eye(self.feature.n_feature)
-
+    def initialize(self, x: Tensor, target: Tensor, v):
         r = x.norm(dim=1).max().item()
         nn.init.uniform_(self.feature.centroid, a=-r, b=r)
         nn.init.constant_(self.feature.logwidth, math.log(r))
+        self.rls(x, target, v)
+        # self.kalman(x, target, torch.tensor(.1))
