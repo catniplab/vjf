@@ -1,7 +1,8 @@
+import math
 from typing import Union
 
 import torch
-from torch import Tensor, linalg
+from torch import Tensor, linalg, nn
 from torch.nn import Parameter, Module, functional
 
 from . import kalman
@@ -110,7 +111,11 @@ class LinearRegression(Module):
         # self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
 
     @torch.no_grad()
-    def reset(self):
+    def initialize(self, x: Tensor):
         self.w_mean = torch.zeros_like(self.w_mean)
         # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
+
+        r = x.norm(dim=1).max().item()
+        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        nn.init.constant_(self.feature.logwidth, math.log(r))

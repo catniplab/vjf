@@ -330,9 +330,8 @@ class RBFDS(Module):
         self.n_sample = n_sample
 
     @torch.no_grad()
-    def reset(self):
-        """Reset posterior"""
-        self.velocity.reset()
+    def initialize(self, x: Tensor):
+        self.velocity.initialize(x)
 
     def loss(self, pt: Tensor, xt: Tensor) -> Tensor:
         return gaussian_loss(xt, pt, self.logvar)
