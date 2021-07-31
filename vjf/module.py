@@ -74,7 +74,7 @@ class LinearRegression(Module):
         scaled_target = target / s
         g = P.mm(self.w_mean) + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
-        self.w_precision = P + scaled_feat.t().mm(scaled_feat)
+        self.w_precision = P * (1 - decay) + scaled_feat.t().mm(scaled_feat)
         assert torch.allclose(self.w_precision, self.w_precision.t())  # symmetric
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
         # self.w_precision = .5 * (self.w_precision + self.w_precision.t())  # make sure symmetric
