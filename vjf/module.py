@@ -58,7 +58,7 @@ class LinearRegression(Module):
             logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
             return Gaussian(functional.linear(feat, w.t()), logvar)
 
-    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], decay: float = 0.):
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
         """
         :param x: (sample, dim)
         :param target: (sample, dim)
@@ -72,9 +72,9 @@ class LinearRegression(Module):
         s = torch.sqrt(v)
         scaled_feat = feat / s
         scaled_target = target / s
-        g = P.mm(self.w_mean) + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
+        g = P.mm(self.w_mean) * shrink + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
-        self.w_precision = P * (1 - decay) + scaled_feat.t().mm(scaled_feat)
+        self.w_precision = P * shrink + scaled_feat.t().mm(scaled_feat)
         assert torch.allclose(self.w_precision, self.w_precision.t())  # symmetric
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
         # self.w_precision = .5 * (self.w_precision + self.w_precision.t())  # make sure symmetric
