@@ -63,7 +63,7 @@ class LinearRegression(Module):
         :param x: (sample, dim)
         :param target: (sample, dim)
         :param v: observation noise
-        :param decay: forgetfulness
+        :param shrink: forgetting factor, 1 meaning no forgetfulness. 0.98 ~ 1
         :return:
         """
         # eye = torch.eye(self.w_precision.shape[0])
