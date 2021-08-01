@@ -10,11 +10,12 @@ def test_RBFLDS():
     lds = RBFDS(n_rbf, xdim, udim)
 
     N = 20
+    u = torch.randn(N, udim)
     xu = torch.randn(N, xdim + udim)
     x = torch.randn(N, xdim)
 
     lds.loss(x, x)
-    lds.update(None, xu, None, None, x, None)
+    lds.update(x, x, u)
 
 
 def test_Recognition():

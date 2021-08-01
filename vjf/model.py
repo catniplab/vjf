@@ -12,7 +12,7 @@ from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
 from .recognition import Gaussian, Recognition
-from .util import reparametrize, symmetric, running_var
+from .util import reparametrize, symmetric, running_var, nonecat
 from .numerical import positivize
 
 
@@ -39,21 +39,21 @@ class LinearDecoder(Module):
         else:
             raise NotImplementedError
 
-    @torch.no_grad()
-    def update(self, x: Tensor, y: Tensor, *, decay=0.5):
-        w = torch.column_stack((self.decode.bias.data, self.decode.weight.data)).t()
-        n, xdim = x.shape
-        x = torch.column_stack((torch.ones(n), x))
-        xx = x.t().mm(x)
-        g = self.XX.mm(w * (1 - decay)) + x.t().mm(y)
-        self.XX += xx
-        if self.n_sample > xdim:
-            self.requires_grad_(False)
-            w = g.cholesky_solve(linalg.cholesky(self.XX))
-            b, C = w.split([1, xdim])
-            self.decode.bias.data = b.squeeze()
-            self.decode.weight.data = C.t()
-        self.n_sample += n
+    # @torch.no_grad()
+    # def update(self, x: Tensor, y: Tensor, *, decay=0.5):
+    #     w = torch.column_stack((self.decode.bias.data, self.decode.weight.data)).t()
+    #     n, xdim = x.shape
+    #     x = torch.column_stack((torch.ones(n), x))
+    #     xx = x.t().mm(x)
+    #     g = self.XX.mm(w * (1 - decay)) + x.t().mm(y)
+    #     self.XX += xx
+    #     if self.n_sample > xdim:
+    #         self.requires_grad_(False)
+    #         w = g.cholesky_solve(linalg.cholesky(self.XX))
+    #         b, C = w.split([1, xdim])
+    #         self.decode.bias.data = b.squeeze()
+    #         self.decode.weight.data = C.t()
+    #     self.n_sample += n
 
 
 def detach(q: Gaussian) -> Gaussian:
@@ -135,7 +135,7 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, qs)  # TODO: qs
+        qt = self.recognition(y, qs, u)  # TODO: qs
 
         # decode
         xt = reparametrize(qt)
@@ -168,7 +168,7 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor, *,
+    def update(self, y: Tensor, xs: Tensor, u: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor, *,
                likelhood=True, decoder=True, transition=True, recognition=True, warm_up=False):
         """Learning without gradient
         :param y:
@@ -186,7 +186,7 @@ class VJF(Module):
         if likelhood:
             self.likelihood.update(py, y)
         if transition:
-            self.transition.update(xs, xt, warm_up=warm_up)
+            self.transition.update(xt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, debug: bool = False, warm_up: bool = False):
@@ -217,7 +217,7 @@ class VJF(Module):
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
         if update:
-            self.update(y, xs, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
+            self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
 
         return qt, loss, *elbos
 
@@ -235,9 +235,10 @@ class VJF(Module):
         y = torch.as_tensor(y, dtype=torch.get_default_dtype())
         y = torch.atleast_2d(y)
         if u is None:
-            u = [None]
+            u_ = [None]
         else:
-            u = torch.as_tensor(u)
+            u_ = torch.as_tensor(u, dtype=torch.get_default_dtype())
+            u_ = torch.atleast_2d(u_)
 
         warm_up = True
         with trange(max_iter) as progress:
@@ -248,7 +249,7 @@ class VJF(Module):
                 losses = []
 
                 q = None  # use prior
-                for yt, ut in zip_longest(y, u):
+                for yt, ut in zip_longest(y, u_):
                     q, loss, *elbos = self.filter(yt, ut, q,
                                                   sgd=True,
                                                   update=True,
@@ -277,9 +278,8 @@ class VJF(Module):
                         running_loss = epoch_loss
                         print('Warm up stopped.')
                         self.decoder.requires_grad_(False)  # freeze decoder after warm up
-                        update_ds = True
                         m = torch.stack([q.mean for q in q_seq]).squeeze()
-                        self.transition.initialize(m[:-1], m[1:])
+                        self.transition.initialize(m[1:], m[:-1], u)
                         progress.reset()
                 else:
                     if epoch_loss.isclose(running_loss, rtol=1e-4):
@@ -301,7 +301,7 @@ class VJF(Module):
             likelihood = GaussianLikelihood()
 
         # model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes))
         return model
 
 
@@ -315,12 +315,7 @@ class RBFDS(Module):
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
         if not isinstance(x, Tensor):
             x, q = x
-        if u is None:
-            xu = x
-        else:
-            u = torch.atleast_2d(u)
-            xu = torch.cat((x, u), dim=-1)
-
+        xu = nonecat(x, u)
         dx = self.velocity(xu, sampling=sampling)
         if isinstance(dx, Gaussian):
             return Gaussian((1 - leak) * q.mean + dx.mean,
@@ -343,27 +338,29 @@ class RBFDS(Module):
         return x
 
     @torch.no_grad()
-    def update(self, xs: Tensor, xt: Tensor, *, warm_up=False):
+    def update(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *, warm_up=False):
         """Train regression"""
         xs = torch.atleast_2d(xs)
+        xu = nonecat(xs, ut)
         xt = torch.atleast_2d(xt)  # TODO: use qt, add qt.logvar to state noise
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xs, dx, self.logvar.exp(), decay=0.)  # model dx
+            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
-        residual = dx - self.velocity(xs, sampling=False).mean
+        residual = dx - self.velocity(xu, sampling=False).mean
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
         self.logvar.data = var.log()
         self.n_sample = n_sample
 
     @torch.no_grad()
-    def initialize(self, xs: Tensor, xt: Tensor):
+    def initialize(self, xt: Tensor, xs: Tensor, ut: Tensor = None):
         xs = torch.atleast_2d(xs)
         xt = torch.atleast_2d(xt)
+        xu = nonecat(xs, ut)
         mse = (xt - xs).pow(2).mean()
-        self.velocity.initialize(xs, xt - xs, mse)
-        d, V = self.velocity(xs, sampling=False)
+        self.velocity.initialize(xu, xt - xs, mse)
+        d, V = self.velocity(xu, sampling=False)
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()
 
