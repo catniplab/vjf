@@ -29,3 +29,11 @@ def running_var(acc_var, acc_size, new_var, new_size, *, size_cap=1000):
     acc_var = f1 * acc_var + f2 * new_var
     # print(acc_var.item(), tot_size)
     return acc_var, tot_size
+
+
+def nonecat(a: Tensor, u: Tensor):
+    au = torch.atleast_2d(a)
+    if u is not None:
+        u = torch.atleast_2d(u)
+        au = torch.cat((au, u), -1)
+    return au
