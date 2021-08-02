@@ -24,7 +24,7 @@ class LinearDecoder(Module):
         self.XX = torch.zeros(xdim + 1, xdim + 1)
         self.n_sample = 0
 
-    def forward(self, x: Union[Tensor, Tuple]) -> Union[Tensor, Tuple]:
+    def forward(self, x: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
         if isinstance(x, Tensor):
             return self.decode(x)
         elif isinstance(x, Gaussian):

@@ -21,7 +21,8 @@ def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
     return torch.exp(-.5 * d.pow(2))
 
 
-def gaussian_entropy(q: Tuple[Tensor, Tensor]) -> Tensor:
+def gaussian_entropy(q: Gaussian) -> Tensor:
+    """Gaussian entropy"""
     _, logvar = q
     assert logvar.ndim == 2
     return 0.5 * logvar.sum(-1).mean()
