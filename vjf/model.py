@@ -307,8 +307,8 @@ class VJF(Module):
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes))
         return model
 
-    def forecast(self, x0: Tensor, step=1, *, noise=False) -> Tuple[Tensor, Tensor]:
-        x = self.transition.forecast(x0, step, noise)
+    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
+        x = self.transition.forecast(x0, u, n_step, noise)
         y = self.decoder(y)
         return x, y
 
@@ -328,15 +328,22 @@ class RBFDS(Module):
         else:
             return (1 - leak) * x + dx
 
-    def forecast(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
+    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
-        x = torch.empty(step + 1, *x0.shape)
+        x = torch.empty(n_step + 1, *x0.shape)
         x[0] = x0
         s = torch.exp(.5 * self.logvar)
 
-        for t in range(step):
-            x[t + 1] = self.forward(x[t], sampling=True)
+        if u is None:
+            u = [None] * n_step
+        else:
+            u = torch.as_tensor(u, dtype=torch.get_default_dtype())
+            u = torch.atleast_2d(u)
+            assert u.shape[0] != n_step, 'u must have length of n_step if present'
+
+        for t in range(n_step):
+            x[t + 1] = self.forward(x[t], u[t], sampling=True)
             if noise:
                 x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
 
