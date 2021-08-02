@@ -307,6 +307,11 @@ class VJF(Module):
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes))
         return model
 
+    def forecast(self, x0: Tensor, step=1, *, noise=False) -> Tuple[Tensor, Tensor]:
+        x = self.transition.forecast(x0, step, noise)
+        y = self.decoder(y)
+        return x, y
+
 
 class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
@@ -323,7 +328,7 @@ class RBFDS(Module):
         else:
             return (1 - leak) * x + dx
 
-    def simulate(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
+    def forecast(self, x0: Tensor, step=1, *, noise=False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
         x = torch.empty(step + 1, *x0.shape)
