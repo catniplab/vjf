@@ -43,3 +43,17 @@ def nonecat(a: Tensor, u: Tensor):
         u = torch.atleast_2d(u)
         au = torch.cat((au, u), -1)
     return au
+
+
+def at_least2d(a: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
+    """
+    See torch.at_least2d
+    :param a: Tensor or Tuple
+    :return:
+    """
+    if isinstance(a, Tensor):
+        return torch.atleast_2d(a)
+    elif isinstance(a, Gaussian):
+        return Gaussian(torch.atleast_2d(a.mean), torch.atleast_2d(a.logvar))
+    else:
+        raise TypeError(a.__class__)
