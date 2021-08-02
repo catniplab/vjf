@@ -47,6 +47,13 @@ class LinearRegression(Module):
         self.w_pchol = linalg.cholesky(self.w_precision)
 
     def forward(self, x: Tensor, sampling=True) -> Union[Tensor, Gaussian]:
+        """
+        Predictive distribution or sample given predictor
+        :param x: predictor, supposed to be [x, u].
+        :param sampling: return a sample if True, default=True
+        :return:
+            predictive distribution or sample given sampling
+        """
         feat = self.feature(x)
         w = self.w_mean
         if sampling:
@@ -59,7 +66,7 @@ class LinearRegression(Module):
             return Gaussian(functional.linear(feat, w.t()), logvar)
 
     def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
-        """
+        """RLS weight update
         :param x: (sample, dim)
         :param target: (sample, dim)
         :param v: observation noise
