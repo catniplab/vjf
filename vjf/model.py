@@ -133,7 +133,7 @@ class VJF(Module):
             qs = detach(qs)
 
         xs = reparametrize(qs)
-        pt = self.transition(xs, u, sampling=True)
+        pt = self.transition(xs, u, sampling=False)
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
