@@ -65,6 +65,7 @@ def detach(q: Gaussian) -> Gaussian:
 class VJF(Module):
     def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module):
         """
+        Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
         :param transition: f(x[t-1], u[t]) -> x[t]
         :param recognition: y[t], f(x[t-1], u[t]) -> x[t]
@@ -174,6 +175,7 @@ class VJF(Module):
         """Learning without gradient
         :param y:
         :param xs:
+        :param u:
         :param pt:
         :param qt:
         :param xt:
@@ -182,6 +184,7 @@ class VJF(Module):
         :param decoder:
         :param transition:
         :param recognition:
+        :param warm_up:
         :return:
         """
         if likelhood:
