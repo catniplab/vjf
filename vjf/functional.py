@@ -5,6 +5,7 @@ from torch import Tensor, cdist
 from torch.nn import functional
 
 from .distribution import Gaussian
+from .util import at_least2d
 
 
 def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
@@ -26,31 +27,56 @@ def gaussian_entropy(q: Tuple[Tensor, Tensor]) -> Tensor:
     return 0.5 * logvar.sum(-1).mean()
 
 
-def gaussian_loss(x, mu, logvar):
-    x = torch.atleast_2d(x)
+def gaussian_loss(a, b, logvar):
+    """
+    Negative Gaussian log-likelihood
+    E_{a,b} [ 0.5 * (1/sigma^2 ||a - b||_2^2 + 2 * log(sigma)) ]
+    :param a: Tensor or Tuple
+    :param b: Tensor or Tuple
+    :param logvar: 2*log(sigma)
+    :return:
+        (expected) Gaussian loss
+    """
+    # a = torch.atleast_2d(a)
+    #
+    # if isinstance(b, Tensor):
+    #     b = torch.atleast_2d(b)
+    #     logv = None
+    # elif isinstance(b, Gaussian):
+    #     b, logv = b
+    # else:
+    #     raise TypeError
+    a = at_least2d(a)
+    b = at_least2d(b)
+
+    if isinstance(a, Tensor):
+        m1, logv1 = a, None
+    else:
+        m1, logv1 = a
+
+    if isinstance(b, Tensor):
+        m2, logv2 = b, None
+    else:
+        m2, logv2 = b
+
     p = torch.exp(-.5 * logvar)
 
-    if isinstance(mu, Tensor):
-        mu = torch.atleast_2d(mu)
-        logv = None
-    elif isinstance(mu, Gaussian):
-        mu, logv = mu
-    else:
-        raise TypeError
-
     # print(mu, logv)
-    mse = functional.mse_loss(x * p, mu * p, reduction='none')
+    mse = functional.mse_loss(m1 * p, m2 * p, reduction='none')
     assert mse.ndim == 2
     assert torch.all(torch.isfinite(mse)), mse
 
-    if logv is None:
-        nll = .5 * (mse + logvar)
+    nll = .5 * (mse + logvar)
+
+    if logv1 is None and logv2 is None:
+        trace = 0.
+    elif logv2 is None:
+        trace = torch.exp(logv1 - logvar)
+    elif logv1 is None:
+        trace = torch.exp(logv2 - logvar)
     else:
-        if logv.ndim == 2:
-            trace = torch.exp(logv - logvar)
-            assert torch.all(torch.isfinite(logv)), logv
-            assert torch.all(torch.isfinite(trace)), trace
-        else:
-            raise RuntimeError
-        nll = .5 * (mse + logvar + trace)
+        trace = torch.exp(logv1 + logv2 - logvar)
+
+    nll = nll + .5 * trace
+
     return nll.sum(-1).mean()
