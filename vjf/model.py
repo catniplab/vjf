@@ -63,18 +63,19 @@ def detach(q: Gaussian) -> Gaussian:
 
 
 class VJF(Module):
-    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module):
+    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module,
+                 *, lr_decay: float = .9):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
         :param transition: f(x[t-1], u[t]) -> x[t]
         :param recognition: y[t], f(x[t-1], u[t]) -> x[t]
+        :param lr_decay: multiplicative factor of learning rate decay
         """
         super().__init__()
         self.add_module('likelihood', likelihood)
         self.add_module('transition', transition)
         self.add_module('recognition', recognition)
-        # self.add_module('decoder', Linear(xdim, ydim))
         self.add_module('decoder', LinearDecoder(xdim, ydim))
 
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
@@ -90,7 +91,7 @@ class VJF(Module):
             ],
             lr=lr,
         )
-        self.scheduler = ExponentialLR(self.optimizer, 0.9)  # TODO: argument gamma
+        self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
 
         # if isinstance(self.likelihood, GaussianLikelihood):
         #     self.decoder.requires_grad_(False)
@@ -297,14 +298,15 @@ class VJF(Module):
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson'):
+                   likelihood: str = 'poisson', *args, **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
         # model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes))
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
+                    *args, **kwargs)
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
