@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Sequence
+from typing import Sequence, Union
 
 import torch
 from torch import Tensor
@@ -29,18 +29,15 @@ class Recognition(Module):
         self.add_module('logvar', Linear(hidden_sizes[-1], xdim, bias=True))
         # nn.init.zeros_(self.input_x.weight)
 
-    def forward(self, y: Tensor, xs: Tensor, u: Tensor = None) -> Gaussian:
+    def forward(self, y: Tensor, xs: Union[Tensor, Gaussian], u: Tensor = None) -> Gaussian:
         yu = nonecat(y, u)
         if isinstance(xs, Tensor):
             inputs = torch.cat((yu, xs), dim=-1)
-        else:
+        elif isinstance(xs, Gaussian):
             inputs = torch.cat((yu, *xs), dim=-1)
+        else:
+            raise TypeError
         output = self.mlp(inputs)
-        # mean, logvar = output.chunk(2, dim=-1)
         mean = self.mean(output)
         logvar = self.logvar(output)
-        # mean = torch.tanh(mean)
-        # mean = hardtanh(mean)
-        # mean = tanhshrink(mean)
-        # mean = mean + pt
         return Gaussian(mean, logvar)
