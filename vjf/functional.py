@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Union
 
 import torch
 from torch import Tensor, cdist
@@ -27,7 +27,7 @@ def gaussian_entropy(q: Tuple[Tensor, Tensor]) -> Tensor:
     return 0.5 * logvar.sum(-1).mean()
 
 
-def gaussian_loss(a, b, logvar):
+def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar: Tensor) -> Tensor:
     """
     Negative Gaussian log-likelihood
     E_{a,b} [ 0.5 * (1/sigma^2 ||a - b||_2^2 + 2 * log(sigma)) ]
@@ -37,15 +37,6 @@ def gaussian_loss(a, b, logvar):
     :return:
         (expected) Gaussian loss
     """
-    # a = torch.atleast_2d(a)
-    #
-    # if isinstance(b, Tensor):
-    #     b = torch.atleast_2d(b)
-    #     logv = None
-    # elif isinstance(b, Gaussian):
-    #     b, logv = b
-    # else:
-    #     raise TypeError
     a = at_least2d(a)
     b = at_least2d(b)
 
