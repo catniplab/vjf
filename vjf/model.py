@@ -137,12 +137,11 @@ class VJF(Module):
         # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, qs, u)  # TODO: qs
+        qt = self.recognition(y, qs, u)
 
         # decode
         xt = reparametrize(qt)
-        py = self.decoder(xt)
-        # py = self.decoder(qt.mean)
+        py = self.decoder(xt)  # NOTE: closed-form did not work well
 
         return xs, pt, qt, xt, py
 
@@ -317,13 +316,10 @@ class RBFDS(Module):
         self.n_sample = 0  # sample counter
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
-        if not isinstance(x, Tensor):
-            x, q = x
         xu = nonecat(x, u)
         dx = self.velocity(xu, sampling=sampling)
         if isinstance(dx, Gaussian):
-            return Gaussian((1 - leak) * q.mean + dx.mean,
-                            torch.log(dx.logvar.exp() + q.logvar.exp()))
+            return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
         else:
             return (1 - leak) * x + dx
 
