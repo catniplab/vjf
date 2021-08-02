@@ -1,7 +1,9 @@
-from typing import Tuple
+from typing import Tuple, Union
 
 import torch
 from torch import Tensor
+
+from .distribution import Gaussian
 
 
 def reparametrize(q: Tuple[Tensor, Tensor]) -> Tensor:

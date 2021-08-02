@@ -6,12 +6,11 @@ from torch import Tensor
 from torch.nn import Module, Linear, Tanh, Sequential, ReLU, Dropout, Parameter
 from torch.nn.functional import hardtanh, tanhshrink
 
+from .distribution import Gaussian
 from .util import nonecat
 
 
-__all__ = ['Gaussian', 'Recognition']
-
-Gaussian = namedtuple('Gaussian', ['mean', 'logvar'])  # 2nd field is logvar or cov
+__all__ = ['Recognition']
 
 
 class Recognition(Module):

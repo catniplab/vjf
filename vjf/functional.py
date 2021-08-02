@@ -4,7 +4,7 @@ import torch
 from torch import Tensor, cdist
 from torch.nn import functional
 
-from vjf.recognition import Gaussian
+from .distribution import Gaussian
 
 
 def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:

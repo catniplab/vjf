@@ -8,10 +8,11 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
+from .distribution import Gaussian
 from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
-from .recognition import Gaussian, Recognition
+from .recognition import Recognition
 from .util import reparametrize, symmetric, running_var, nonecat
 from .numerical import positivize
 
