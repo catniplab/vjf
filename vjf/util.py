@@ -32,6 +32,10 @@ def running_var(acc_var, acc_size, new_var, new_size, *, size_cap=1000):
 
 
 def nonecat(a: Tensor, u: Tensor):
+    """Concatenation allowing None input
+    :param a: 1st Tensor
+    :param u: 2st Tensor or None
+    """
     au = torch.atleast_2d(a)
     if u is not None:
         u = torch.atleast_2d(u)
