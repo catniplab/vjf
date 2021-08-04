@@ -36,7 +36,9 @@ def test_VJF():
     n_rbf = 10
     N = 100
     y = torch.randn(N, ydim)
+    x = torch.randn(N, xdim)
     u = torch.randn(N, udim)
 
     model = VJF.make_model(ydim, xdim, udim, n_rbf, hidden_sizes=[5, 5])
     model.fit(y, u, max_iter=1)
+    model.forecast(x[0, ...], u, n_step=N)

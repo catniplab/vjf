@@ -328,7 +328,7 @@ class RBFDS(Module):
         else:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
-            assert u.shape[0] != n_step, 'u must have length of n_step if present'
+            assert u.shape[0] == n_step, 'u must have length of n_step if present'
 
         for t in range(n_step):
             x[t + 1] = self.forward(x[t], u[t], sampling=True)
