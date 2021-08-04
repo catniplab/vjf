@@ -16,8 +16,8 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
-        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=True))
+        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=True))
 
     @property
     def n_feature(self):
@@ -122,8 +122,8 @@ class LinearRegression(Module):
 
     @torch.no_grad()
     def initialize(self, x: Tensor, target: Tensor, v):
-        r = x.norm(dim=1).max().item()
-        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
-        nn.init.constant_(self.feature.logwidth, math.log(r))
+        # r = x.norm(dim=1).max().item()
+        # nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        # nn.init.constant_(self.feature.logwidth, math.log(r))
         self.rls(x, target, v)
         # self.kalman(x, target, torch.tensor(.1))

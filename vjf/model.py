@@ -218,6 +218,9 @@ class VJF(Module):
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
+            # if self.transition.velocity.feature.centroid.requires_grad:
+            #     if self.transition.velocity.feature.centroid.grad is not None:
+            #         print(self.transition.velocity.feature.centroid.grad)
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
         if update:
@@ -271,6 +274,8 @@ class VJF(Module):
                                               'q norm': torch.norm(q[0]).item(),
                                               'obs noise': self.likelihood.logvar.exp().item(),
                                               'state noise': self.transition.logvar.exp().item(),
+                                              # 'centroid': self.transition.velocity.feature.centroid.mean().item(),
+                                              # 'width': self.transition.velocity.feature.logwidth.exp().mean().item(),
                                               })
 
                 epoch_loss = sum(losses) / len(losses)
