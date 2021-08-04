@@ -2,7 +2,7 @@ from itertools import zip_longest
 from typing import Tuple, Sequence, Union
 
 import torch
-from torch import Tensor, nn, linalg
+from torch import Tensor, nn
 from torch.nn import Module, Linear, Parameter
 from torch.optim import SGD
 from torch.optim.lr_scheduler import ExponentialLR
@@ -14,7 +14,6 @@ from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
 from .recognition import Recognition
 from .util import reparametrize, symmetric, running_var, nonecat
-from .numerical import positivize
 
 
 class LinearDecoder(Module):
@@ -39,22 +38,6 @@ class LinearDecoder(Module):
             return Gaussian(mean, v.log())
         else:
             raise NotImplementedError
-
-    # @torch.no_grad()
-    # def update(self, x: Tensor, y: Tensor, *, decay=0.5):
-    #     w = torch.column_stack((self.decode.bias.data, self.decode.weight.data)).t()
-    #     n, xdim = x.shape
-    #     x = torch.column_stack((torch.ones(n), x))
-    #     xx = x.t().mm(x)
-    #     g = self.XX.mm(w * (1 - decay)) + x.t().mm(y)
-    #     self.XX += xx
-    #     if self.n_sample > xdim:
-    #         self.requires_grad_(False)
-    #         w = g.cholesky_solve(linalg.cholesky(self.XX))
-    #         b, C = w.split([1, xdim])
-    #         self.decode.bias.data = b.squeeze()
-    #         self.decode.weight.data = C.t()
-    #     self.n_sample += n
 
 
 def detach(q: Gaussian) -> Gaussian:
