@@ -311,7 +311,7 @@ class VJF(Module):
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
         x = self.transition.forecast(x0, u, n_step, noise)
-        y = self.decoder(y)
+        y = self.decoder(x)
         return x, y
 
 
