@@ -200,13 +200,14 @@ class VJF(Module):
         return qt, loss, *elbos
 
     def fit(self, y: Tensor, u: Union[None, Tensor] = None, *,
-            max_iter: int = 1, beta: float = 0.1, debug: bool = True):
+            max_iter: int = 200, beta: float = 0.1, debug: bool = True, rtol: float = 1e-4):
         """
         :param y: observation, (time, ..., dim)
         :param u: control input, None if
         :param max_iter: maximum number of epochs
         :param beta: discounting factor for running loss, large weight on current epoch loss for small value
         :param debug: verbose output
+        :param rtol: relative tolerance for convergence detection
         :return:
             q_seq: list of posterior each step
         """
@@ -237,32 +238,32 @@ class VJF(Module):
                     losses.append(loss)
                     q_seq.append(q)
                     if debug:
-                        progress.set_postfix({'Warm up': str(warm_up),
-                                              'Loss': running_loss.item(),
-                                              'Recon': elbos[0].item(),
-                                              'Dynamics': elbos[1].item(),
-                                              'Entropy': elbos[2].item(),
-                                              'q norm': torch.norm(q[0]).item(),
-                                              'obs noise': self.likelihood.logvar.exp().item(),
-                                              'state noise': self.transition.logvar.exp().item(),
-                                              # 'centroid': self.transition.velocity.feature.centroid.mean().item(),
-                                              # 'width': self.transition.velocity.feature.logwidth.exp().mean().item(),
-                                              })
+                        progress.set_postfix({
+                            # 'Warm up': str(warm_up),
+                            'Loss': running_loss.item(),
+                            'Recon': elbos[0].item(),
+                            'Dynamics': elbos[1].item(),
+                            'Entropy': elbos[2].item(),
+                            # 'q norm': torch.norm(q[0]).item(),
+                            'obs noise': self.likelihood.logvar.exp().item(),
+                            'state noise': self.transition.logvar.exp().item(),
+                            # 'centroid': self.transition.velocity.feature.centroid.mean().item(),
+                            # 'width': self.transition.velocity.feature.logwidth.exp().mean().item(),
+                        })
 
                 epoch_loss = sum(losses) / len(losses)
 
                 if warm_up:
-                    if epoch_loss.isclose(running_loss, rtol=1e-4):
+                    if epoch_loss.isclose(running_loss, rtol=rtol):
                         warm_up = False
                         running_loss = epoch_loss
-                        print('Warm up stopped.')
+                        print('\nWarm up stopped.\n')
                         self.decoder.requires_grad_(False)  # freeze decoder after warm up
                         m = torch.stack([q.mean for q in q_seq]).squeeze()
                         self.transition.initialize(m[1:], m[:-1], u)
-                        progress.reset()
                 else:
-                    if epoch_loss.isclose(running_loss, rtol=1e-4):
-                        print('Converged.')
+                    if epoch_loss.isclose(running_loss, rtol=rtol):
+                        print('\nConverged.\n')
                         break
 
                 running_loss = beta * running_loss + (1 - beta) * epoch_loss if i > 0 else epoch_loss
