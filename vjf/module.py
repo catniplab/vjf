@@ -1,132 +1,132 @@
 import math
+import warnings
+from typing import Union
+
 import torch
-from torch import nn, Tensor
+from torch import Tensor, linalg, nn
 from torch.nn import Parameter, Module, functional
 
+from . import kalman
+from .functional import rbf
+from .distribution import Gaussian
 
-class RBFN(Module):
-    def __init__(self, xdim, rdim, center=None, logwidth=None):
+
+class RBF(Module):
+    """Radial basis functions"""
+    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False):
         super().__init__()
+        self.n_basis = n_basis
+        self.intercept = intercept
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
+        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
 
-        # centers
-        self.register_parameter(
-            "c",
-            Parameter(torch.empty(rdim, xdim, dtype=torch.float), requires_grad=False),
-        )
-        if center is not None:
-            self.c.data = torch.tensor(center, dtype=torch.float)
+    @property
+    def n_feature(self):
+        if self.intercept:
+            return self.n_basis + 1
         else:
-            nn.init.uniform_(self.c, -0.5, 0.5)
+            return self.n_basis
 
-        # kernel widths
-        self.register_parameter(
-            "logwidth",
-            Parameter(torch.full((rdim, 1),
-                                 fill_value=0.5*math.log(xdim) - 0.5*math.log(rdim),
-                                 dtype=torch.float),
-                      requires_grad=False),
-        )
-        if logwidth is not None:
-            self.logwidth.data = torch.tensor(logwidth, dtype=torch.float)
-
-    def forward(self, x):
-        x = torch.unsqueeze(x, dim=1)  # (?, xdim) -> (?, 1, xdim)
-        c = torch.unsqueeze(self.c, dim=0)  # (1, rdim, xdim)
-        iw = torch.unsqueeze(torch.exp(-self.logwidth), dim=0)  # (1, rdim, 1)
-        # (?, 1, xdim) - (1, rdim, xdim) -> (?, rdim, xdim) -> (?, rdim)
-        return torch.exp(-0.5 * torch.sum((x * iw - c * iw) ** 2, dim=-1))
+    def forward(self, x: Tensor) -> Tensor:
+        output = rbf(x, self.centroid, self.logwidth.exp())
+        if self.intercept:
+            output = torch.column_stack((torch.ones(output.shape[0]), output))
+        return output
 
 
-class SGP(nn.Module):
-    def __init__(self, in_features, out_features, inducing_points, mean, cov):
-        super().__init__()
-
-    def forward(self, *input):
-        pass
-
-
-class IGRU(nn.Module):
-    def __init__(self, in_features, hidden, mapping):
-        super().__init__()
-
-        # reset gate
-        self.add_module(
-            "i2r", nn.Linear(in_features=in_features, out_features=hidden, bias=False)
-        )
-        self.add_module(
-            "h2r", nn.Linear(in_features=hidden, out_features=hidden, bias=True)
-        )
-        # update gate
-        self.add_module(
-            "i2u", nn.Linear(in_features=in_features, out_features=hidden, bias=False)
-        )
-        self.add_module(
-            "h2u", nn.Linear(in_features=hidden, out_features=hidden, bias=True)
-        )
-        # hidden state
-        self.add_module(
-            "i2g", nn.Linear(in_features=in_features, out_features=mapping, bias=False)
-        )
-        self.add_module(
-            "h2g", nn.Linear(in_features=hidden, out_features=mapping, bias=True)
-        )
-        self.add_module(
-            "g2h", nn.Linear(in_features=mapping, out_features=hidden, bias=False)
-        )
-
-    def forward(self, hidden, inputs):
-        u = torch.sigmoid(self.i2u(inputs) + self.h2u(hidden))
-        r = torch.sigmoid(self.i2r(inputs) + self.h2r(hidden))
-        g = torch.tanh(self.i2g(inputs) + self.h2g(r * hidden))
-        h = u * hidden + (1 - u) * self.g2h(g)
-        return h
-
-
-class bLR(Module):
+class LinearRegression(Module):
+    """Bayesian linear regression"""
     def __init__(self, feature: Module, n_output: int):
         super().__init__()
-        self.feature = feature
+        self.add_module('feature', feature)
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
-        self.w_mean = torch.zeros(n_output, self.feature.n_feature)
-        self.w_icov = torch.tile(torch.eye(self.feature.n_feature), (n_output, 1, 1))
+        self.w_mean = torch.zeros(self.feature.n_feature, n_output)
+        # self.w_cov = torch.eye(self.feature.n_feature)
+        self.w_chol = torch.eye(self.feature.n_feature)
+        self.w_precision = torch.eye(self.feature.n_feature)
+        self.w_pchol = linalg.cholesky(self.w_precision)
 
-    def predict(self, x, u=None) -> Tensor:
-        if u is not None:
-            x = torch.cat((x, u), dim=-1)
-        feat = self.feature(x)
-        return nn.functional.linear(feat, self.w_mean)  # do we need the intercept?
-
-    def cov(self, q, u):
-        raise NotImplementedError
-
-    def expect(self, q, u):
-        raise NotImplementedError
-
-    def update(self, target, x, u, p):
+    def forward(self, x: Tensor, sampling=True) -> Union[Tensor, Gaussian]:
         """
-        :param target: (sample, dim)
+        Predictive distribution or sample given predictor
+        :param x: predictor, supposed to be [x, u].
+        :param sampling: return a sample if True, default=True
+        :return:
+            predictive distribution or sample given sampling
+        """
+        feat = self.feature(x)
+        w = self.w_mean
+        if sampling:
+            w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
+            # w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
+            return functional.linear(feat, w.t())
+        else:
+            FL = feat.mm(self.w_chol)
+            logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
+            return Gaussian(functional.linear(feat, w.t()), logvar)
+
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
+        """RLS weight update
         :param x: (sample, dim)
-        :param u: (sample, dim) or None
-        :param p: noise precision (out,) or (sample, out)
+        :param target: (sample, dim)
+        :param v: observation noise
+        :param shrink: forgetting factor, 1 meaning no forgetfulness. 0.98 ~ 1
         :return:
         """
-        p = torch.atleast_2d(p)
-        if u is not None:
-            x = torch.cat((x, u), dim=-1)
-        feat = self.feature(x)  # (1, sample, feature)
-        ft = feat.t()
-        f3d = feat[None, ...]  # (1, sample, feature)
-        ft3d = ft[None, ...]  # (1, feature, sample)
-        # target = target.T[..., None]  # (output, sample, 1)
-        xty = ft @ (p * target)  # (feature, sample) (sample, out) (sample, out) => (feature, out)
-        G = self.w_icov @ self.w_mean[..., None] + xty.T[..., None]
-        # (output, feature, feature) (output, feature, 1) + (output, feature, 1)
-        # => (output, feature, 1) + (output, feature, 1)
-        # => (output, feature, 1)
-        self.w_icov = self.w_icov + ft3d @ torch.block_diag(p.t()) @ f3d
-        # (output, feature, feature) + (1, feature, sample) (out, sample, sample) (1, sample, feature)
-        # => (output, feature, feature) + (output, feature, feature)
-        # => (output, feature, feature)
-        self.w_mean = torch.squeeze(self.w_icov @ G)
-        # (output, feature, feature) (output, feature, 1) => (output, feature, 1)
+        # eye = torch.eye(self.w_precision.shape[0])
+        P = self.w_precision
+        feat = self.feature(x)  # (sample, feature)
+        s = torch.sqrt(v)
+        scaled_feat = feat / s
+        scaled_target = target / s
+        g = P.mm(self.w_mean) * shrink + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
+        # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
+        P = P * shrink + scaled_feat.t().mm(scaled_feat)
+        # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
+        try:
+            self.w_pchol = linalg.cholesky(P)
+            self.w_precision = P
+            self.w_mean = g.cholesky_solve(self.w_pchol)
+            self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
+            # (feature, feature) (feature, output) => (feature, output)
+        except RuntimeError:
+            warnings.warn('RLS failed.')
+
+    @torch.no_grad()
+    def kalman(self, x: Tensor, target: Tensor, v: Union[Tensor, float], diffusion: float = 0.):
+        """Update weight using Kalman
+        w[t] = w[t-1] + Q
+        target[t] = f(x[t])'w[t] + v
+        f(x) is the features, e.g. RBF
+        Q is diffusion
+        :param x: model prediction
+        :param target: true x
+        :param v: noise variance
+        :param diffusion: Q = diffusion * I, default=0. (RLS)
+        :return:
+        """
+        assert diffusion >= 0., 'diffusion needs to be non-negative'
+        eye = torch.eye(self.w_mean.shape[0])  # identity matrix (feature, feature)
+
+        # Kalman naming:
+        # A: transition matrix
+        # Q: state noise
+        # H: loading matrix
+        # R: observation noise
+        Q = diffusion * eye
+        A = eye  # diffusion
+        H = self.feature(x)  # (sample, feature)
+        R = torch.eye(H.shape[0]) * v  # (feature, feature)
+
+        yhat, mhat, Vhat = kalman.predict(self.w_mean, self.w_chol, A, Q, H, R)
+        # self.w_mean, self.w_chol = kalman.update(target, yhat, mhat, Vhat, H, R)
+        self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
+
+    @torch.no_grad()
+    def initialize(self, x: Tensor, target: Tensor, v):
+        r = x.norm(dim=1).max().item()
+        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        nn.init.constant_(self.feature.logwidth, math.log(r))
+        self.rls(x, target, v)
+        # self.kalman(x, target, torch.tensor(.1))

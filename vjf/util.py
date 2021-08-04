@@ -1,75 +1,59 @@
-import numpy as np
-from scipy.ndimage import gaussian_filter1d
+from typing import Tuple, Union
+
+import torch
+from torch import Tensor
+
+from .distribution import Gaussian
 
 
-def make_xy(x):
+def reparametrize(q: Tuple[Tensor, Tensor]) -> Tensor:
+    mean, logvar = q
+    return mean + torch.randn_like(mean) * torch.exp(.5 * logvar)
+
+
+def symmetric(a: Tensor) -> bool:
+    return torch.allclose(a, a.transpose(-1, -2))
+
+
+def running_var(acc_var, acc_size, new_var, new_size, *, size_cap=1000):
+    """Running Variance
+    :param acc_var:
+    :param acc_size:
+    :param new_var:
+    :param new_size:
+    :param size_cap:
+    :return:
     """
-    Prepare time series
-    Args:
-        x: raw dynamics
-    Returns:
+    acc_size = min(acc_size, size_cap)
+    tot_size = acc_size + new_size
+    f1 = acc_size / tot_size
+    f2 = new_size / tot_size
+    acc_var = f1 * acc_var + f2 * new_var
+    # print(acc_var.item(), tot_size)
+    return acc_var, tot_size
 
+
+def nonecat(a: Tensor, u: Tensor):
+    """Concatenation allowing None input
+    :param a: 1st Tensor
+    :param u: 2st Tensor or None
     """
+    au = torch.atleast_2d(a)
+    if u is not None:
+        u = torch.atleast_2d(u)
+        au = torch.cat((au, u), -1)
+    return au
 
-    if x.ndim == 1:
-        x3d = np.atleast_3d(x)
-    elif x.ndim == 2:
-        x3d = x[None, ...]
+
+def at_least2d(a: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
+    """
+    See torch.at_least2d
+    :param a: Tensor or Tuple
+    :return:
+    """
+    if isinstance(a, Tensor):
+        return torch.atleast_2d(a)
+    elif isinstance(a, Gaussian):
+        return Gaussian(torch.atleast_2d(a.mean), torch.atleast_2d(a.logvar))
     else:
-        x3d = x
-
-    x0 = x3d[:, :-1, :]
-    x1 = x3d[:, 1:, :]
-    return x0, x1
-
-
-def make_xyu(x, u):
-    if x.ndim == 1:
-        x3d = x[None, :, None]
-    elif x.ndim == 2:
-        x3d = x[None, :, :]
-    else:
-        x3d = x
-
-    if u.ndim == 1:
-        u3d = u[None, :, None]
-    elif u.ndim == 2:
-        u3d = u[None, :, :]
-    else:
-        u3d = u
-
-    x0 = x3d[:, :-1, :].reshape((-1, x3d.shape[-1]))
-    x1 = x3d[:, 1:, :].reshape((-1, x3d.shape[-1]))
-    u0 = u3d[:, :-1, :].reshape((-1, u3d.shape[-1]))
-
-    return x0, x1, u0
-
-
-def embed(x, dim=1, delay=1):
-    if x.ndim == 1:
-        x3d = np.atleast_3d(x)
-    elif x.ndim == 2:
-        x3d = x[None, ...]
-    else:
-        x3d = x
-    return np.concatenate(
-        [np.roll(x3d, shift=-d * delay, axis=1) for d in range(dim)], axis=2
-    )[:, : -(dim - 1) * delay, :]
-
-
-def smooth_1d(x, sigma=10):
-    assert x.ndim == 1
-    y = gaussian_filter1d(x, sigma=sigma, mode="constant", cval=0.0)
-    return y
-
-
-def smooth(x, sigma=10):
-    return np.stack([smooth_1d(row, sigma) for row in x])
-
-
-def cut(a, i):
-    return a[:i], a[i:]
-
-
-def assert_numeric(param):
-    assert np.all(np.isfinite(param))
+        raise TypeError(a.__class__)
