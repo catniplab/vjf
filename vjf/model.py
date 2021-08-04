@@ -268,6 +268,10 @@ class VJF(Module):
 
                 running_loss = beta * running_loss + (1 - beta) * epoch_loss if i > 0 else epoch_loss
 
+                progress.set_postfix({
+                    'Loss': running_loss.item(),
+                })
+
                 self.scheduler.step()
 
         return q_seq
