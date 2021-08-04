@@ -279,13 +279,12 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        # model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, hidden_sizes))
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
                     *args, **kwargs)
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
-        x = self.transition.forecast(x0, u, n_step, noise)
+        x = self.transition.forecast(x0, u, n_step, noise=noise)
         y = self.decoder(x)
         return x, y
 
