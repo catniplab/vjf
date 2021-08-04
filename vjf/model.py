@@ -188,7 +188,11 @@ class VJF(Module):
             u = torch.atleast_2d(u)
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
-        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
+        output = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
+        if verbose:
+            loss, *elbos = output
+        else:
+            loss = output
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
@@ -197,7 +201,10 @@ class VJF(Module):
         if update:
             self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
 
-        return qt, loss, *elbos
+        if verbose:
+            return qt, loss, *elbos
+        else:
+            return qt, loss
 
     def fit(self, y: Tensor, u: Tensor = None, *,
             max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4):
@@ -321,7 +328,7 @@ class RBFDS(Module):
         else:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
-            assert u.shape[0] != n_step, 'u must have length of n_step if present'
+            assert u.shape[0] == n_step, 'u must have length of n_step if present'
 
         for t in range(n_step):
             x[t + 1] = self.forward(x[t], u[t], sampling=True)
