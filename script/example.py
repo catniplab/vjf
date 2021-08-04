@@ -51,12 +51,12 @@ q_seq = model.fit(y, max_iter=150)  # return list of state posterior tuples (mea
 m = torch.stack([q.mean for q in q_seq])  # collect posterior mean
 m = m.detach().numpy().squeeze()
 
-# draw the latent trajectory
+# %% draw the latent trajectory
 ax = fig.add_subplot(222)
 ax.plot(m)
 plt.title('Posterior mean')
 
-# %% Draw velocity field
+# Draw velocity field
 # make mesh for velocity field
 def grid(n, lims):
     xedges = np.linspace(*lims, n)
@@ -87,3 +87,5 @@ plt.title('Forecast')
 plt.tight_layout()
 plt.show()
 plt.close()
+
+# %%
