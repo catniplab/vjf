@@ -245,8 +245,8 @@ class VJF(Module):
                             'Dynamics': elbos[1].item(),
                             'Entropy': elbos[2].item(),
                             # 'q norm': torch.norm(q[0]).item(),
-                            'obs noise': self.likelihood.logvar.exp().item(),
-                            'state noise': self.transition.logvar.exp().item(),
+                            # 'obs noise': self.likelihood.logvar.exp().item(),
+                            # 'state noise': self.transition.logvar.exp().item(),
                             # 'centroid': self.transition.velocity.feature.centroid.mean().item(),
                             # 'width': self.transition.velocity.feature.logwidth.exp().mean().item(),
                         })

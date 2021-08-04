@@ -60,3 +60,7 @@ class PoissonLikelihood(Module):
         nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
         assert nll.ndim == 2
         return nll.sum(-1).mean()
+
+    @torch.no_grad()
+    def update(self, eta: Tensor, target: Tensor):
+        pass
