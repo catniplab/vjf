@@ -84,7 +84,6 @@ class LinearRegression(Module):
         self.w_precision = P * shrink + scaled_feat.t().mm(scaled_feat)
         assert torch.allclose(self.w_precision, self.w_precision.t())  # symmetric
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
-        # self.w_precision = .5 * (self.w_precision + self.w_precision.t())  # make sure symmetric
         self.w_pchol = linalg.cholesky(self.w_precision)
         self.w_mean = g.cholesky_solve(self.w_pchol)
         self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
