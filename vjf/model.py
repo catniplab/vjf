@@ -167,7 +167,7 @@ class VJF(Module):
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, debug: bool = False, warm_up: bool = False):
+               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -175,7 +175,7 @@ class VJF(Module):
         :param qs: previos posterior. use prior if None, otherwise detached.
         :param sgd: flag to enable gradient step
         :param update: flag to update DS
-        :param debug: verbose output
+        :param verbose: verbose output
         :param warm_up: do not learn dynamics if True, default=False
         :return:
             qt: posterior
@@ -188,7 +188,7 @@ class VJF(Module):
             u = torch.atleast_2d(u)
 
         xs, pt, qt, xt, py = self.forward(y, qs, u)
-        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=debug, warm_up=warm_up)
+        loss, *elbos = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
@@ -199,14 +199,14 @@ class VJF(Module):
 
         return qt, loss, *elbos
 
-    def fit(self, y: Tensor, u: Union[None, Tensor] = None, *,
-            max_iter: int = 200, beta: float = 0.1, debug: bool = True, rtol: float = 1e-4):
+    def fit(self, y: Tensor, u: Tensor = None, *,
+            max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4):
         """
         :param y: observation, (time, ..., dim)
         :param u: control input, None if
         :param max_iter: maximum number of epochs
         :param beta: discounting factor for running loss, large weight on current epoch loss for small value
-        :param debug: verbose output
+        :param verbose: verbose output
         :param rtol: relative tolerance for convergence detection
         :return:
             q_seq: list of posterior each step
@@ -232,12 +232,12 @@ class VJF(Module):
                     q, loss, *elbos = self.filter(yt, ut, q,
                                                   sgd=True,
                                                   update=True,
-                                                  debug=debug,
+                                                  verbose=verbose,
                                                   warm_up=warm_up,
                                                   )
                     losses.append(loss)
                     q_seq.append(q)
-                    if debug:
+                    if verbose:
                         progress.set_postfix({
                             # 'Warm up': str(warm_up),
                             'Loss': running_loss.item(),
