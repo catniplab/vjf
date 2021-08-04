@@ -93,14 +93,6 @@ class VJF(Module):
         )
         self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
 
-        # if isinstance(self.likelihood, GaussianLikelihood):
-        #     self.decoder.requires_grad_(False)
-        #     # print(self.decoder.decode.weight.shape,
-        #     #       self.decoder.decode.bias.shape,
-        #     #       )
-        #     nn.init.zeros_(self.decoder.decode.weight)
-        #     nn.init.zeros_(self.decoder.decode.bias)
-
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
         n_batch = y.shape[0]
@@ -135,7 +127,6 @@ class VJF(Module):
 
         xs = reparametrize(qs)
         pt = self.transition(xs, u, sampling=False)
-        # print(torch.linalg.norm(xs - pt).item())
 
         y = torch.atleast_2d(y)
         qt = self.recognition(y, qs, u)
@@ -218,9 +209,6 @@ class VJF(Module):
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
-            # if self.transition.velocity.feature.centroid.requires_grad:
-            #     if self.transition.velocity.feature.centroid.grad is not None:
-            #         print(self.transition.velocity.feature.centroid.grad)
             nn.utils.clip_grad_value_(self.parameters(), 1.)
             self.optimizer.step()
         if update:
@@ -279,7 +267,6 @@ class VJF(Module):
                                               })
 
                 epoch_loss = sum(losses) / len(losses)
-                print(f'epoch loss: {epoch_loss.item():.3f}')
 
                 if warm_up:
                     if epoch_loss.isclose(running_loss, rtol=1e-4):
