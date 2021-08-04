@@ -1,4 +1,5 @@
 import math
+import warnings
 from typing import Union
 
 import torch
@@ -7,7 +8,7 @@ from torch.nn import Parameter, Module, functional
 
 from . import kalman
 from .functional import rbf
-from .recognition import Gaussian
+from .distribution import Gaussian
 
 
 class RBF(Module):
@@ -81,13 +82,16 @@ class LinearRegression(Module):
         scaled_target = target / s
         g = P.mm(self.w_mean) * shrink + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
-        self.w_precision = P * shrink + scaled_feat.t().mm(scaled_feat)
-        assert torch.allclose(self.w_precision, self.w_precision.t())  # symmetric
+        P = P * shrink + scaled_feat.t().mm(scaled_feat)
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
-        self.w_pchol = linalg.cholesky(self.w_precision)
-        self.w_mean = g.cholesky_solve(self.w_pchol)
-        self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
-        # (feature, feature) (feature, output) => (feature, output)
+        try:
+            self.w_pchol = linalg.cholesky(P)
+            self.w_precision = P
+            self.w_mean = g.cholesky_solve(self.w_pchol)
+            self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
+            # (feature, feature) (feature, output) => (feature, output)
+        except RuntimeError:
+            warnings.warn('RLS failed.')
 
     @torch.no_grad()
     def kalman(self, x: Tensor, target: Tensor, v: Union[Tensor, float], diffusion: float = 0.):
