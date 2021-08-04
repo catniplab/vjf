@@ -32,7 +32,11 @@ def test_Recognition():
 def test_VJF():
     ydim = 10
     xdim = 3
-    udim = 0
+    udim = 1
     n_rbf = 10
+    N = 100
+    y = torch.randn(N, ydim)
+    u = torch.randn(N, udim)
 
-    VJF.make_model(ydim, xdim, udim, n_rbf, hidden_sizes=[5, 5])
+    model = VJF.make_model(ydim, xdim, udim, n_rbf, hidden_sizes=[5, 5])
+    model.fit(y, u, max_iter=1)
