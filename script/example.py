@@ -45,7 +45,7 @@ likelihood = 'gaussian'  # gaussian or poisson
 # likelihood = 'poisson'  # gaussian or poisson
 
 model = VJF.make_model(ydim, xdim, udim=udim, n_rbf=n_rbf, hidden_sizes=hidden_sizes, likelihood=likelihood)
-m, logvar, _ = model.fit(y, max_iter=1)  # return list of state posterior tuples (mean, log variance)
+m, logvar, _ = model.fit(y, max_iter=150)  # return list of state posterior tuples (mean, log variance)
 
 m = m.detach().numpy().squeeze()
 

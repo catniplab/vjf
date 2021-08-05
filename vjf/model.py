@@ -227,6 +227,7 @@ class VJF(Module):
             u_ = torch.atleast_2d(u_)
 
         warm_up = True
+        epoch_loss = torch.tensor(float('nan'))
         with trange(max_iter) as progress:
             running_loss = torch.tensor(float('nan'))
             for i in progress:
