@@ -267,8 +267,14 @@ class VJF(Module):
                         running_loss = epoch_loss
                         print('\nWarm up stopped.\n')
                         self.decoder.requires_grad_(False)  # freeze decoder after warm up
-                        m = torch.stack([q.mean for q in q_seq]).squeeze()
-                        self.transition.initialize(m[1:], m[:-1], u)
+                        m = torch.stack([q.mean for q in q_seq])
+                        if isinstance(u_, Tensor) and u_.shape[-1] > 0:
+                            u_init = u_[:-1, :].reshape(-1, u_.shape[-1])
+                        else:
+                            u_init = None
+                        self.transition.initialize(m[1:].reshape(-1, m.shape[-1]),
+                                                   m[:-1].reshape(-1, m.shape[-1]),
+                                                   u_init)
                 else:
                     if epoch_loss.isclose(running_loss, rtol=rtol):
                         print('\nConverged.\n')
