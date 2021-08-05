@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "vjf"
-version = "2018.11.16"
+version = "2021.8.4"
 description = "Variational Joint Filtering"
 authors = ["yuan <yuanz271@gmail.com>"]
 license = "MIT"
