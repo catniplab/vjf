@@ -281,7 +281,9 @@ class VJF(Module):
 
                 self.scheduler.step()
 
-        return q_seq
+        mu = torch.stack([q.mean for q in q_seq])
+        logvar = torch.stack([q.logvar for q in q_seq])
+        return mu, logvar, epoch_loss
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],

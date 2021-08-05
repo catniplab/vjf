@@ -45,10 +45,8 @@ likelihood = 'gaussian'  # gaussian or poisson
 # likelihood = 'poisson'  # gaussian or poisson
 
 model = VJF.make_model(ydim, xdim, udim=udim, n_rbf=n_rbf, hidden_sizes=hidden_sizes, likelihood=likelihood)
+m, logvar, _ = model.fit(y, max_iter=1)  # return list of state posterior tuples (mean, log variance)
 
-q_seq = model.fit(y, max_iter=150)  # return list of state posterior tuples (mean, log variance)
-
-m = torch.stack([q.mean for q in q_seq])  # collect posterior mean
 m = m.detach().numpy().squeeze()
 
 # %% draw the latent trajectory
