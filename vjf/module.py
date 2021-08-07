@@ -66,7 +66,7 @@ class LinearRegression(Module):
             logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
             return Gaussian(functional.linear(feat, w.t()), logvar)
 
-    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = .99):
         """RLS weight update
         :param x: (sample, dim)
         :param target: (sample, dim)
