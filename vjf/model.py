@@ -167,7 +167,8 @@ class VJF(Module):
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False):
+               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
+               clip_value=1.):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -177,6 +178,7 @@ class VJF(Module):
         :param update: flag to update DS
         :param verbose: verbose output
         :param warm_up: do not learn dynamics if True, default=False
+        :param clip_value: maximum allowed value of the gradients.
         :return:
             qt: posterior
             loss: negative eblo
@@ -196,7 +198,12 @@ class VJF(Module):
         if sgd:
             self.optimizer.zero_grad()
             loss.backward()  # accumulate grad if not trained
-            nn.utils.clip_grad_value_(self.parameters(), 1.)
+            # if self.transition.velocity.feature.centroid.grad is not None:
+            #     print('centroid', self.transition.velocity.feature.centroid.grad.norm().item())
+            # if self.transition.velocity.feature.logwidth.grad is not None:
+            #     print('width', self.transition.velocity.feature.logwidth.grad.norm().item())
+            if clip_value is not None:
+                nn.utils.clip_grad_value_(self.parameters(), clip_value)
             self.optimizer.step()
         if update:
             self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
@@ -207,7 +214,8 @@ class VJF(Module):
             return qt, loss
 
     def fit(self, y: Tensor, u: Tensor = None, *,
-            max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4):
+            max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4,
+            warm_up=True, **kwargs):
         """
         :param y: observation, (time, ..., dim)
         :param u: control input, None if
@@ -215,6 +223,7 @@ class VJF(Module):
         :param beta: discounting factor for running loss, large weight on current epoch loss for small value
         :param verbose: verbose output
         :param rtol: relative tolerance for convergence detection
+        :param warm_up:
         :return:
             q_seq: list of posterior each step
         """
@@ -226,7 +235,6 @@ class VJF(Module):
             u_ = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u_ = torch.atleast_2d(u_)
 
-        warm_up = True
         epoch_loss = torch.tensor(float('nan'))
         with trange(max_iter) as progress:
             running_loss = torch.tensor(float('nan'))
@@ -242,6 +250,7 @@ class VJF(Module):
                                                   update=True,
                                                   verbose=verbose,
                                                   warm_up=warm_up,
+                                                  **kwargs,
                                                   )
                     losses.append(loss)
                     q_seq.append(q)
