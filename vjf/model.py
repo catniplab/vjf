@@ -297,6 +297,8 @@ class VJF(Module):
                 })
 
                 self.scheduler.step()
+            else:
+                print('Max iteration reached.')
 
         mu = torch.stack([q.mean for q in q_seq])
         logvar = torch.stack([q.logvar for q in q_seq])

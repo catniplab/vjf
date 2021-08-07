@@ -25,7 +25,7 @@ d = torch.randn(ydim)  # bias
 
 t = torch.arange(0, T, step=dt)  # time point evaluated
 print(t.shape)
-x = torch.column_stack((torch.sin(t), torch.cos(t)))  # limit cycle
+x = 2 * torch.column_stack((torch.sin(t), torch.cos(t)))  # limit cycle
 x = x + torch.randn_like(x) * 0.1  # add some noise
 
 # observation
@@ -35,7 +35,7 @@ y = y + torch.randn_like(y) * 0.1  # add noise
 
 fig = plt.figure()
 ax = fig.add_subplot(221)
-ax.plot(x.numpy())
+ax.plot(*x.numpy().T)
 plt.title('True state')
 
 # %% Fit VJF
@@ -45,7 +45,15 @@ likelihood = 'gaussian'  # gaussian or poisson
 # likelihood = 'poisson'  # gaussian or poisson
 
 model = VJF.make_model(ydim, xdim, udim=udim, n_rbf=n_rbf, hidden_sizes=hidden_sizes, likelihood=likelihood)
-m, logvar, _ = model.fit(y, max_iter=150)  # return list of state posterior tuples (mean, log variance)
+ax.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T, s=10, c='r')
+
+c0 = model.transition.velocity.feature.centroid.clone()
+
+m, logvar, _ = model.fit(y, max_iter=100, warm_up=False, clip_value=5.)  # return list of state posterior tuples (mean, log variance)
+
+c1 = model.transition.velocity.feature.centroid.clone()
+
+print(torch.norm(c0 - c1).item())
 
 m = m.detach().numpy().squeeze()
 
@@ -76,7 +84,7 @@ plt.plot(*m.T, color='C1', alpha=0.5, zorder=5)
 plt.title('Velocity field')
 
 # %% Forecast state and observation
-ax = fig.add_subplot(224)
+fig.add_subplot(224)
 x, y = model.forecast(x0=m[9, ...], n_step=int(100 / dt), noise=False)
 x = x.detach().numpy().squeeze()
 plt.plot(x)
