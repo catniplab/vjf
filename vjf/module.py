@@ -17,8 +17,8 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
-        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=True))
+        self.register_parameter('logwidth', Parameter(torch.tensor(0.), requires_grad=True))
 
     @property
     def n_feature(self):
