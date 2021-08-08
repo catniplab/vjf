@@ -18,7 +18,7 @@ class RBF(Module):
         self.n_basis = n_basis
         self.intercept = intercept
         self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=True))
-        self.register_parameter('logwidth', Parameter(torch.tensor(0.), requires_grad=True))
+        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=True))
 
     @property
     def n_feature(self):
@@ -28,7 +28,7 @@ class RBF(Module):
             return self.n_basis
 
     def forward(self, x: Tensor) -> Tensor:
-        output = rbf(x, self.centroid, self.logwidth.exp())
+        output = rbf(x, self.centroid, self.logscale.exp())
         if self.intercept:
             output = torch.column_stack((torch.ones(output.shape[0]), output))
         return output
