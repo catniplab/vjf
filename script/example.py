@@ -49,7 +49,7 @@ ax.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T, s=10,
 
 c0 = model.transition.velocity.feature.centroid.clone()
 
-m, logvar, _ = model.fit(y, max_iter=100, warm_up=False, clip_value=5.)  # return list of state posterior tuples (mean, log variance)
+m, logvar, _ = model.fit(y, max_iter=100, warm_up=True, clip_value=5., gamma=0.99, update=True)  # return list of state posterior tuples (mean, log variance)
 
 c1 = model.transition.velocity.feature.centroid.clone()
 

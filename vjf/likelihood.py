@@ -56,8 +56,10 @@ class PoissonLikelihood(Module):
         :return:
         """
         if not isinstance(eta, Tensor):
-            raise NotImplementedError
-        nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
+            raise NotImplementedError            
+        # nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
+        rate = functional.softplus(eta)
+        nll = functional.poisson_nll_loss(rate, target, log_input=False, reduction='none')
         assert nll.ndim == 2
         return nll.sum(-1).mean()
 
