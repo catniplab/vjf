@@ -32,6 +32,16 @@ class RBF(Module):
         if self.intercept:
             output = torch.column_stack((torch.ones(output.shape[0]), output))
         return output
+    
+    @torch.no_grad()
+    def init(self, x: Tensor):
+        n = self.centroid.shape[0]
+        idx = torch.multinomial(torch.ones(x.shape[0]), num_samples=n)
+        c = x[idx, :]
+        d = functional.pdist(c)
+        nn.init.constant_(self.logscale, d.max().log())
+        c = c + torch.randn_like(c) * d.median()
+        self.centroid.data = c 
 
 
 class LinearRegression(Module):
@@ -126,15 +136,9 @@ class LinearRegression(Module):
     @torch.no_grad()
     def initialize(self, x: Tensor, target: Tensor, v):
         # r = x.abs().max(0, keepdim=True).values
-        n = self.feature.centroid.shape[0]
-        idx = torch.multinomial(torch.ones(x.shape[0]), num_samples=n)
-        c = x[idx, :]
-        d = functional.pdist(c)
-        nn.init.constant_(self.feature.logscale, d.max().log())
-        c = c + torch.randn_like(c) * d.median()
-        self.feature.centroid.data = c 
         # nn.init.uniform_(self.feature.centroid, a=-r, b=r)
         # self.feature.logscale.data = r.log()
         # nn.init.constant_(self.feature.logscale, math.log(r))
+        self.feature.init(x)
         self.rls(x, target, v, shrink=1.)
         # self.kalman(x, target, torch.tensor(.1))
