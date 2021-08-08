@@ -11,6 +11,30 @@ from .functional import rbf
 from .distribution import Gaussian
 
 
+class RFF(Module):
+    """Random Fourier Feature"""
+    def __init__(self, n_dim: int, size: int):
+        super().__init__()
+        self.size = size
+        self.register_parameter('w', Parameter(torch.randn(n_dim, size), requires_grad=False))
+        self.register_parameter('b', Parameter(torch.rand(1, size) * math.pi * 2, requires_grad=False))
+        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=False))
+        self.register_parameter('s', Parameter(torch.tensor(1.) / math.sqrt(size), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.randn(size, n_dim), requires_grad=False))
+
+    @property
+    def n_feature(self):
+        return self.size
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = x / self.logscale.exp()
+        return self.s * torch.cos(x.mm(self.w) + self.b)
+    
+    @torch.no_grad()
+    def init(self, x: Tensor):
+        pass
+
+
 class RBF(Module):
     """Radial basis functions"""
     def __init__(self, n_dim: int, n_basis: int, intercept: bool = False):

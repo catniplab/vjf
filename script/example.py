@@ -44,12 +44,22 @@ hidden_sizes = [20]  # structure of MLP
 likelihood = 'gaussian'  # gaussian or poisson
 # likelihood = 'poisson'  # gaussian or poisson
 
-model = VJF.make_model(ydim, xdim, udim=udim, n_rbf=n_rbf, hidden_sizes=hidden_sizes, likelihood=likelihood)
-ax.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T, s=10, c='r')
+model = VJF.make_model(ydim,
+                       xdim,
+                       udim=udim,
+                       n_rbf=n_rbf,
+                       hidden_sizes=hidden_sizes,
+                       likelihood=likelihood,
+                       feature='rff')
+ax.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T,
+           s=10,
+           c='r')
 
 c0 = model.transition.velocity.feature.centroid.clone()
 
-m, logvar, _ = model.fit(y, max_iter=100, warm_up=True, clip_value=5., gamma=0.99, update=True)  # return list of state posterior tuples (mean, log variance)
+m, logvar, _ = model.fit(
+    y, max_iter=100, warm_up=True, clip_value=5., gamma=0.99,
+    update=True)  # return list of state posterior tuples (mean, log variance)
 
 c1 = model.transition.velocity.feature.centroid.clone()
 
@@ -62,6 +72,7 @@ ax = fig.add_subplot(222)
 ax.plot(m)
 plt.title('Posterior mean')
 
+
 # Draw velocity field
 # make mesh for velocity field
 def grid(n, lims):
@@ -71,15 +82,19 @@ def grid(n, lims):
     grids = np.column_stack([X.reshape(-1), Y.reshape(-1)])
     return X, Y, grids
 
+
 ax = fig.add_subplot(223)
 r = np.mean(np.abs(m).max())  # determine the limits of plot
 
-Xm, Ym, XYm = grid(51, [-1.5*r, 1.5*r])
-Um, Vm = model.transition.velocity(torch.tensor(XYm)).detach().numpy().T  # get velocity
+Xm, Ym, XYm = grid(51, [-1.5 * r, 1.5 * r])
+Um, Vm = model.transition.velocity(
+    torch.tensor(XYm)).detach().numpy().T  # get velocity
 Um = np.reshape(Um, Xm.shape)
 Vm = np.reshape(Vm, Ym.shape)
 plt.streamplot(Xm, Ym, Um, Vm)
-plt.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T, s=10, c='r')
+plt.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T,
+            s=10,
+            c='r')
 plt.plot(*m.T, color='C1', alpha=0.5, zorder=5)
 plt.title('Velocity field')
 

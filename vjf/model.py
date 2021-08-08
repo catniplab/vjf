@@ -11,7 +11,7 @@ from tqdm import trange
 from .distribution import Gaussian
 from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
-from .module import LinearRegression, RBF
+from .module import LinearRegression, RBF, RFF
 from .recognition import Recognition
 from .util import reparametrize, symmetric, running_var, nonecat
 
@@ -310,13 +310,13 @@ class VJF(Module):
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', *args, **kwargs):
+                   likelihood: str = 'poisson', feature: str = 'rbf', *args, **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, feature), Recognition(ydim, xdim, udim, hidden_sizes),
                     *args, **kwargs)
         return model
 
@@ -327,9 +327,12 @@ class VJF(Module):
 
 
 class RBFDS(Module):
-    def __init__(self, n_rbf: int, xdim: int, udim: int):
+    def __init__(self, n_rbf: int, xdim: int, udim: int, feature='rbf'):
         super().__init__()
-        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        if feature == 'rbf':
+            self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        else:
+            self.add_module('velocity', LinearRegression(RFF(xdim + udim, n_rbf), xdim))
         self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
 
