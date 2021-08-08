@@ -214,7 +214,8 @@ class VJF(Module):
 
     def fit(self, y: Tensor, u: Tensor = None, *,
             max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4,
-            warm_up=True, **kwargs):
+            update=True,
+            warm_up=True, gamma=0.99, **kwargs):
         """
         :param y: observation, (time, ..., dim)
         :param u: control input, None if
@@ -248,7 +249,7 @@ class VJF(Module):
                 for yt, ut in zip_longest(y, u_):
                     q, loss, *elbos = self.filter(yt, ut, q,
                                                   sgd=True,
-                                                  update=True,
+                                                  update=update,
                                                   verbose=verbose,
                                                   warm_up=warm_up,
                                                   **kwargs,
