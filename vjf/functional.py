@@ -53,7 +53,6 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
 
     p = torch.exp(-.5 * logvar)
 
-    # print(mu, logv)
     mse = functional.mse_loss(m1 * p, m2 * p, reduction='none')
     assert mse.ndim == 2
     assert torch.all(torch.isfinite(mse)), mse

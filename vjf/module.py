@@ -130,7 +130,6 @@ class LinearRegression(Module):
         idx = torch.multinomial(torch.ones(x.shape[0]), num_samples=n)
         c = x[idx, :]
         d = functional.pdist(c)
-        print(d)
         nn.init.constant_(self.feature.logscale, d.max().log())
         c = c + torch.randn_like(c) * d.median()
         self.feature.centroid.data = c 
