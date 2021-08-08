@@ -835,3 +835,4 @@ poetry.lock
 *.npz
 notebook
 script
+*.mat
