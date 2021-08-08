@@ -46,8 +46,7 @@ def detach(q: Gaussian) -> Gaussian:
 
 
 class VJF(Module):
-    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module,
-                 *, lr_decay: float = .9):
+    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
@@ -74,7 +73,6 @@ class VJF(Module):
             ],
             lr=lr,
         )
-        self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -165,6 +163,7 @@ class VJF(Module):
             self.likelihood.update(py, y)
         if transition:
             self.transition.update(xt, xs, u, warm_up=warm_up)
+            # self.transition.update(qt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
@@ -227,6 +226,8 @@ class VJF(Module):
         :return:
             q_seq: list of posterior each step
         """
+        scheduler = ExponentialLR(self.optimizer, gamma=gamma)
+
         y = torch.as_tensor(y, dtype=torch.get_default_dtype())
         y = torch.atleast_2d(y)
         if u is None:
@@ -296,7 +297,7 @@ class VJF(Module):
                     'Loss': running_loss.item(),
                 })
 
-                self.scheduler.step()
+                scheduler.step()
             else:
                 print('Max iteration reached.')
 
