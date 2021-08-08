@@ -278,15 +278,18 @@ class VJF(Module):
                         warm_up = False
                         running_loss = epoch_loss
                         self.decoder.requires_grad_(False)  # freeze decoder after warm up
-                        self.scheduler.step(epoch=0)
-                        # m = torch.stack([q.mean for q in q_seq])
-                        # if isinstance(u_, Tensor) and u_.shape[-1] > 0:
-                        #     u_init = u_[1:, :].reshape(-1, u_.shape[-1])
-                        # else:
-                        #     u_init = None
-                        # self.transition.initialize(m[1:].reshape(-1, m.shape[-1]),
-                        #                            m[:-1].reshape(-1, m.shape[-1]),
-                        #                            u_init)
+                        scheduler.step(epoch=0)
+                        mu = torch.stack([q.mean.detach() for q in q_seq])
+                        if isinstance(u_, Tensor) and u_.shape[-1] > 0:
+                            u_init = u_[1:, :].reshape(-1, u_.shape[-1])
+                        else:
+                            u_init = None
+                        mu0 = mu[:-1].reshape(-1, mu.shape[-1])
+                        mu1 = mu[1:].reshape(-1, mu.shape[-1])
+                        self.transition.initialize(mu1,
+                                                   mu0,
+                                                   u_init)
+                        # self.transition.hyper(mu0, mu1)
                 else:
                     if epoch_loss.isclose(running_loss, rtol=rtol):
                         print('\nConverged.\n')
