@@ -52,7 +52,6 @@ class VJF(Module):
         :param likelihood: GLM likelihood, Gaussian or Poisson
         :param transition: f(x[t-1], u[t]) -> x[t]
         :param recognition: y[t], f(x[t-1], u[t]) -> x[t]
-        :param lr_decay: multiplicative factor of learning rate decay
         """
         super().__init__()
         self.add_module('likelihood', likelihood)
@@ -274,11 +273,10 @@ class VJF(Module):
 
                 if warm_up:
                     if epoch_loss.isclose(running_loss, rtol=rtol):
-                        print('\nWarm up stopped.\n')
                         warm_up = False
                         running_loss = epoch_loss
                         self.decoder.requires_grad_(False)  # freeze decoder after warm up
-                        scheduler.step(epoch=0)
+                        # scheduler.step(epoch=0)
                         mu = torch.stack([q.mean.detach() for q in q_seq])
                         if isinstance(u_, Tensor) and u_.shape[-1] > 0:
                             u_init = u_[1:, :].reshape(-1, u_.shape[-1])
@@ -290,6 +288,7 @@ class VJF(Module):
                                                    mu0,
                                                    u_init)
                         # self.transition.hyper(mu0, mu1)
+                        print('\nWarm up finished.\n')
                 else:
                     if epoch_loss.isclose(running_loss, rtol=rtol):
                         print('\nConverged.\n')
