@@ -367,16 +367,9 @@ class RBFDS(Module):
         """Train regression"""
         xs = torch.atleast_2d(xs)
         xu = nonecat(xs, ut)
-        if isinstance(xt, Tensor):
-            xt = torch.atleast_2d(xt)
-            v = 0.
-        elif isinstance(xt, Gaussian):
-            mean, logvar = xt
-            xt = torch.atleast_2d(mean)
-            v = logvar.exp().mean()
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=.99)  # model dx
+            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
         residual = dx - self.velocity(xu, sampling=False).mean
         mse = residual.pow(2).mean()

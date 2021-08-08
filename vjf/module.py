@@ -17,8 +17,8 @@ class RBF(Module):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=True))
-        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=True))
+        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=False))
+        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=False))
 
     @property
     def n_feature(self):
@@ -66,7 +66,7 @@ class LinearRegression(Module):
             logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
             return Gaussian(functional.linear(feat, w.t()), logvar)
 
-    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = .99):
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
         """RLS weight update
         :param x: (sample, dim)
         :param target: (sample, dim)
