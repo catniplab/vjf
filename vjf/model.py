@@ -316,7 +316,7 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, feature), Recognition(ydim, xdim, udim, hidden_sizes),
+        model = VJF(ydim, xdim, likelihood, DS(n_rbf, xdim, udim, feature), Recognition(ydim, xdim, udim, hidden_sizes),
                     *args, **kwargs)
         return model
 
@@ -326,7 +326,11 @@ class VJF(Module):
         return x, y
 
 
-class RBFDS(Module):
+class DS(Module):
+    """
+    Yet another LDS
+    Model velocity with a linear model
+    """
     def __init__(self, n_rbf: int, xdim: int, udim: int, feature='rbf'):
         super().__init__()
         if feature == 'rbf':
