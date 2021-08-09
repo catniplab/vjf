@@ -27,12 +27,13 @@ class RFF(Module):
         return self.size
 
     def forward(self, x: Tensor) -> Tensor:
-        x = x / self.logscale.exp()
+        # x = x / self.logscale.exp()
         return self.s * torch.cos(x.mm(self.w) + self.b)
     
     @torch.no_grad()
     def init(self, x: Tensor):
-        pass
+        d = functional.pdist(x)
+        nn.init.constant_(self.logscale, d.max().log())
 
 
 class RBF(Module):
@@ -62,7 +63,7 @@ class RBF(Module):
         n = self.centroid.shape[0]
         idx = torch.multinomial(torch.ones(x.shape[0]), num_samples=n)
         c = x[idx, :]
-        d = functional.pdist(c)
+        d = functional.pdist(x)
         nn.init.constant_(self.logscale, d.max().log())
         c = c + torch.randn_like(c) * d.median()
         self.centroid.data = c 
