@@ -27,7 +27,7 @@ class RFF(Module):
         return self.size
 
     def forward(self, x: Tensor) -> Tensor:
-        # x = x / self.logscale.exp()
+        x = x / self.logscale.exp()
         return self.s * torch.cos(x.mm(self.w) + self.b)
     
     @torch.no_grad()
