@@ -161,8 +161,8 @@ class VJF(Module):
         if likelhood:
             self.likelihood.update(py, y)
         if transition:
-            self.transition.update(xt, xs, u, warm_up=warm_up)
-            # self.transition.update(qt, xs, u, warm_up=warm_up)
+            # self.transition.update(xt, xs, u, warm_up=warm_up)
+            self.transition.update(qt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
@@ -374,9 +374,16 @@ class DS(Module):
         """Train regression"""
         xs = torch.atleast_2d(xs)
         xu = nonecat(xs, ut)
+        if isinstance(xt, Tensor):
+            xt = torch.atleast_2d(xt)
+            v = 0.
+        else:
+            mu, logvar = xt
+            xt = torch.atleast_2d(mu)
+            v = torch.atleast_2d(logvar).mean(-1).exp().mean()
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
+            self.velocity.rls(xu, dx, self.logvar.exp() + v, shrink=1.)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
         residual = dx - self.velocity(xu, sampling=False).mean
         mse = residual.pow(2).mean()
