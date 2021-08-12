@@ -40,7 +40,7 @@ plt.title('True state')
 
 # %% Fit VJF
 n_rbf = 100  # number of radial basis functions
-hidden_sizes = [20]  # structure of MLP
+hidden_sizes = 20  # structure of MLP
 likelihood = 'gaussian'  # gaussian or poisson
 # likelihood = 'poisson'  # gaussian or poisson
 
@@ -50,6 +50,7 @@ model = VJF.make_model(ydim,
                        n_rbf=n_rbf,
                        hidden_sizes=hidden_sizes,
                        likelihood=likelihood,
+                       recognition='gru',
                        feature='rff')
 ax.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T,
            s=10,
@@ -59,7 +60,7 @@ c0 = model.transition.velocity.feature.centroid.clone()
 
 m, logvar, _ = model.fit(
     y, max_iter=100, warm_up=True, clip_value=5., gamma=0.99,
-    update=True)  # return list of state posterior tuples (mean, log variance)
+    update=True, offline=True, rtol=1e-4)  # return list of state posterior tuples (mean, log variance)
 
 c1 = model.transition.velocity.feature.centroid.clone()
 
@@ -92,9 +93,9 @@ Um, Vm = model.transition.velocity(
 Um = np.reshape(Um, Xm.shape)
 Vm = np.reshape(Vm, Ym.shape)
 plt.streamplot(Xm, Ym, Um, Vm)
-plt.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T,
-            s=10,
-            c='r')
+# plt.scatter(*model.transition.velocity.feature.centroid.detach().numpy().T,
+#             s=10,
+#             c='r')
 plt.plot(*m.T, color='C1', alpha=0.5, zorder=5)
 plt.title('Velocity field')
 

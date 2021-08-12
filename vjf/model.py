@@ -12,7 +12,7 @@ from .distribution import Gaussian
 from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF, RFF
-from .recognition import Recognition
+from .recognition import GRURecognition, Recognition
 from .util import reparametrize, symmetric, running_var, nonecat
 
 
@@ -46,7 +46,8 @@ def detach(q: Gaussian) -> Gaussian:
 
 
 class VJF(Module):
-    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module):
+    def __init__(self, ydim: int, xdim: int, likelihood: Module,
+                 transition: Module, recognition: Module):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
@@ -65,10 +66,22 @@ class VJF(Module):
         lr = 1e-4
         self.optimizer = SGD(
             [
-                {'params': self.likelihood.parameters(), 'lr': lr},
-                {'params': self.decoder.parameters(), 'lr': lr},
-                {'params': self.transition.parameters(), 'lr': lr},
-                {'params': self.recognition.parameters(), 'lr': lr},
+                {
+                    'params': self.likelihood.parameters(),
+                    'lr': lr
+                },
+                {
+                    'params': self.decoder.parameters(),
+                    'lr': lr
+                },
+                {
+                    'params': self.transition.parameters(),
+                    'lr': lr
+                },
+                {
+                    'params': self.recognition.parameters(),
+                    'lr': lr
+                },
             ],
             lr=lr,
         )
@@ -90,11 +103,18 @@ class VJF(Module):
 
         return Gaussian(mean, logvar)
 
-    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None) -> Tuple:
+    def forward(self,
+                y: Tensor,
+                qs: Gaussian,
+                u: Tensor = None,
+                h: Tensor = None,
+                *,
+                online: bool = True) -> Tuple:
         """
         :param y: new observation
         :param qs: posterior before new observation
         :param u: input, None if autonomous
+        :param offline: detach qs
         :return:
             pt: prediction before observation
             qt: posterior after observation
@@ -102,14 +122,19 @@ class VJF(Module):
         # encode
         if qs is None:
             qs = self.prior(y)
-        else:
+        elif online:
+            # print('detaching qs')
+        # else:
             qs = detach(qs)
 
         xs = reparametrize(qs)
         pt = self.transition(xs, u, sampling=False)
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, qs, u)
+        if isinstance(self.recognition, GRURecognition):
+            qt, h = self.recognition(y, h, u)
+        else:
+            qt = self.recognition(y, qs, u)
 
         # decode
         xt = reparametrize(qt)
@@ -117,8 +142,15 @@ class VJF(Module):
 
         return xs, pt, qt, xt, py
 
-    def loss(self, y: Tensor, xs: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor,
-             components: bool = False, warm_up: bool = False) -> Union[Tensor, Tuple]:
+    def loss(self,
+             y: Tensor,
+             xs: Tensor,
+             pt: Tensor,
+             qt: Gaussian,
+             xt: Tensor,
+             py: Tensor,
+             components: bool = False,
+             warm_up: bool = False) -> Union[Tensor, Tuple]:
 
         # recon
         l_recon = self.likelihood.loss(py, y)
@@ -141,8 +173,20 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, u: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor, *,
-               likelhood=True, decoder=True, transition=True, recognition=True, warm_up=False):
+    def update(self,
+               y: Tensor,
+               xs: Tensor,
+               u: Tensor,
+               pt: Tensor,
+               qt: Gaussian,
+               xt: Tensor,
+               py: Tensor,
+               *,
+               likelhood=True,
+               decoder=True,
+               transition=True,
+               recognition=True,
+               warm_up=False):
         """Learning without gradient
         :param y:
         :param xs:
@@ -164,8 +208,16 @@ class VJF(Module):
             # self.transition.update(xt, xs, u, warm_up=warm_up)
             self.transition.update(qt, xs, u, warm_up=warm_up)
 
-    def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
+    def filter(self,
+               y: Tensor,
+               u: Tensor = None,
+               qs: Gaussian = None,
+               h: Tensor = None,
+               *,
+               sgd: bool = True,
+               update: bool = True,
+               verbose: bool = False,
+               warm_up: bool = False,
                clip_value=1.):
         """
         Filter a step or a sequence
@@ -187,8 +239,15 @@ class VJF(Module):
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
 
-        xs, pt, qt, xt, py = self.forward(y, qs, u)
-        output = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
+        xs, pt, qt, xt, py = self.forward(y, qs, u, h, online=sgd)
+        output = self.loss(y,
+                           xs,
+                           pt,
+                           qt,
+                           xt,
+                           py,
+                           components=verbose,
+                           warm_up=warm_up)
         if verbose:
             loss, *elbos = output
         else:
@@ -204,17 +263,27 @@ class VJF(Module):
                 nn.utils.clip_grad_value_(self.parameters(), clip_value)
             self.optimizer.step()
         if update:
-            self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
+            self.update(y, xs, u, pt, qt, xt, py,
+                        warm_up=warm_up)  # non-gradient step
 
         if verbose:
-            return qt, loss, *elbos
+            return qt, loss, h, *elbos
         else:
-            return qt, loss
+            return qt, loss, h
 
-    def fit(self, y: Tensor, u: Tensor = None, *,
-            max_iter: int = 200, beta: float = 0.1, verbose: bool = False, rtol: float = 1e-4,
-            update=True,
-            warm_up=True, gamma=0.99, **kwargs):
+    def fit(self,
+            y: Tensor,
+            u: Tensor = None,
+            *,
+            max_iter: int = 200,
+            beta: float = 0.1,
+            verbose: bool = False,
+            rtol: float = 1e-4,
+            update: bool = True,
+            warm_up: bool = True,
+            gamma: float = 0.99,
+            offline: bool = False,
+            **kwargs):
         """
         :param y: observation, (time, ..., dim)
         :param u: control input, None if
@@ -245,14 +314,19 @@ class VJF(Module):
                 losses = []
 
                 q = None  # use prior
+                h = None
                 for yt, ut in zip_longest(y, u_):
-                    q, loss, *elbos = self.filter(yt, ut, q,
-                                                  sgd=True,
-                                                  update=update,
-                                                  verbose=verbose,
-                                                  warm_up=warm_up,
-                                                  **kwargs,
-                                                  )
+                    q, loss, h, *elbos = self.filter(
+                        yt,
+                        ut,
+                        q,
+                        h,
+                        sgd=not offline,
+                        update=update,
+                        verbose=verbose,
+                        warm_up=warm_up,
+                        **kwargs,
+                    )
                     losses.append(loss)
                     q_seq.append(q)
                     if verbose:
@@ -275,7 +349,8 @@ class VJF(Module):
                     if epoch_loss.isclose(running_loss, rtol=rtol):
                         warm_up = False
                         running_loss = epoch_loss
-                        self.decoder.requires_grad_(False)  # freeze decoder after warm up
+                        self.decoder.requires_grad_(
+                            False)  # freeze decoder after warm up
                         # scheduler.step(epoch=0)
                         mu = torch.stack([q.mean.detach() for q in q_seq])
                         if isinstance(u_, Tensor) and u_.shape[-1] > 0:
@@ -284,9 +359,7 @@ class VJF(Module):
                             u_init = None
                         mu0 = mu[:-1].reshape(-1, mu.shape[-1])
                         mu1 = mu[1:].reshape(-1, mu.shape[-1])
-                        self.transition.initialize(mu1,
-                                                   mu0,
-                                                   u_init)
+                        self.transition.initialize(mu1, mu0, u_init)
                         # self.transition.hyper(mu0, mu1)
                         print('\nWarm up finished.\n')
                 else:
@@ -294,11 +367,17 @@ class VJF(Module):
                         print('\nConverged.\n')
                         break
 
-                running_loss = beta * running_loss + (1 - beta) * epoch_loss if i > 0 else epoch_loss
+                running_loss = beta * running_loss + (
+                    1 - beta) * epoch_loss if i > 0 else epoch_loss
 
                 progress.set_postfix({
                     'Loss': running_loss.item(),
                 })
+                
+                if offline:
+                    self.optimizer.zero_grad()
+                    epoch_loss.backward()
+                    self.optimizer.step()
 
                 scheduler.step()
             else:
@@ -309,18 +388,38 @@ class VJF(Module):
         return mu, logvar, epoch_loss
 
     @classmethod
-    def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', feature: str = 'rbf', *args, **kwargs):
+    def make_model(cls,
+                   ydim: int,
+                   xdim: int,
+                   udim: int,
+                   n_rbf: int,
+                   hidden_sizes: Union[int, Sequence[int]],
+                   likelihood: str = 'poisson',
+                   recognition: str = 'mlp',
+                   feature: str = 'rbf',
+                   *args,
+                   **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, DS(n_rbf, xdim, udim, feature), Recognition(ydim, xdim, udim, hidden_sizes),
-                    *args, **kwargs)
+        if recognition == 'mlp':
+            recognition = Recognition(ydim, xdim, udim, hidden_sizes)
+        elif recognition == 'gru':
+            recognition = GRURecognition(ydim, xdim, udim, hidden_sizes)
+
+        model = VJF(ydim, xdim, likelihood, DS(n_rbf, xdim, udim, feature),
+                    recognition, *args,
+                    **kwargs)
         return model
 
-    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
+    def forecast(self,
+                 x0: Tensor,
+                 u: Tensor = None,
+                 n_step: int = 1,
+                 *,
+                 noise: bool = False) -> Tuple[Tensor, Tensor]:
         x = self.transition.forecast(x0, u, n_step, noise=noise)
         y = self.decoder(x)
         return x, y
@@ -334,13 +433,21 @@ class DS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int, feature='rbf'):
         super().__init__()
         if feature == 'rbf':
-            self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+            self.add_module('velocity',
+                            LinearRegression(RBF(xdim + udim, n_rbf), xdim))
         else:
-            self.add_module('velocity', LinearRegression(RFF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
+            self.add_module('velocity',
+                            LinearRegression(RFF(xdim + udim, n_rbf), xdim))
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(0.),
+                                          requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
 
-    def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
+    def forward(self,
+                x: Tensor,
+                u: Tensor = None,
+                sampling: bool = True,
+                leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
         dx = self.velocity(xu, sampling=sampling)
         if isinstance(dx, Gaussian):
@@ -348,7 +455,12 @@ class DS(Module):
         else:
             return (1 - leak) * x + dx
 
-    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tensor:
+    def forecast(self,
+                 x0: Tensor,
+                 u: Tensor = None,
+                 n_step: int = 1,
+                 *,
+                 noise: bool = False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
         x = torch.empty(n_step + 1, *x0.shape)
@@ -360,7 +472,8 @@ class DS(Module):
         else:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
-            assert u.shape[0] == n_step, 'u must have length of n_step if present'
+            assert u.shape[
+                0] == n_step, 'u must have length of n_step if present'
 
         for t in range(n_step):
             x[t + 1] = self.forward(x[t], u[t], sampling=True)
@@ -370,7 +483,12 @@ class DS(Module):
         return x
 
     @torch.no_grad()
-    def update(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *, warm_up=False):
+    def update(self,
+               xt: Tensor,
+               xs: Tensor,
+               ut: Tensor = None,
+               *,
+               warm_up=False):
         """Train regression"""
         xs = torch.atleast_2d(xs)
         xu = nonecat(xs, ut)
@@ -383,11 +501,16 @@ class DS(Module):
             v = torch.atleast_2d(logvar).mean(-1).exp().mean()
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp() + v, shrink=1.)  # model dx
+            self.velocity.rls(xu, dx, self.logvar.exp() + v,
+                              shrink=1.)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
         residual = dx - self.velocity(xu, sampling=False).mean
         mse = residual.pow(2).mean()
-        var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
+        var, n_sample = running_var(self.logvar.exp(),
+                                    self.n_sample,
+                                    mse,
+                                    xs.shape[0],
+                                    size_cap=500)
         self.logvar.data = var.log()
         self.n_sample = n_sample
 
