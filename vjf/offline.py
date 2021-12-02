@@ -262,7 +262,7 @@ class RBFDS(Module):
         return gaussian_loss(pt, qt, self.logvar)
 
 
-def train(model: VJF, y, u, *, max_iter: int = 200, beta: float = .1, verbose: bool = False, rtol: float = 1e-4, lr: float = 1e-4, lr_decay: float = .9):
+def train(model: VJF, y: Tensor, u: Tensor = None, *, max_iter: int = 200, beta: float = .1, verbose: bool = False, rtol: float = 1e-4, lr: float = 1e-4, lr_decay: float = .9):
     optimizer = Adam(
         [
             {'params': model.likelihood.parameters(), 'lr': lr},
