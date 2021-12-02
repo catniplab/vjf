@@ -185,7 +185,7 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), GRURecognition(ydim, xdim, udim, hidden_sizes),
                     *args, **kwargs)
         return model
 
