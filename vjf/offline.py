@@ -277,67 +277,39 @@ def train(model: VJF, y: Tensor, u: Tensor = None, *, max_iter: int = 200, beta:
 
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
     y = torch.atleast_2d(y)
-    if u is None:
-        u_ = [None]
-    else:
-        u_ = torch.as_tensor(u, dtype=torch.get_default_dtype())
-        u_ = torch.atleast_2d(u_)
 
     warm_up = True
-    epoch_loss = torch.tensor(float('nan'))
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
         for i in progress:
             # collections
-            q_seq = []  # maybe deque is better than list?
-            losses = []
 
-            q = None  # use prior
-            for yt, ut in zip_longest(y, u_):
-                q, loss, *elbos = model.filter(yt, ut, q,
-                                                sgd=True,
-                                                update=True,
-                                                verbose=verbose,
-                                                warm_up=warm_up,
-                                                )
-                losses.append(loss)
-                q_seq.append(q)
-                if verbose:
-                    progress.set_postfix({
-                        # 'Warm up': str(warm_up),
-                        'Loss': running_loss.item(),
-                        'Recon': elbos[0].item(),
-                        'Dynamics': elbos[1].item(),
-                        'Entropy': elbos[2].item(),
-                        # 'q norm': torch.norm(q[0]).item(),
-                        # 'obs noise': self.likelihood.logvar.exp().item(),
-                        # 'state noise': self.transition.logvar.exp().item(),
-                        # 'centroid': self.transition.velocity.feature.centroid.mean().item(),
-                        # 'width': self.transition.velocity.feature.logwidth.exp().mean().item(),
-                    })
-
-            epoch_loss = sum(losses) / len(losses)
+            yhat, x, m, lv, m1, lv1 = model.forward(y, u)
+            total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, x, m, lv, m1, lv1, components=True, warm_up=warm_up)
 
             if warm_up:
-                if epoch_loss.isclose(running_loss, rtol=rtol):
+                # total_loss = loss_recon - h
+                if total_loss.isclose(running_loss, rtol=rtol):
                     warm_up = False
-                    running_loss = epoch_loss
+                    running_loss = total_loss
                     print('\nWarm up stopped.\n')
                     model.decoder.requires_grad_(False)  # freeze decoder after warm up
-                    m = torch.stack([q.mean for q in q_seq])
-                    if isinstance(u_, Tensor) and u_.shape[-1] > 0:
-                        u_init = u_[1:, :].reshape(-1, u_.shape[-1])
-                    else:
-                        u_init = None
                     model.transition.initialize(m[1:].reshape(-1, m.shape[-1]),
                                                 m[:-1].reshape(-1, m.shape[-1]),
-                                                u_init)
+                                                u)
+                else:
+                    optimizer.zero_grad()
+                    total_loss.backward()
+                    optimizer.step()
             else:
-                if epoch_loss.isclose(running_loss, rtol=rtol):
+                optimizer.zero_grad()
+                total_loss.backward()
+                optimizer.step()
+                if total_loss.isclose(running_loss, rtol=rtol):
                     print('\nConverged.\n')
                     break
 
-            running_loss = beta * running_loss + (1 - beta) * epoch_loss if i > 0 else epoch_loss
+            running_loss = beta * running_loss + (1 - beta) * total_loss if i > 0 else total_loss
 
             progress.set_postfix({
                 'Loss': running_loss.item(),
