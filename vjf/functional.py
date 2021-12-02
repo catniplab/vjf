@@ -24,7 +24,7 @@ def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
 def gaussian_entropy(q: Gaussian) -> Tensor:
     """Gaussian entropy"""
     _, logvar = q
-    assert logvar.ndim == 2
+    assert logvar.ndim >= 2
     return 0.5 * logvar.sum(-1).mean()
 
 
@@ -55,7 +55,7 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
 
     # print(mu, logv)
     mse = functional.mse_loss(m1 * p, m2 * p, reduction='none')
-    assert mse.ndim == 2
+    assert mse.ndim >= 2
     assert torch.all(torch.isfinite(mse)), mse
 
     nll = .5 * (mse + logvar)
