@@ -120,14 +120,15 @@ class VJF(Module):
         # encode
 
         y = torch.atleast_2d(y)
+        # TODO: 3D y
         mean, logvar, mean0, logvar0 = self.recognition(y, u)
-        m = torch.stack((mean, mean0))
-        lv = torch.stack((logvar, logvar0))
-        x = reparametrize(m, lv)
-
-        m1, lv1 = self.transition(x, u)
-
-        x1 = x[:-1, ...]
+        m = torch.vstack((mean0.unsqueeze(0), mean))
+        lv = torch.vstack((logvar0.unsqueeze(0), logvar))
+        x = reparametrize((m, lv))
+        x0 = x[:-1, ...]
+        m1 = self.transition(x0, u)
+        lv1 = torch.ones_like(m1) * self.transition.logvar
+        x1 = x[1:, ...]
         # decode
         yhat = self.decoder(x1)  # NOTE: closed-form did not work well
 
