@@ -345,6 +345,4 @@ def train(model: VJF, y: Tensor, u: Tensor = None, *, max_iter: int = 200, beta:
 
             scheduler.step()
 
-    mu = torch.stack([q.mean for q in q_seq])
-    logvar = torch.stack([q.logvar for q in q_seq])
-    return mu, logvar, epoch_loss
+    return m, lv
