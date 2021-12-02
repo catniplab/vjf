@@ -150,7 +150,7 @@ class VJF(Module):
             loss = loss + l_dynamics
 
         if components:
-            return loss, -l_recon, -l_dynamics, h
+            return loss, l_recon, l_dynamics, h
         else:
             return loss
 
