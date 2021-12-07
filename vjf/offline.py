@@ -364,6 +364,7 @@ def train(model: VJF,
 
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
     y = torch.atleast_2d(y)
+    u2D = None if u is None else u.reshape(-1, u.shape[-1])
 
     warm_up = True
     with trange(max_iter) as progress:
