@@ -43,10 +43,18 @@ class GRURecognition(Module):
     def __init__(self, ydim: int, xdim: int, udim: int, hidden_size: int):
         super().__init__()
 
-        self.add_module('gru', GRU(input_size=ydim + udim, hidden_size=hidden_size, batch_first=False, bidirectional=True))
-        self.register_parameter('h0', Parameter(torch.zeros(2, 1, hidden_size)))
+        self.add_module(
+            'gru',
+            GRU(input_size=ydim + udim,
+                hidden_size=hidden_size,
+                batch_first=False,
+                bidirectional=True))
+        self.register_parameter('h0', Parameter(torch.zeros(2, 1,
+                                                            hidden_size)))
 
-        self.add_module('hidden_q', Linear(hidden_size * 2, xdim * 2, bias=True))
+        self.add_module('hidden_q', Linear(hidden_size * 2,
+                                           xdim * 2,
+                                           bias=True))
 
     def forward(self, y: Tensor, u: Tensor = None) -> Gaussian:
         yu = nonecat(y, u)
@@ -63,7 +71,8 @@ class GRURecognition(Module):
 
 
 class VJF(Module):
-    def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module):
+    def __init__(self, ydim: int, xdim: int, likelihood: Module,
+                 transition: Module, recognition: Module):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
@@ -134,11 +143,21 @@ class VJF(Module):
 
         return yhat, x, m, lv, m1, lv1
 
-    def loss(self, y: Tensor, yhat, x, m, lv, m1, lv1, components: bool = True, warm_up: bool = False):
+    def loss(self,
+             y: Tensor,
+             yhat,
+             x,
+             m,
+             lv,
+             m1,
+             lv1,
+             components: bool = True,
+             warm_up: bool = False):
         # recon
         l_recon = self.likelihood.loss(yhat, y)
         # dynamics
-        l_dynamics = gaussian_loss(m1, x[:-1, ...], self.logvar)  # TODO: use posterior variance
+        l_dynamics = gaussian_loss(m1, x[:-1, ...],
+                                   self.logvar)  # TODO: use posterior variance
         # entropy
         h = entropy(Gaussian(m, lv))
 
@@ -156,8 +175,20 @@ class VJF(Module):
             return loss
 
     @torch.no_grad()
-    def update(self, y: Tensor, xs: Tensor, u: Tensor, pt: Tensor, qt: Gaussian, xt: Tensor, py: Tensor, *,
-               likelhood=True, decoder=True, transition=True, recognition=True, warm_up=False):
+    def update(self,
+               y: Tensor,
+               xs: Tensor,
+               u: Tensor,
+               pt: Tensor,
+               qt: Gaussian,
+               xt: Tensor,
+               py: Tensor,
+               *,
+               likelhood=True,
+               decoder=True,
+               transition=True,
+               recognition=True,
+               warm_up=False):
         """Learning without gradient
         :param y:
         :param xs:
@@ -179,18 +210,31 @@ class VJF(Module):
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
     @classmethod
-    def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', *args, **kwargs):
+    def make_model(cls,
+                   ydim: int,
+                   xdim: int,
+                   udim: int,
+                   n_rbf: int,
+                   hidden_sizes: Sequence[int],
+                   likelihood: str = 'poisson',
+                   *args,
+                   **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), GRURecognition(ydim, xdim, udim, hidden_sizes),
-                    *args, **kwargs)
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim),
+                    GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
+                    **kwargs)
         return model
 
-    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
+    def forecast(self,
+                 x0: Tensor,
+                 u: Tensor = None,
+                 n_step: int = 1,
+                 *,
+                 noise: bool = False) -> Tuple[Tensor, Tensor]:
         x = self.transition.forecast(x0, u, n_step, noise=noise)
         y = self.decoder(x)
         return x, y
@@ -199,11 +243,18 @@ class VJF(Module):
 class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
-        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
-        self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
+        self.add_module('velocity',
+                        LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(0.),
+                                          requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
 
-    def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
+    def forward(self,
+                x: Tensor,
+                u: Tensor = None,
+                sampling: bool = True,
+                leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
         dx = self.velocity(xu, sampling=sampling)
         if isinstance(dx, Gaussian):
@@ -211,7 +262,12 @@ class RBFDS(Module):
         else:
             return (1 - leak) * x + dx
 
-    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tensor:
+    def forecast(self,
+                 x0: Tensor,
+                 u: Tensor = None,
+                 n_step: int = 1,
+                 *,
+                 noise: bool = False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
         x = torch.empty(n_step + 1, *x0.shape)
@@ -223,7 +279,8 @@ class RBFDS(Module):
         else:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
-            assert u.shape[0] == n_step, 'u must have length of n_step if present'
+            assert u.shape[
+                0] == n_step, 'u must have length of n_step if present'
 
         for t in range(n_step):
             x[t + 1] = self.forward(x[t], u[t], sampling=True)
@@ -233,7 +290,12 @@ class RBFDS(Module):
         return x
 
     @torch.no_grad()
-    def update(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *, warm_up=False):
+    def update(self,
+               xt: Tensor,
+               xs: Tensor,
+               ut: Tensor = None,
+               *,
+               warm_up=False):
         """Train regression"""
         xs = torch.atleast_2d(xs)
         xu = nonecat(xs, ut)
@@ -244,7 +306,11 @@ class RBFDS(Module):
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
         residual = dx - self.velocity(xu, sampling=False).mean
         mse = residual.pow(2).mean()
-        var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
+        var, n_sample = running_var(self.logvar.exp(),
+                                    self.n_sample,
+                                    mse,
+                                    xs.shape[0],
+                                    size_cap=500)
         self.logvar.data = var.log()
         self.n_sample = n_sample
 
@@ -263,13 +329,34 @@ class RBFDS(Module):
         return gaussian_loss(pt, qt, self.logvar)
 
 
-def train(model: VJF, y: Tensor, u: Tensor = None, *, max_iter: int = 200, beta: float = .1, verbose: bool = False, rtol: float = 1e-4, lr: float = 1e-4, lr_decay: float = .9):
+def train(model: VJF,
+          y: Tensor,
+          u: Tensor = None,
+          *,
+          max_iter: int = 200,
+          beta: float = .1,
+          verbose: bool = False,
+          rtol: float = 1e-4,
+          lr: float = 1e-4,
+          lr_decay: float = .9):
     optimizer = Adam(
         [
-            {'params': model.likelihood.parameters(), 'lr': lr},
-            {'params': model.decoder.parameters(), 'lr': lr},
-            {'params': model.transition.parameters(), 'lr': lr},
-            {'params': model.recognition.parameters(), 'lr': lr},
+            {
+                'params': model.likelihood.parameters(),
+                'lr': lr
+            },
+            {
+                'params': model.decoder.parameters(),
+                'lr': lr
+            },
+            {
+                'params': model.transition.parameters(),
+                'lr': lr
+            },
+            {
+                'params': model.recognition.parameters(),
+                'lr': lr
+            },
         ],
         lr=lr,
     )
