@@ -43,7 +43,11 @@ class LinearRegression(Module):
         self.add_module('feature', feature)
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
-        self.w_mean = torch.zeros(self.feature.n_feature, n_output)
+        w_mean = torch.zeros(self.feature.n_feature, n_output)
+        if not bayes:
+            self.register_parameter('w_mean', Parameter(w_mean))
+        else:
+            self.w_mean = w_mean
         # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         self.w_precision = torch.eye(self.feature.n_feature)
