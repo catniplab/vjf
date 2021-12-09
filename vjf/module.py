@@ -36,8 +36,10 @@ class RBF(Module):
 
 class LinearRegression(Module):
     """Bayesian linear regression"""
-    def __init__(self, feature: Module, n_output: int):
+    def __init__(self, feature: Module, n_output: int, bayes=True):
         super().__init__()
+
+        self.bayes = bayes
         self.add_module('feature', feature)
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
@@ -57,6 +59,10 @@ class LinearRegression(Module):
         """
         feat = self.feature(x)
         w = self.w_mean
+        
+        if not self.bayes:
+            return functional.linear(feat, w.t())
+
         if sampling:
             w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
             # w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
