@@ -243,12 +243,17 @@ class VJF(Module):
 class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
-        self.add_module('velocity',
-                        LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim, bayes=False))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(0.),
                                           requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
+    
+    def velocity(self, x, sampling=True):
+        return self.linreg(x, sampling)
+
+    def transition(self, x, sampling=True):
+        return self.linreg(x, sampling) + x
 
     def forward(self,
                 x: Tensor,
@@ -256,11 +261,12 @@ class RBFDS(Module):
                 sampling: bool = True,
                 leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
-        dx = self.velocity(xu, sampling=sampling)
-        if isinstance(dx, Gaussian):
-            return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
-        else:
-            return (1 - leak) * x + dx
+        # dx = self.velocity(xu, sampling=sampling)
+        return self.transition(xu, sampling=sampling)
+        # if isinstance(dx, Gaussian):
+        #     return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
+        # else:
+        #     return (1 - leak) * x + dx
 
     def forecast(self,
                  x0: Tensor,
