@@ -380,39 +380,27 @@ def train(model: VJF,
 
             yhat, x, m, lv, m1, lv1 = model.forward(y, u)
             total_loss, loss_recon, loss_dynamics, h = model.loss(
-                y, yhat, x, m, lv, m1, lv1, components=True, warm_up=warm_up)
+                y, yhat, x, m, lv, m1, lv1, components=True, warm_up=False)
+            
+            kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
+            total_loss = loss_recon + kl_scale * (loss_dynamics - h)
 
-            if warm_up:
-                # total_loss = loss_recon - h
-                if total_loss.isclose(running_loss, rtol=rtol):
-                    warm_up = False
-                    running_loss = total_loss
-                    print('\nWarm up stopped.\n')
-                    model.decoder.requires_grad_(
-                        False)  # freeze decoder after warm up
-                    model.transition.initialize(
-                        m[1:].reshape(-1, m.shape[-1]),
-                        m[:-1].reshape(-1, m.shape[-1]), u2D)
-                else:
-                    optimizer.zero_grad()
-                    total_loss.backward()
-                    optimizer.step()
-            else:
-                optimizer.zero_grad()
-                total_loss.backward()
-                optimizer.step()
-                model.transition.update(m[1:].reshape(-1, m.shape[-1]),
-                                        m[:-1].reshape(-1, m.shape[-1]), u2D)
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+                # model.transition.update(m[1:].reshape(-1, m.shape[-1]),
+                #                         m[:-1].reshape(-1, m.shape[-1]), u2D)
 
-                if total_loss.isclose(running_loss, rtol=rtol):
-                    print('\nConverged.\n')
-                    break
+            if total_loss.isclose(running_loss, rtol=rtol):
+                print('\nConverged.\n')
+                break
 
-            running_loss = beta * running_loss + (
-                1 - beta) * total_loss if i > 0 else total_loss
+            running_loss = beta * running_loss + (1 - beta) * total_loss if i > 0 else total_loss
+            # print(total_loss)
 
             progress.set_postfix({
                 'Loss': running_loss.item(),
+                'KL scale': kl_scale.item(),
             })
 
             scheduler.step()
