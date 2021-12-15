@@ -57,3 +57,12 @@ def at_least2d(a: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
         return Gaussian(torch.atleast_2d(a.mean), torch.atleast_2d(a.logvar))
     else:
         raise TypeError(a.__class__)
+
+
+def flat2d(a):
+    if a is None:
+        return None
+    if a.ndim <= 2:
+        return at_least2d(a)
+    else:
+        return a.reshape(-1, a.shape[-1])
