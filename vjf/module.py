@@ -13,12 +13,12 @@ from .distribution import Gaussian
 
 class RBF(Module):
     """Radial basis functions"""
-    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False):
+    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False, requires_grad: bool = False):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=False))
-        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=requires_grad))
+        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=requires_grad))
 
     @property
     def n_feature(self):
