@@ -350,9 +350,14 @@ def train(model: VJF,
 
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
     y = torch.atleast_2d(y)
-    u2D = None if u is None else u.reshape(-1, u.shape[-1])
 
-    warm_up = True
+    L, N, _ = y.shape  # 3D, time first
+
+    if u is None:
+        udim = 0
+        u = torch.zeros(L, N, udim)  # 0D input
+    udim = u.shape[-1]
+
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
         for i in progress:
