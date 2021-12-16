@@ -342,30 +342,10 @@ def train(model: VJF,
           max_iter: int = 200,
           beta: float = 0.,
           verbose: bool = False,
-          rtol: float = 1e-4,
-          lr: float = 1e-4,
-          lr_decay: float = .9):
-    optimizer = Adam(
-        [
-            {
-                'params': model.likelihood.parameters(),
-                'lr': lr
-            },
-            {
-                'params': model.decoder.parameters(),
-                'lr': lr
-            },
-            {
-                'params': model.transition.parameters(),
-                'lr': lr
-            },
-            {
-                'params': model.recognition.parameters(),
-                'lr': lr
-            },
-        ],
-        lr=lr,
-    )
+          rtol: float = 1e-5,
+          lr: float = 1e-3,
+          lr_decay: float = .99):
+    optimizer = Adam(model.parameters(), lr=lr)
     scheduler = ExponentialLR(optimizer, gamma=lr_decay)
 
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
