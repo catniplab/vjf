@@ -335,6 +335,33 @@ class RBFDS(Module):
         return gaussian_loss(pt, qt, self.logvar)
 
 
+class GRUDS(Transition):
+    """DS with GRU transition"""
+    def __init__(self, xdim: int, udim: int):
+        super().__init__()
+        self.xdim = xdim
+        self.udim = udim
+        self.add_module('gru', GRUCell(input_size=udim, hidden_size=xdim))  # TODO: use GRU, better for offline
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(0.),
+                                          requires_grad=True))  # state noise
+    
+    def velocity(self, x, u):
+        return self.forward(x, u) - x
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                sampling: bool = True,
+                leak: float = 0.) -> Union[Tensor, Gaussian]:
+        # dx = self.velocity(xu, sampling=sampling)
+        return self.gru(u, x)
+        # if isinstance(dx, Gaussian):
+        #     return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
+        # else:
+        #     return (1 - leak) * x + dx
+
+
 def train(model: VJF,
           y: Tensor,
           u: Tensor = None,
