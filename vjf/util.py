@@ -65,4 +65,12 @@ def flat2d(a):
     if a.ndim <= 2:
         return at_least2d(a)
     else:
-        return a.reshape(-1, a.shape[-1])
+        shape = a.shape
+        if 0 == shape[-1]:
+            return a.reshape(prod(shape[:-1]), 0)
+        else:
+            return a.reshape(-1, a.shape[-1])
+
+
+def prod(a):
+    return reduce(operator.mul, a, 1)
