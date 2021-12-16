@@ -156,8 +156,8 @@ class VJF(Module):
         # recon
         l_recon = self.likelihood.loss(yhat, y)
         # dynamics
-        l_dynamics = gaussian_loss(m1, x[:-1, ...],
-                                   self.logvar)  # TODO: use posterior variance
+        x1 = x[1:, ...]
+        l_dynamics = gaussian_loss(m1, x1, self.logvar)  # TODO: use posterior variance
         # entropy
         h = entropy(Gaussian(m, lv))
 
