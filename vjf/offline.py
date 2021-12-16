@@ -387,10 +387,8 @@ def train(model: VJF,
 
             optimizer.zero_grad()
             total_loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.)
             optimizer.step()
-                # model.transition.update(m[1:].reshape(-1, m.shape[-1]),
-                #                         m[:-1].reshape(-1, m.shape[-1]), u2D)
-
             if total_loss.isclose(running_loss, rtol=rtol):
                 print('\nConverged.\n')
                 break
