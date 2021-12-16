@@ -1,9 +1,10 @@
-from itertools import zip_longest
+from abc import ABCMeta, abstractmethod
 from typing import Tuple, Sequence, Union
 
 import torch
 from torch import Tensor, nn
 from torch.nn import Module, Linear, Parameter, GRU
+from torch.nn.modules.rnn import GRUCell
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
@@ -12,7 +13,7 @@ from .distribution import Gaussian
 from .functional import gaussian_entropy as entropy, gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
-from .util import reparametrize, symmetric, running_var, nonecat
+from .util import reparametrize, symmetric, running_var, nonecat, flat2d
 
 
 class LinearDecoder(Module):
@@ -118,10 +119,10 @@ class VJF(Module):
 
         return Gaussian(mean, logvar)
 
-    def forward(self, y: Tensor, u: Tensor = None) -> Tuple:
+    def forward(self, y: Tensor, u: Tensor) -> Tuple:
         """
         :param y: new observation
-        :param u: input, None if autonomous
+        :param u: input
         :return:
             pt: prediction before observation
             qt: posterior after observation
@@ -129,15 +130,13 @@ class VJF(Module):
         # encode
 
         y = torch.atleast_2d(y)
-        # TODO: 3D y
-        mean, logvar, mean0, logvar0 = self.recognition(y, u)
-        m = torch.vstack((mean0.unsqueeze(0), mean))
-        lv = torch.vstack((logvar0.unsqueeze(0), logvar))
-        x = reparametrize((m, lv))
-        x0 = x[:-1, ...]
-        m1 = self.transition(x0, u)
+        m, lv = self.recognition(y, u)
+        x = reparametrize((m, lv))  # (L + 1, N, X)
+        x0 = x[:-1, ...]  # (L, N, X), 0...T-1
+        x1 = x[1:, ...]  # (L, N, X), 1...T
+        m1 = self.transition(flat2d(x0), flat2d(u))
+        m1 = m1.reshape(*x0.shape)
         lv1 = torch.ones_like(m1) * self.transition.logvar
-        x1 = x[1:, ...]
         # decode
         yhat = self.decoder(x1)  # NOTE: closed-form did not work well
 
@@ -259,7 +258,7 @@ class Transition(Module, metaclass=ABCMeta):
         s = torch.exp(.5 * self.logvar)
 
         if u is None:
-            u = [None] * n_step
+            u = torch.zeros(n_step, x0.shape[0], 0)  # (L, N, 0)
         else:
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
