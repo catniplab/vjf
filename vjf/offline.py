@@ -49,8 +49,8 @@ class GRURecognition(Module):
                 hidden_size=hidden_size,
                 batch_first=False,
                 bidirectional=True))
-        self.register_parameter('h0', Parameter(torch.zeros(2, 1,
-                                                            hidden_size)))
+        D = 2  # bidirectional
+        self.register_parameter('h0', Parameter(torch.zeros(D, hidden_size)))  # (D, H), batch?
 
         self.add_module('hidden_q', Linear(hidden_size * 2,
                                            xdim * 2,
@@ -61,13 +61,13 @@ class GRURecognition(Module):
         if yu.ndim == 2:
             yu = yu.unsqueeze(1)
         L, N, _ = yu.shape
-        h0 = self.h0.expand(-1, N, -1)  # expand batch axis
-        output, h_n = self.gru(yu, h0)  # (L, N, D*H), (D, N, H)
-        output = self.hidden_q(output)
+        h0 = self.h0.unsqueeze(1).expand(-1, N, -1)  # expand batch axis, (D, N, H)
+        h, _ = self.gru(yu, h0)  # (L, N, D*H) <- (L, N, Y), (D, N, H)
+        h0 = h0 = h0.transpose(0, 1).reshape(N, -1).unsqueeze(0)  # (D, N, H) -> (N, D, H) -> (N, D*H) -> (1, N, D*H)
+        h_all = torch.concat((h0, h), axis=0)
+        output = self.hidden_q(h_all)  # (L + 1, N, 2*X)
         mean, logvar = output.chunk(2, -1)
-        h_n = h0.transpose(0, 1).view(N, -1)
-        mean0, logvar0 = self.hidden_q(h_n).chunk(2, -1)
-        return mean, logvar, mean0, logvar0
+        return mean, logvar
 
 
 class VJF(Module):
