@@ -217,63 +217,41 @@ class VJF(Module):
                    n_rbf: int,
                    hidden_sizes: Sequence[int],
                    likelihood: str = 'poisson',
+                   ds: str = 'rbf',
                    *args,
                    **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
-
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim),
-                    GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
-                    **kwargs)
+        
+        if ds == 'rbf':
+            model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim),
+                        GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
+                        **kwargs)
+        else:
+            model = VJF(ydim, xdim, likelihood, GRUDS(xdim, udim),
+                        GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
+                        **kwargs)
         return model
 
-    def forecast(self,
-                 x0: Tensor,
-                 u: Tensor = None,
-                 n_step: int = 1,
-                 *,
-                 noise: bool = False) -> Tuple[Tensor, Tensor]:
+    def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
         x = self.transition.forecast(x0, u, n_step, noise=noise)
         y = self.decoder(x)
         return x, y
 
 
-class RBFDS(Module):
-    def __init__(self, n_rbf: int, xdim: int, udim: int):
-        super().__init__()
-        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf), xdim, bayes=False))
-        self.register_parameter('logvar',
-                                Parameter(torch.tensor(0.),
-                                          requires_grad=False))  # state noise
-        self.n_sample = 0  # sample counter
-    
-    def velocity(self, x, sampling=True):
-        return self.linreg(x, sampling)
-
-    def transition(self, x, sampling=True):
-        return self.linreg(x, sampling) + x
-
-    def forward(self,
-                x: Tensor,
-                u: Tensor = None,
-                sampling: bool = True,
-                leak: float = 0.) -> Union[Tensor, Gaussian]:
-        xu = nonecat(x, u)
-        # dx = self.velocity(xu, sampling=sampling)
-        return self.transition(xu, sampling=sampling)
-        # if isinstance(dx, Gaussian):
-        #     return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
-        # else:
-        #     return (1 - leak) * x + dx
+class Transition(Module, metaclass=ABCMeta):
+    @abstractmethod
+    def velocity(x, u):
+        pass
 
     def forecast(self,
-                 x0: Tensor,
-                 u: Tensor = None,
-                 n_step: int = 1,
-                 *,
-                 noise: bool = False) -> Tensor:
+                x0: Tensor,
+                u: Tensor = None,
+                n_step: int = 1,
+                *,
+                noise: bool = False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
         x = torch.empty(n_step + 1, *x0.shape)
@@ -294,6 +272,60 @@ class RBFDS(Module):
                 x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
 
         return x
+
+
+# TODO: add abstract DS class
+class RBFDS(Transition):
+    def __init__(self, n_rbf: int, xdim: int, udim: int):
+        super().__init__()
+        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf, requires_grad=True), xdim, bayes=False))
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(0.),
+                                          requires_grad=True))  # state noise
+        self.n_sample = 0  # sample counter
+    
+    def velocity(self, x, sampling=True):
+        return self.linreg(x, sampling)
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor = None,
+                sampling: bool = True,
+                leak: float = 0.) -> Union[Tensor, Gaussian]:
+        xu = nonecat(x, u)
+        dx = self.velocity(xu, sampling=sampling)
+        # return self.transition(xu, sampling=sampling)
+        if isinstance(dx, Gaussian):
+            return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
+        else:
+            return (1 - leak) * x + dx
+
+    # def forecast(self,
+    #              x0: Tensor,
+    #              u: Tensor = None,
+    #              n_step: int = 1,
+    #              *,
+    #              noise: bool = False) -> Tensor:
+    #     x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
+    #     x0 = torch.atleast_2d(x0)
+    #     x = torch.empty(n_step + 1, *x0.shape)
+    #     x[0] = x0
+    #     s = torch.exp(.5 * self.logvar)
+
+    #     if u is None:
+    #         u = [None] * n_step
+    #     else:
+    #         u = torch.as_tensor(u, dtype=torch.get_default_dtype())
+    #         u = torch.atleast_2d(u)
+    #         assert u.shape[
+    #             0] == n_step, 'u must have length of n_step if present'
+
+    #     for t in range(n_step):
+    #         x[t + 1] = self.forward(x[t], u[t], sampling=True)
+    #         if noise:
+    #             x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
+
+    #     return x
 
     @torch.no_grad()
     def update(self,
