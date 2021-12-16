@@ -1,4 +1,6 @@
+from functools import reduce
 from typing import Tuple, Union
+import operator
 
 import torch
 from torch import Tensor
@@ -40,8 +42,10 @@ def nonecat(a: Tensor, u: Tensor):
     """
     au = torch.atleast_2d(a)
     if u is not None:
-        u = torch.atleast_2d(u)
-        au = torch.cat((au, u), -1)
+        udim = u.shape[-1]
+        if udim > 0:
+            u = torch.atleast_2d(u)
+            au = torch.cat((au, u), -1)
     return au
 
 
