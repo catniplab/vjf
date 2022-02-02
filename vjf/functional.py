@@ -10,7 +10,8 @@ from .util import at_least2d
 
 def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
     """
-    Radial basis functions
+    Set of Gaussian radial basis functions defined by centroids and lengthscales
+    broadcast batch and basis axes
     :param x: input, (batch, dim)
     :param c: centroids, (basis, dim)
     :param w: width (scale), (basis)
