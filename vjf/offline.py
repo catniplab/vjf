@@ -4,13 +4,13 @@ from typing import Tuple, Sequence, Union
 import torch
 from torch import Tensor, nn
 from torch.nn import Module, Linear, Parameter, GRU
-from torch.nn.modules.rnn import GRUCell
+from torch.nn.modules.rnn import RNNCell
 from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
 from .distribution import Gaussian
-from .functional import gaussian_entropy as entropy, gaussian_loss
+from .functional import gaussian_entropy as entropy, gaussian_loss, normed_linear
 from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import LinearRegression, RBF
 from .util import reparametrize, symmetric, running_var, nonecat, flat2d
@@ -20,12 +20,12 @@ class LinearDecoder(Module):
     def __init__(self, xdim: int, ydim: int):
         super().__init__()
         self.add_module('decode', Linear(xdim, ydim))
-        self.XX = torch.zeros(xdim + 1, xdim + 1)
         self.n_sample = 0
 
     def forward(self, x: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
         if isinstance(x, Tensor):
             return self.decode(x)
+            # return normed_linear(x, self.decode.weight.T, self.decode.bias)
         elif isinstance(x, Gaussian):
             mean, logvar = x
             mean = self.decode(mean)
@@ -87,45 +87,11 @@ class VJF(Module):
         self.add_module('recognition', recognition)
         self.add_module('decoder', LinearDecoder(xdim, ydim))
 
-        self.register_parameter('mean', Parameter(torch.zeros(xdim)))
-        self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
-
-        # lr = 1e-4
-        # self.optimizer = SGD(
-        #     [
-        #         {'params': self.likelihood.parameters(), 'lr': lr},
-        #         {'params': self.decoder.parameters(), 'lr': lr},
-        #         {'params': self.transition.parameters(), 'lr': lr},
-        #         {'params': self.recognition.parameters(), 'lr': lr},
-        #     ],
-        #     lr=lr,
-        # )
-        # self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
-
-    def prior(self, y: Tensor) -> Gaussian:
-        assert y.ndim == 2
-        n_batch = y.shape[0]
-        xdim = self.mean.shape[-1]
-
-        mean = torch.atleast_2d(self.mean)
-        logvar = torch.atleast_2d(self.logvar)
-
-        one = torch.ones(n_batch, xdim)
-
-        mean = one * mean
-        logvar = one * logvar
-
-        assert mean.size(0) == n_batch and logvar.size(0) == n_batch
-
-        return Gaussian(mean, logvar)
-
     def forward(self, y: Tensor, u: Tensor) -> Tuple:
         """
         :param y: new observation
         :param u: input
         :return:
-            pt: prediction before observation
-            qt: posterior after observation
         """
         # encode
 
@@ -135,28 +101,26 @@ class VJF(Module):
         x0 = x[:-1, ...]  # (L, N, X), 0...T-1
         x1 = x[1:, ...]  # (L, N, X), 1...T
         m1 = self.transition(flat2d(x0), flat2d(u))
-        m1 = m1.reshape(*x0.shape)
-        lv1 = torch.ones_like(m1) * self.transition.logvar
+        m1 = m1.reshape(*x1.shape)
+        # lv1 = torch.ones_like(m1) * self.transition.logvar
         # decode
         yhat = self.decoder(x1)  # NOTE: closed-form did not work well
 
-        return yhat, x, m, lv, m1, lv1
+        return yhat, m, lv, x0, x1, m1
 
     def loss(self,
              y: Tensor,
              yhat,
-             x,
              m,
              lv,
+             x1,
              m1,
-             lv1,
              components: bool = True,
              warm_up: bool = False):
         # recon
         l_recon = self.likelihood.loss(yhat, y)
         # dynamics
-        x1 = x[1:, ...]
-        l_dynamics = gaussian_loss(m1, x1, self.logvar)  # TODO: use posterior variance
+        l_dynamics = self.transition.loss(m1, x1)  # TODO: use posterior variance
         # entropy
         h = entropy(Gaussian(m, lv))
 
@@ -183,7 +147,7 @@ class VJF(Module):
                xt: Tensor,
                py: Tensor,
                *,
-               likelhood=True,
+               likelhood=False,
                decoder=True,
                transition=True,
                recognition=True,
@@ -229,7 +193,7 @@ class VJF(Module):
                         GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
                         **kwargs)
         else:
-            model = VJF(ydim, xdim, likelihood, GRUDS(xdim, udim),
+            model = VJF(ydim, xdim, likelihood, RNNDS(xdim, udim),
                         GRURecognition(ydim, xdim, udim, hidden_sizes), *args,
                         **kwargs)
         return model
@@ -272,15 +236,17 @@ class Transition(Module, metaclass=ABCMeta):
 
         return x
 
+    def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
+        return gaussian_loss(pt, qt, self.logvar)
 
-# TODO: add abstract DS class
+
 class RBFDS(Transition):
     def __init__(self, n_rbf: int, xdim: int, udim: int):
         super().__init__()
-        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf, requires_grad=True), xdim, bayes=False))
+        self.add_module('linreg', LinearRegression(RBF(xdim + udim, n_rbf, requires_grad=False), xdim, bayes=True))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(0.),
-                                          requires_grad=True))  # state noise
+                                          requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
     
     def velocity(self, x, sampling=True):
@@ -299,33 +265,6 @@ class RBFDS(Transition):
         else:
             return (1 - leak) * x + dx
 
-    # def forecast(self,
-    #              x0: Tensor,
-    #              u: Tensor = None,
-    #              n_step: int = 1,
-    #              *,
-    #              noise: bool = False) -> Tensor:
-    #     x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
-    #     x0 = torch.atleast_2d(x0)
-    #     x = torch.empty(n_step + 1, *x0.shape)
-    #     x[0] = x0
-    #     s = torch.exp(.5 * self.logvar)
-
-    #     if u is None:
-    #         u = [None] * n_step
-    #     else:
-    #         u = torch.as_tensor(u, dtype=torch.get_default_dtype())
-    #         u = torch.atleast_2d(u)
-    #         assert u.shape[
-    #             0] == n_step, 'u must have length of n_step if present'
-
-    #     for t in range(n_step):
-    #         x[t + 1] = self.forward(x[t], u[t], sampling=True)
-    #         if noise:
-    #             x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
-
-    #     return x
-
     @torch.no_grad()
     def update(self,
                xt: Tensor,
@@ -339,9 +278,9 @@ class RBFDS(Transition):
         xt = torch.atleast_2d(xt)  # TODO: use qt, add qt.logvar to state noise
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
+            self.linreg.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
-        residual = dx - self.velocity(xu, sampling=False).mean
+        residual = dx - self.linreg(xu, sampling=False).mean
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(),
                                     self.n_sample,
@@ -362,17 +301,14 @@ class RBFDS(Transition):
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()
 
-    def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
-        return gaussian_loss(pt, qt, self.logvar)
 
-
-class GRUDS(Transition):
+class RNNDS(Transition):
     """DS with GRU transition"""
     def __init__(self, xdim: int, udim: int):
         super().__init__()
         self.xdim = xdim
         self.udim = udim
-        self.add_module('gru', GRUCell(input_size=udim, hidden_size=xdim))  # TODO: use GRU, better for offline
+        self.add_module('rnn', RNNCell(input_size=udim, hidden_size=xdim))  # TODO: use GRU, better for offline
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(0.),
                                           requires_grad=True))  # state noise
@@ -385,12 +321,7 @@ class GRUDS(Transition):
                 u: Tensor,
                 sampling: bool = True,
                 leak: float = 0.) -> Union[Tensor, Gaussian]:
-        # dx = self.velocity(xu, sampling=sampling)
-        return self.gru(u, x)
-        # if isinstance(dx, Gaussian):
-        #     return Gaussian((1 - leak) * x + dx.mean, dx.logvar)
-        # else:
-        #     return (1 - leak) * x + dx
+        return self.rnn(u, x)
 
 
 def train(model: VJF,
@@ -421,9 +352,8 @@ def train(model: VJF,
         for i in progress:
             # collections
 
-            yhat, x, m, lv, m1, lv1 = model.forward(y, u)
-            total_loss, loss_recon, loss_dynamics, h = model.loss(
-                y, yhat, x, m, lv, m1, lv1, components=True, warm_up=False)
+            yhat, m, lv, x0, x1, m1 = model.forward(y, u)
+            total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
             
             kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
             total_loss = loss_recon + kl_scale * (loss_dynamics - h)
@@ -445,5 +375,15 @@ def train(model: VJF,
             })
 
             scheduler.step()
+
+            if torch.isclose(kl_scale, torch.tensor(1.)):
+                model.update(flat2d(y), flat2d(x0),  flat2d(u), None, None, flat2d(x1), flat2d(yhat))
+            #    y: Tensor,
+            #    xs: Tensor,
+            #    u: Tensor,
+            #    pt: Tensor,
+            #    qt: Gaussian,
+            #    xt: Tensor,
+            #    py: Tensor,
 
     return m, lv
