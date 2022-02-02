@@ -140,3 +140,26 @@ class LinearRegression(Module):
         nn.init.constant_(self.feature.logwidth, math.log(r))
         self.rls(x, target, v)
         # self.kalman(x, target, torch.tensor(.1))
+
+
+class RBFN(Module):
+    """Radial basis function network
+    Not Bayesian
+    """
+    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = True):
+        """
+        param in_features: dimensionality of input
+        param out_features: dimensionality of output
+        param n_basis: number of RBFs
+        param bias: If set to False, the output layer will not learn an additive bias. Default: True
+        """
+        super().__init__()
+        self.n_basis = n_basis
+        self.bias = bias
+        self.register_parameter('centroid', Parameter(torch.randn(n_basis, in_features)))
+        self.register_parameter('logscale', Parameter(torch.zeros(1, n_basis)))  # singleton dim for broadcast over batches
+        self.add_module('basis2output', nn.Linear(in_features=n_basis, out_features=out_features, bias=bias))
+
+    def forward(self, x: Tensor) -> Tensor:
+        h = rbf(x, self.centroid, self.logscale.exp())
+        return self.basis2output(h)
