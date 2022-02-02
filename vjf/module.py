@@ -75,7 +75,8 @@ class LinearRegression(Module):
             FL = feat.mm(self.w_chol)
             logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
             return Gaussian(functional.linear(feat, w.t()), logvar)
-
+    
+    @torch.no_grad()
     def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
         """RLS weight update
         :param x: (sample, dim)
