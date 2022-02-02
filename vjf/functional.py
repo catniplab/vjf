@@ -73,3 +73,10 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
     nll = nll + .5 * trace
 
     return nll.sum(-1).mean()
+
+
+def normed_linear(x, w, bias):
+    w_row_norms = torch.sqrt(torch.sum(
+        w**2, dim=1, keepdim=True))  # TODO: use torch.linalg.norm
+    w = w / w_row_norms
+    return functional.linear(x, w.T, bias)
