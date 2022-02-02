@@ -13,7 +13,7 @@ class GaussianLikelihood(Module):
 
     def __init__(self):
         super().__init__()
-        self.register_parameter('logvar', Parameter(torch.tensor(.1).log(), requires_grad=False))
+        self.register_parameter('logvar', Parameter(torch.tensor(.1).log(), requires_grad=True))
         self.n_sample = 0
 
     def loss(self, eta: Tensor, target: Tensor) -> Tensor:
@@ -56,10 +56,8 @@ class PoissonLikelihood(Module):
         :return:
         """
         if not isinstance(eta, Tensor):
-            raise NotImplementedError            
-        # nll = functional.poisson_nll_loss(eta, target, log_input=True, reduction='none')
-        rate = functional.softplus(eta)
-        nll = functional.poisson_nll_loss(rate, target, log_input=False, reduction='none')
+            raise NotImplementedError
+        nll = functional.poisson_nll_loss(eta.clamp(max=10.), target, log_input=True, reduction='none')
         assert nll.ndim == 2
         return nll.sum(-1).mean()
 

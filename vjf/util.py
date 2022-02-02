@@ -1,4 +1,6 @@
+from functools import reduce
 from typing import Tuple, Union
+import operator
 
 import torch
 from torch import Tensor
@@ -40,8 +42,10 @@ def nonecat(a: Tensor, u: Tensor):
     """
     au = torch.atleast_2d(a)
     if u is not None:
-        u = torch.atleast_2d(u)
-        au = torch.cat((au, u), -1)
+        udim = u.shape[-1]
+        if udim > 0:
+            u = torch.atleast_2d(u)
+            au = torch.cat((au, u), -1)
     return au
 
 
@@ -57,3 +61,20 @@ def at_least2d(a: Union[Tensor, Gaussian]) -> Union[Tensor, Gaussian]:
         return Gaussian(torch.atleast_2d(a.mean), torch.atleast_2d(a.logvar))
     else:
         raise TypeError(a.__class__)
+
+
+def flat2d(a):
+    if a is None:
+        return None
+    if a.ndim <= 2:
+        return at_least2d(a)
+    else:
+        shape = a.shape
+        if 0 == shape[-1]:
+            return a.reshape(prod(shape[:-1]), 0)
+        else:
+            return a.reshape(-1, a.shape[-1])
+
+
+def prod(a):
+    return reduce(operator.mul, a, 1)

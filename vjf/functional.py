@@ -10,7 +10,8 @@ from .util import at_least2d
 
 def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
     """
-    Radial basis functions
+    Set of Gaussian radial basis functions defined by centroids and lengthscales
+    broadcast batch and basis axes
     :param x: input, (batch, dim)
     :param c: centroids, (basis, dim)
     :param w: length scale, (1, dim)
@@ -24,7 +25,7 @@ def rbf(x: Tensor, c: Tensor, w: Tensor) -> Tensor:
 def gaussian_entropy(q: Gaussian) -> Tensor:
     """Gaussian entropy"""
     _, logvar = q
-    assert logvar.ndim == 2
+    assert logvar.ndim >= 2
     return 0.5 * logvar.sum(-1).mean()
 
 
@@ -54,7 +55,7 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
     p = torch.exp(-.5 * logvar)
 
     mse = functional.mse_loss(m1 * p, m2 * p, reduction='none')
-    assert mse.ndim == 2
+    assert mse.ndim >= 2
     assert torch.all(torch.isfinite(mse)), mse
 
     nll = .5 * (mse + logvar)
@@ -71,3 +72,10 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
     nll = nll + .5 * trace
 
     return nll.sum(-1).mean()
+
+
+def normed_linear(x, w, bias):
+    w_row_norms = torch.sqrt(torch.sum(
+        w**2, dim=1, keepdim=True))  # TODO: use torch.linalg.norm
+    w = w / w_row_norms
+    return functional.linear(x, w.T, bias)

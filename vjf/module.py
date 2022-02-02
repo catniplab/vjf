@@ -11,39 +11,14 @@ from .functional import rbf
 from .distribution import Gaussian
 
 
-class RFF(Module):
-    """Random Fourier Feature"""
-    def __init__(self, n_dim: int, size: int):
-        super().__init__()
-        self.size = size
-        self.register_parameter('w', Parameter(torch.randn(n_dim, size), requires_grad=False))
-        self.register_parameter('b', Parameter(torch.rand(1, size) * math.pi * 2, requires_grad=False))
-        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=False))
-        self.register_parameter('s', Parameter(torch.tensor(1.) / math.sqrt(size), requires_grad=False))
-        self.register_parameter('centroid', Parameter(torch.randn(size, n_dim), requires_grad=False))
-
-    @property
-    def n_feature(self):
-        return self.size
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = x / self.logscale.exp()
-        return self.s * torch.cos(x.mm(self.w) + self.b)
-    
-    @torch.no_grad()
-    def init(self, x: Tensor):
-        d = functional.pdist(x)
-        nn.init.constant_(self.logscale, d.max().log())
-
-
 class RBF(Module):
     """Radial basis functions"""
-    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False):
+    def __init__(self, n_dim: int, n_basis: int, intercept: bool = False, requires_grad: bool = False):
         super().__init__()
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('centroid', Parameter(torch.randn(n_basis, n_dim), requires_grad=False))
-        self.register_parameter('logscale', Parameter(torch.zeros(1, n_dim), requires_grad=False))
+        self.register_parameter('centroid', Parameter(torch.rand(n_basis, n_dim) * 4 - 2., requires_grad=requires_grad))
+        self.register_parameter('logwidth', Parameter(torch.zeros(n_basis), requires_grad=requires_grad))
 
     @property
     def n_feature(self):
@@ -53,30 +28,26 @@ class RBF(Module):
             return self.n_basis
 
     def forward(self, x: Tensor) -> Tensor:
-        output = rbf(x, self.centroid, self.logscale.exp())
+        output = rbf(x, self.centroid, self.logwidth.exp())
         if self.intercept:
             output = torch.column_stack((torch.ones(output.shape[0]), output))
         return output
-    
-    @torch.no_grad()
-    def init(self, x: Tensor):
-        n = self.centroid.shape[0]
-        idx = torch.multinomial(torch.ones(x.shape[0]), num_samples=n)
-        c = x[idx, :]
-        d = functional.pdist(x)
-        nn.init.constant_(self.logscale, d.max().log())
-        c = c + torch.randn_like(c) * d.median()
-        self.centroid.data = c 
 
 
 class LinearRegression(Module):
     """Bayesian linear regression"""
-    def __init__(self, feature: Module, n_output: int):
+    def __init__(self, feature: Module, n_output: int, bayes=True):
         super().__init__()
+
+        self.bayes = bayes
         self.add_module('feature', feature)
         self.n_output = n_output
         # self.bias = torch.zeros(n_outputs)
-        self.w_mean = torch.zeros(self.feature.n_feature, n_output)
+        w_mean = torch.zeros(self.feature.n_feature, n_output)
+        if not bayes:
+            self.register_parameter('w_mean', Parameter(w_mean))
+        else:
+            self.w_mean = w_mean
         # self.w_cov = torch.eye(self.feature.n_feature)
         self.w_chol = torch.eye(self.feature.n_feature)
         self.w_precision = torch.eye(self.feature.n_feature)
@@ -92,6 +63,10 @@ class LinearRegression(Module):
         """
         feat = self.feature(x)
         w = self.w_mean
+        
+        if not self.bayes:
+            return functional.linear(feat, w.t())
+
         if sampling:
             w = w + self.w_chol.mm(torch.randn_like(w))  # sampling
             # w = w + torch.randn_like(w).cholesky_solve(self.w_pchol)
@@ -100,7 +75,8 @@ class LinearRegression(Module):
             FL = feat.mm(self.w_chol)
             logvar = FL.mm(FL.t()).diagonal().log().tile((w.shape[-1], 1)).t()
             return Gaussian(functional.linear(feat, w.t()), logvar)
-
+    
+    @torch.no_grad()
     def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
         """RLS weight update
         :param x: (sample, dim)
@@ -160,10 +136,31 @@ class LinearRegression(Module):
 
     @torch.no_grad()
     def initialize(self, x: Tensor, target: Tensor, v):
-        # r = x.abs().max(0, keepdim=True).values
-        # nn.init.uniform_(self.feature.centroid, a=-r, b=r)
-        # self.feature.logscale.data = r.log()
-        # nn.init.constant_(self.feature.logscale, math.log(r))
-        self.feature.init(x)
-        self.rls(x, target, v, shrink=1.)
+        r = x.norm(dim=1).max().item()
+        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        nn.init.constant_(self.feature.logwidth, math.log(r))
+        self.rls(x, target, v)
         # self.kalman(x, target, torch.tensor(.1))
+
+
+class RBFN(Module):
+    """Radial basis function network
+    Not Bayesian
+    """
+    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = True):
+        """
+        param in_features: dimensionality of input
+        param out_features: dimensionality of output
+        param n_basis: number of RBFs
+        param bias: If set to False, the output layer will not learn an additive bias. Default: True
+        """
+        super().__init__()
+        self.n_basis = n_basis
+        self.bias = bias
+        self.register_parameter('centroid', Parameter(torch.randn(n_basis, in_features)))
+        self.register_parameter('logscale', Parameter(torch.zeros(1, n_basis)))  # singleton dim for broadcast over batches
+        self.add_module('basis2output', nn.Linear(in_features=n_basis, out_features=out_features, bias=bias))
+
+    def forward(self, x: Tensor) -> Tensor:
+        h = rbf(x, self.centroid, self.logscale.exp())
+        return self.basis2output(h)
