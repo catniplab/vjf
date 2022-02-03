@@ -189,7 +189,7 @@ class RBFDS(Transition):
         param n_basis: number of radial basis functions
         """
         super().__init__()
-        self.add_module('predict', RBFN(in_features=xdim, out_features=xdim, n_basis=n_basis))
+        self.add_module('predict', RBFN(in_features=xdim, out_features=xdim, n_basis=n_basis, bias=True))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(0.),
                                           requires_grad=False))  # state noise
@@ -229,7 +229,8 @@ def train(model: VJF,
             yhat, m, lv, x0, x1, m1 = model.forward(y)
             total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
             
-            kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
+            # kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
+            kl_scale = 1.
             total_loss = loss_recon + kl_scale * (loss_dynamics - h)
 
             optimizer.zero_grad()
@@ -245,9 +246,9 @@ def train(model: VJF,
 
             progress.set_postfix({
                 'Loss': running_loss.item(),
-                'KL scale': kl_scale.item(),
+                # 'KL scale': kl_scale.item(),
             })
 
-            scheduler.step()
+            # scheduler.step()
 
     return m, lv
