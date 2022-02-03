@@ -30,7 +30,7 @@ class LinearDecoder(Module):
 
 
 class GRUEncoder(Module):
-    def __init__(self, ydim: int, xdim: int, hidden_size: int, batch_first: bool = False):
+    def __init__(self, ydim: int, xdim: int, hidden_size: int, batch_first: bool = True):
         super().__init__()
 
         self.add_module(
@@ -40,7 +40,7 @@ class GRUEncoder(Module):
                 batch_first=batch_first,
                 bidirectional=True))
         D = 2  # bidirectional
-        self.register_parameter('h0', Parameter(torch.zeros(D, hidden_size)))  # (D, H), batch?
+        self.register_parameter('h0', Parameter(torch.zeros(D, hidden_size)))  # (D, H)
 
         self.add_module('hidden2posterior', Linear(hidden_size * D, xdim * 2, bias=True))  # q_t
         self.add_module('hidden2initial', Linear(hidden_size * D, xdim * 2, bias=True))  # q_0
@@ -48,19 +48,19 @@ class GRUEncoder(Module):
     def forward(self, y: Tensor) -> Gaussian:
         if y.ndim == 2:
             y = y.unsqueeze(1)
-        L, N, _ = y.shape
+        N, L, ydim = y.shape
         h0 = self.h0.unsqueeze(1).expand(-1, N, -1)  # expand batch axis, (D, N, H)
-        h_t, h_n = self.gru(y, h0)  # (L, N, Y), (D, N, H) -> (L, N, D*H), (D, N, H)
+        h_t, h_n = self.gru(y, h0)  # (N, L, Y), (D, N, H) -> (N, L, D*H), (D, N, H)
         
         h_n = torch.swapaxes(h_n, 0, 1)  # (D, N, H) -> (N, D, H)
-        h_n = h_n.reshape(N, -1).unsqueeze(0)  # (D, N, H) -> (N, D*H) -> (1, N, D*H)
+        h_n = h_n.reshape(N, -1).unsqueeze(1)  # (D, N, H) -> (N, D*H) -> (N, 1, D*H)
         
-        o_t = self.hidden2posterior(h_t)  # (L, N, D*H) -> (L, N, 2X)
-        o_0 = self.hidden2initial(h_n)  # (1, N, D*H) -> (1, N, 2X)
+        o_t = self.hidden2posterior(h_t)  # (N, L, D*H) -> (N, L, 2X)
+        o_0 = self.hidden2initial(h_n)  # (N, 1, D*H) -> (N, 1, 2X)
 
-        o = torch.concat([o_0, o_t], dim=0)  # (L + 1, N, 2X)
+        o = torch.concat([o_0, o_t], dim=1)  # (N, L + 1, 2X)
 
-        mean, logvar = o.chunk(2, -1)  # (L + 1, N, X), (L + 1, N, X)
+        mean, logvar = o.chunk(2, -1)  # (N, L + 1, X), (N, L + 1, X)
         return mean, logvar
 
 
@@ -89,9 +89,9 @@ class VJF(Module):
 
         y = torch.atleast_2d(y)
         m, lv = self.encode(y)
-        x = reparametrize((m, lv))  # (L + 1, N, X)
-        x0 = x[:-1, ...]  # (L, N, X), 0...T-1
-        x1 = x[1:, ...]  # (L, N, X), 1...T
+        x = reparametrize((m, lv))  # (N, L + 1, X)
+        x0 = x[:, :-1, :]  # (N, L, X), 0...T-1
+        x1 = x[:, 1:, :]  # (N, L, X), 1...T
         m1 = self.transition(flat2d(x0))
         m1 = m1.reshape(*x1.shape)
         # lv1 = torch.ones_like(m1) * self.transition.logvar
@@ -219,7 +219,7 @@ def train(model: VJF,
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
     y = torch.atleast_2d(y)
 
-    L, N, _ = y.shape  # 3D, time first
+    N, L, _ = y.shape  # 3D, time first
 
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
