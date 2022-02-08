@@ -58,7 +58,7 @@ class PoissonLikelihood(Module):
         if not isinstance(eta, Tensor):
             raise NotImplementedError
         nll = functional.poisson_nll_loss(eta.clamp(max=10.), target, log_input=True, reduction='none')
-        assert nll.ndim == 2
+        # assert nll.ndim == 2
         return nll.sum(-1).mean()
 
     @torch.no_grad()
