@@ -1,10 +1,10 @@
 """
-Autonomous system
+input-driven system
 batch training
 non-Bayesian state model
 """
 from abc import ABCMeta, abstractmethod
-from typing import List, Tuple, Sequence, Union
+from typing import Tuple, Sequence, Union, List
 
 import torch
 from torch import Tensor, nn
@@ -30,12 +30,12 @@ class LinearDecoder(Module):
 
 
 class GRUEncoder(Module):
-    def __init__(self, ydim: int, xdim: int, hidden_size: int, batch_first: bool = True):
+    def __init__(self, ydim: int, xdim: int, udim: int, hidden_size: int, batch_first: bool = True):
         super().__init__()
 
         self.add_module(
             'gru',
-            GRU(input_size=ydim,
+            GRU(input_size=ydim + udim,
                 hidden_size=hidden_size,
                 batch_first=batch_first,
                 bidirectional=True))
@@ -45,7 +45,8 @@ class GRUEncoder(Module):
         self.add_module('hidden2posterior', Linear(hidden_size * D, xdim * 2, bias=True))  # q_t
         self.add_module('hidden2initial', Linear(hidden_size * D, xdim * 2, bias=True))  # q_0
 
-    def forward(self, y: Tensor) -> Gaussian:
+    def forward(self, y: Tensor, u: Tensor) -> Gaussian:
+        y = torch.cat([y, u], dim=-1)  # append input
         if y.ndim == 2:
             y = y.unsqueeze(1)
         N, L, ydim = y.shape
@@ -65,7 +66,7 @@ class GRUEncoder(Module):
 
 
 class VJF(Module):
-    def __init__(self, ydim: int, xdim: int, likelihood: Module,
+    def __init__(self, ydim: int, xdim: int, udim: int, likelihood: Module,
                  transition: Module, encoder: Module):
         """
         Use VJF.make_model
@@ -79,7 +80,7 @@ class VJF(Module):
         self.add_module('encode', encoder)
         self.add_module('decode', LinearDecoder(xdim, ydim))
 
-    def forward(self, y: Tensor) -> Tuple:
+    def forward(self, y: Tensor, u: Tensor) -> Tuple:
         """
         :param y: new observation
         :param u: input
@@ -88,11 +89,12 @@ class VJF(Module):
         # encode
 
         y = torch.atleast_2d(y)
-        m, lv = self.encode(y)
+        u = torch.atleast_2d(u)
+        m, lv = self.encode(y, u)
         x = reparametrize((m, lv))  # (N, L + 1, X)
         x0 = x[:, :-1, :]  # (N, L, X), 0...T-1
         x1 = x[:, 1:, :]  # (N, L, X), 1...T
-        m1 = self.transition(flat2d(x0))
+        m1 = self.transition(flat2d(x0), flat2d(u))
         m1 = m1.reshape(*x1.shape)
         # lv1 = torch.ones_like(m1) * self.transition.logvar
         # decode
@@ -133,6 +135,7 @@ class VJF(Module):
     def make_model(cls,
                    ydim: int,
                    xdim: int,
+                   udim: int,
                    n_rbf: int,
                    rbfn_bias: bool,
                    hidden_sizes: Sequence[int],
@@ -145,13 +148,13 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
         
-        model = VJF(ydim, xdim, likelihood, RBFDS(xdim, n_rbf, rbfn_bias),
-                        GRUEncoder(ydim, xdim, hidden_sizes), *args,
+        model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, rbfn_bias),
+                        GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                         **kwargs)
         return model
 
-    def forecast(self, x0: Tensor, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
-        x = self.transition.forecast(x0, n_step, noise=noise)
+    def forecast(self, x0: Tensor, u: Tensor, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
+        x = self.transition.forecast(x0, u, n_step, noise=noise)
         y = self.decode(x)
         return x, y
 
@@ -163,17 +166,21 @@ class Transition(Module, metaclass=ABCMeta):
 
     def forecast(self,
                 x0: Tensor,
+                u: Tensor,
                 n_step: int = 1,
                 *,
                 noise: bool = False) -> Tensor:
         x0 = torch.as_tensor(x0, dtype=torch.get_default_dtype())
         x0 = torch.atleast_2d(x0)
+        u = torch.atleast_2d(u)
+        assert u.shape[1] == n_step
+
         x = torch.empty(n_step + 1, *x0.shape)
         x[0] = x0
         s = torch.exp(.5 * self.logvar)
 
         for t in range(n_step):
-            x[t + 1] = self.forward(x[t])
+            x[t + 1] = self.forward(x[t], u[:, t, :])
             if noise:
                 x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
 
@@ -184,29 +191,33 @@ class Transition(Module, metaclass=ABCMeta):
 
 
 class RBFDS(Transition):
-    def __init__(self, xdim: int, n_basis: int, bias=True):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True):
         """
-        param  xdim: state dimensionality
+        param xdim: state dimensionality
+        param udim: input dimensionality
         param n_basis: number of radial basis functions
         """
         super().__init__()
-        self.add_module('predict', RBFN(in_features=xdim, out_features=xdim, n_basis=n_basis, bias=bias))
+        self.add_module('predict', RBFN(in_features=xdim + udim, out_features=xdim, n_basis=n_basis, bias=bias))
         self.register_parameter('logvar',
                                 Parameter(torch.tensor(0.),
                                           requires_grad=False))  # state noise
     
-    def velocity(self, x):
+    def velocity(self, x, u):
+        x = torch.cat([x, u], dim=-1)
         return self.predict(x)
 
     def forward(self,
                 x: Tensor,
+                u: Tensor,
                 leak: float = 0.) -> Tensor:
-        dx = self.velocity(x)
+        dx = self.velocity(x, u)
         return (1 - leak) * x + dx
 
 
 def train(model: VJF,
           y: Tensor,
+          u: Tensor,
           *,
           max_iter: int = 200,
           beta: float = 0.,
@@ -220,6 +231,9 @@ def train(model: VJF,
     y = torch.as_tensor(y, dtype=torch.get_default_dtype())
     y = torch.atleast_2d(y)
 
+    u = torch.as_tensor(u, dtype=torch.get_default_dtype())
+    u = torch.atleast_2d(u)
+
     N, L, _ = y.shape  # 3D, time first
 
     with trange(max_iter) as progress:
@@ -227,7 +241,7 @@ def train(model: VJF,
         for i in progress:
             # collections
 
-            yhat, m, lv, x0, x1, m1 = model.forward(y)
+            yhat, m, lv, x0, x1, m1 = model.forward(y, u)
             total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
             
             # kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
@@ -257,6 +271,7 @@ def train(model: VJF,
 
 def train_seq(model: VJF,
           y: List,
+          u: List,
           *,
           max_iter: int = 200,
           beta: float = 0.,
@@ -267,6 +282,7 @@ def train_seq(model: VJF,
     optimizer = AdamW(model.parameters(), lr=lr)
     scheduler = ExponentialLR(optimizer, gamma=lr_decay)
     ylist = y
+    ulist = u
 
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
@@ -275,14 +291,18 @@ def train_seq(model: VJF,
             epoch_loss = 0.
             m_list = []
             logvar_list = []
-            for y in ylist:
+            for y, u in zip(ylist, ulist):
                 y = torch.as_tensor(y, dtype=torch.get_default_dtype())
                 y = torch.atleast_2d(y)
                 y = y.unsqueeze(0)
 
+                u = torch.as_tensor(u, dtype=torch.get_default_dtype())
+                u = torch.atleast_2d(u)
+                u = u.unsqueeze(0)
+
                 N, L, _ = y.shape  # 3D, time first
 
-                yhat, m, lv, x0, x1, m1 = model.forward(y)
+                yhat, m, lv, x0, x1, m1 = model.forward(y, u)
                 total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
             
                 # kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
