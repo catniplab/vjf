@@ -141,6 +141,7 @@ class VJF(Module):
                    hidden_sizes: Sequence[int],
                    likelihood: str = 'poisson',
                    ds: str = 'rbf',
+                   state_logvar: float = 0.,
                    *args,
                    **kwargs):
         if likelihood.lower() == 'poisson':
@@ -148,7 +149,7 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
         
-        model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, rbfn_bias),
+        model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, rbfn_bias, state_logvar),
                         GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                         **kwargs)
         return model
@@ -191,7 +192,7 @@ class Transition(Module, metaclass=ABCMeta):
 
 
 class RBFDS(Transition):
-    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, logvar=0.):
         """
         param xdim: state dimensionality
         param udim: input dimensionality
@@ -200,7 +201,7 @@ class RBFDS(Transition):
         super().__init__()
         self.add_module('predict', RBFN(in_features=xdim + udim, out_features=xdim, n_basis=n_basis, bias=bias))
         self.register_parameter('logvar',
-                                Parameter(torch.tensor(0.),
+                                Parameter(torch.tensor(logvar),
                                           requires_grad=False))  # state noise
     
     def velocity(self, x, u):
