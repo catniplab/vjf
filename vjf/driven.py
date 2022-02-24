@@ -331,7 +331,7 @@ def train(model: VJF,
     u = torch.atleast_2d(u)
 
     N, L, _ = y.shape  # 3D, time first
-
+    losses = []
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
         for i in progress:
@@ -359,10 +359,10 @@ def train(model: VJF,
                 'Loss': running_loss.item(),
                 # 'KL scale': kl_scale.item(),
             })
-
+            losses.append(total_loss.item())
             # scheduler.step()
 
-    return m, lv
+    return losses, m, lv
 
 
 def train_seq(model: VJF,
@@ -379,7 +379,8 @@ def train_seq(model: VJF,
     scheduler = ExponentialLR(optimizer, gamma=lr_decay)
     ylist = y
     ulist = u
-
+    
+    losses = []
     with trange(max_iter) as progress:
         running_loss = torch.tensor(float('nan'))
         for i in progress:
@@ -426,7 +427,8 @@ def train_seq(model: VJF,
                 'Loss': running_loss.item(),
                 # 'KL scale': kl_scale.item(),
             })
+            losses.append(epoch_loss.item())
 
             # scheduler.step()
 
-    return m_list, logvar_list
+    return losses, m_list, logvar_list
