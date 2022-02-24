@@ -262,6 +262,30 @@ class RFFDS(Transition):
         return self.predict(x)
         # dx = self.velocity(x, u)
         # return (1 - leak) * x + dx
+class GRUDS(Transition):
+    def __init__(self, xdim: int, udim: int, bias=True, logvar=0.):
+        """
+        param xdim: state dimensionality
+        param udim: input dimensionality
+        """
+        super().__init__()
+        self.add_module('predict', GRUCell(input_size=udim, hidden_size=xdim, bias=bias))
+        self.add_module('linear', nn.Linear(xdim, xdim))
+        # self.add_module('input_dropout', nn.Dropout(0.1))
+        # self.add_module('output_dropout', nn.Dropout(0.1))
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(logvar),
+                                          requires_grad=False))  # state noise
+    
+    def velocity(self, x, u):
+        return self.linear(self.predict(u, x)) - x
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                leak: float = 0.) -> Tensor:
+        # u = self.input_dropout(u)
+        return self.linear(self.predict(u, x))
 def train(model: VJF,
           y: Tensor,
           u: Tensor,
