@@ -216,6 +216,31 @@ class RBFDS(Transition):
         return (1 - leak) * x + dx
 
 
+class RFFDS(Transition):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, logvar=0.):
+        """
+        param xdim: state dimensionality
+        param udim: input dimensionality
+        param n_basis: number of radial basis functions
+        """
+        super().__init__()
+        self.add_module('predict', RFF(in_features=xdim + udim, out_features=xdim, n_basis=n_basis))
+        self.register_parameter('logvar',
+                                Parameter(torch.tensor(logvar),
+                                          requires_grad=False))  # state noise
+    
+    def velocity(self, x, u):
+        x = torch.cat([x, u], dim=-1)
+        return self.predict(x) - x
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                leak: float = 0.) -> Tensor:
+        x = torch.cat([x, u], dim=-1)
+        return self.predict(x)
+        # dx = self.velocity(x, u)
+        # return (1 - leak) * x + dx
 def train(model: VJF,
           y: Tensor,
           u: Tensor,

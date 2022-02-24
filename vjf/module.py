@@ -164,3 +164,24 @@ class RBFN(Module):
     def forward(self, x: Tensor) -> Tensor:
         h = rbf(x, self.centroid, self.logscale.exp())
         return self.basis2output(h)
+
+
+class RFF(Module):
+    """Random Fourier Features"""
+    def __init__(self, in_features: int, out_features: int, n_basis: int, intercept: bool = False, requires_grad: bool = False):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.n_basis = n_basis
+        self.intercept = intercept
+        self.register_parameter('w', Parameter(torch.rand(n_basis, in_features), requires_grad=False))  # requires_grad should always be False
+        self.register_parameter('b', Parameter(2 * math.pi * torch.rand(n_basis), requires_grad=False))
+        self.add_module('linear', nn.Linear(n_basis, out_features, bias=False))
+
+    @property
+    def n_feature(self):
+        return self.n_basis
+
+    def forward(self, x: Tensor) -> Tensor:
+        f = torch.cos(functional.linear(x, self.w, self.b))
+        return self.linear(f)
