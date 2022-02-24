@@ -202,11 +202,11 @@ class Transition(Module, metaclass=ABCMeta):
         s = torch.exp(.5 * self.logvar)
 
         for t in range(n_step):
-            x[t + 1] = self.forward(x[t], u[:, t, :])
+            x[t + 1, ...] = self.forward(x[t], u[:, t, :])
             if noise:
-                x[t + 1] = x[t + 1] + torch.randn_like(x[t + 1]) * s
+                x[t + 1, ...] = x[t + 1] + torch.randn_like(x[t + 1]) * s
 
-        return x
+        return x.transpose(0, 1)
 
     def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
         return gaussian_loss(pt, qt, self.logvar)
