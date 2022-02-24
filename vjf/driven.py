@@ -4,11 +4,12 @@ batch training
 non-Bayesian state model
 """
 from abc import ABCMeta, abstractmethod
+import math
 from typing import Tuple, Sequence, Union, List
 
 import torch
 from torch import Tensor, nn
-from torch.nn import Module, Linear, Parameter, GRU
+from torch.nn import Module, Linear, Parameter, GRU, functional, GRUCell, RNNCell
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
@@ -16,7 +17,7 @@ from tqdm import trange
 from .distribution import Gaussian
 from .functional import gaussian_entropy as entropy, gaussian_loss, normed_linear
 from .likelihood import GaussianLikelihood, PoissonLikelihood
-from .module import RBFN
+from .module import RBFN, RFF
 from .util import reparametrize, symmetric, running_var, nonecat, flat2d
 
 
@@ -60,6 +61,9 @@ class GRUEncoder(Module):
                 hidden_size=hidden_size,
                 batch_first=batch_first,
                 bidirectional=True))
+        # self.add_module('input_dropout', nn.Dropout(0.1))
+        # self.add_module('output_dropout', nn.Dropout(0.1))
+
         D = 2  # bidirectional
         self.register_parameter('h0', Parameter(torch.zeros(D, hidden_size)))  # (D, H)
 
@@ -72,17 +76,20 @@ class GRUEncoder(Module):
             y = y.unsqueeze(1)
         N, L, ydim = y.shape
         h0 = self.h0.unsqueeze(1).expand(-1, N, -1)  # expand batch axis, (D, N, H)
+        # y = self.input_dropout(y)
         h_t, h_n = self.gru(y, h0)  # (N, L, Y), (D, N, H) -> (N, L, D*H), (D, N, H)
         
         h_n = torch.swapaxes(h_n, 0, 1)  # (D, N, H) -> (N, D, H)
         h_n = h_n.reshape(N, -1).unsqueeze(1)  # (D, N, H) -> (N, D*H) -> (N, 1, D*H)
         
+        # h_t = self.output_dropout(h_t)
         o_t = self.hidden2posterior(h_t)  # (N, L, D*H) -> (N, L, 2X)
         o_0 = self.hidden2initial(h_n)  # (N, 1, D*H) -> (N, 1, 2X)
 
         o = torch.concat([o_0, o_t], dim=1)  # (N, L + 1, 2X)
-
+        # o = self.output_dropout(o)
         mean, logvar = o.chunk(2, -1)  # (N, L + 1, X), (N, L + 1, X)
+        # mean = torch.tanh(mean)
         return mean, logvar
 
 
@@ -158,7 +165,7 @@ class VJF(Module):
                    xdim: int,
                    udim: int,
                    n_rbf: int,
-                   rbfn_bias: bool,
+                   ds_bias: bool,
                    hidden_sizes: Sequence[int],
                    likelihood: str = 'poisson',
                    ds: str = 'rbf',
@@ -170,9 +177,23 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
         
-        model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, rbfn_bias, state_logvar),
-                        GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
-                        **kwargs)
+        if ds == 'rbf':
+            model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, ds_bias, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+        elif ds == 'rff':
+            model = VJF(ydim, xdim, udim, likelihood, RFFDS(xdim, udim, n_rbf, ds_bias, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+        elif ds == 'gru':
+            model = VJF(ydim, xdim, udim, likelihood, GRUDS(xdim, udim, ds_bias, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+        elif ds == 'rnn':
+            model = VJF(ydim, xdim, udim, likelihood, RNNDS(xdim, udim, ds_bias, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+
         return model
 
     def forecast(self, x0: Tensor, u: Tensor, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
@@ -262,6 +283,8 @@ class RFFDS(Transition):
         return self.predict(x)
         # dx = self.velocity(x, u)
         # return (1 - leak) * x + dx
+
+
 class GRUDS(Transition):
     def __init__(self, xdim: int, udim: int, bias=True, logvar=0.):
         """
@@ -286,6 +309,8 @@ class GRUDS(Transition):
                 leak: float = 0.) -> Tensor:
         # u = self.input_dropout(u)
         return self.linear(self.predict(u, x))
+
+
 class RNNDS(Transition):
     def __init__(self, xdim: int, udim: int, bias=True, logvar=0.):
         """
@@ -310,6 +335,7 @@ class RNNDS(Transition):
                 leak: float = 0.) -> Tensor:
         # u = self.input_dropout(u)
         return self.linear(self.predict(u, x))
+
 
 def train(model: VJF,
           y: Tensor,
