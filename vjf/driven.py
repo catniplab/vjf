@@ -21,12 +21,33 @@ from .util import reparametrize, symmetric, running_var, nonecat, flat2d
 
 
 class LinearDecoder(Module):
-    def __init__(self, xdim: int, ydim: int):
+    def __init__(self, xdim: int, ydim: int, norm='fro'):
         super().__init__()
-        self.add_module('decode', Linear(xdim, ydim))
+        # self.add_module('decode', Linear(xdim, ydim))
+        self.norm = norm
+        self.register_parameter('weight', Parameter(torch.empty(ydim, xdim)))  # (out, in)
+        self.register_parameter('bias', Parameter(torch.empty(ydim)))
+        self.reset_parameters()
+    
+    def reset_parameters(self):
+        # copy from torch Linear layer
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))  
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.decode(x)
+        w = self.weight
+        if self.norm != 'none':
+            if self.norm == 'fro':
+                normalizer = torch.linalg.norm(w, keepdim=True)
+            elif self.norm == 'row':
+                normalizer = torch.linalg.norm(w, dim=0, keepdim=True)
+            elif self.norm == 'col':
+                normalizer = torch.linalg.norm(w, dim=1, keepdim=True)
+            
+            w = w / normalizer
+        return functional.linear(x, w, self.bias)
 
 
 class GRUEncoder(Module):
