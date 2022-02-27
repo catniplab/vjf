@@ -15,10 +15,98 @@ from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
 from .distribution import Gaussian
-from .functional import gaussian_entropy as entropy, gaussian_loss, normed_linear
-from .likelihood import GaussianLikelihood, PoissonLikelihood
 from .module import RBFN, RFF
-from .util import reparametrize, symmetric, running_var, nonecat, flat2d
+from .util import reparametrize, flat2d, at_least2d
+from .functional import rbf
+
+
+###
+def gaussian_entropy(q) -> Tensor:
+    """Elementwise Gaussian entropy"""
+    _, logvar = q
+    assert logvar.ndim >= 2
+    return .5 * logvar.sum()
+
+
+def gaussian_kl(q, p):
+    """
+    Elementwise KL(q|p) = 0.5 * [tr(v_q/v_p) - 1 + (m_q - m_p)^2 / v_p + log(var_p/var_q)]
+    """
+    m_q, logvar_q = q
+    m_p, logvar_p = p
+
+    var_p = torch.exp(logvar_p)
+
+    trace = torch.exp(logvar_p - logvar_q)
+    logdet = logvar_q - logvar_p
+
+    kl = .5 * ((m_q - m_p) ** 2 / var_p + logdet + trace - 1)
+    return kl.sum()
+
+
+def gaussian_loss(a, b, logvar: Tensor) -> Tensor:
+    """
+    Negative Gaussian log-likelihood
+    0.5 * [1/sigma^2 (a - b)^2 + log(sigma^2) + log(2*pi)]
+    :param a: Tensor
+    :param b: Tensor
+    :param logvar: log(sigma^2)
+    :return:
+        (expected) Gaussian loss
+    """
+    a = at_least2d(a)
+    b = at_least2d(b)
+
+    p = torch.exp(-.5 * logvar)  # 1/sigma
+
+    mse = functional.mse_loss(a * p, b * p, reduction='none')
+    assert mse.ndim >= 2
+    assert torch.all(torch.isfinite(mse)), mse
+
+    nll = .5 * (mse + logvar + math.log(2 * math.pi))
+
+    return nll.sum()
+###
+
+class GaussianLikelihood(Module):
+    """
+    Gaussian likelihood
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.register_parameter('logvar', Parameter(torch.tensor(.0)))
+
+    def loss(self, eta: Tensor, target: Tensor) -> Tensor:
+        """
+        :param eta: pre inverse link
+        :param target: observation
+        :return:
+            negative likelihood
+        """
+        return gaussian_loss(target, eta, self.logvar)
+
+
+class PoissonLikelihood(Module):
+    """
+    Poisson likelihood
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def loss(eta: Tensor, target: Tensor) -> Tensor:
+        """
+        :param eta: pre inverse link
+        :param target: observation
+        :return:
+        """
+        if not isinstance(eta, Tensor):
+            raise NotImplementedError
+        nll = functional.poisson_nll_loss(eta.clamp(max=10.), target, log_input=True, reduction='none')
+        # assert nll.ndim == 2
+        return nll.sum()
 
 
 class LinearDecoder(Module):
