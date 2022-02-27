@@ -334,20 +334,20 @@ class Transition(Module, metaclass=ABCMeta):
 
     def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
         return gaussian_loss(pt, qt, self.logvar)
-
+    
+    def kl(self):
+        return torch.tensor(0.)
+        
 
 class RBFDS(Transition):
-    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, logvar=0.):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, normalized=False, logvar=0.):
         """
         param xdim: state dimensionality
         param udim: input dimensionality
         param n_basis: number of radial basis functions
         """
-        super().__init__()
-        self.add_module('predict', RBFN(in_features=xdim + udim, out_features=xdim, n_basis=n_basis, bias=bias))
-        self.register_parameter('logvar',
-                                Parameter(torch.tensor(logvar),
-                                          requires_grad=False))  # state noise
+        super().__init__(logvar)
+        self.add_module('predict', RBFN(in_features=xdim + udim, out_features=xdim, n_basis=n_basis, bias=bias, normalized=normalized))
     
     def velocity(self, x, u):
         x = torch.cat([x, u], dim=-1)
@@ -361,6 +361,75 @@ class RBFDS(Transition):
         return (1 - leak) * x + dx
 
 
+class BayesRBFDS(Transition):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, normalized=False, logvar=0.):
+        """
+        param xdim: state dimensionality
+        param udim: input dimensionality
+        param n_basis: number of radial basis functions
+        """
+        super().__init__(logvar)
+        self.n_basis = n_basis
+        self.bias = bias
+        self.normalized = normalized
+        self.centroid = torch.randn(n_basis, xdim + udim)
+        self.logscale = torch.zeros(1, n_basis)
+        # self.register_parameter('centroid', Parameter(torch.randn(n_basis, xdim + udim), requires_grad=False))
+        # self.register_parameter('logscale', Parameter(torch.zeros(1, n_basis), requires_grad=False))  # singleton dim for broadcast over batches
+
+        self.register_parameter('b_mean', Parameter(torch.zeros(xdim)))
+        self.register_parameter('b_logvar', Parameter(torch.zeros(xdim)))
+        self.register_parameter('b_prior_mean', Parameter(torch.zeros(xdim), requires_grad=False))
+        self.register_parameter('b_prior_logvar', Parameter(torch.zeros(xdim), requires_grad=False))
+        
+        self.register_parameter('w_mean', Parameter(torch.zeros(xdim, n_basis)))
+        self.register_parameter('w_logvar', Parameter(torch.zeros(xdim, n_basis)))
+        self.register_parameter('w_prior_mean', Parameter(torch.zeros(xdim, n_basis), requires_grad=False))
+        self.register_parameter('w_prior_logvar', Parameter(torch.zeros(xdim, n_basis), requires_grad=False))
+
+        self.register_parameter('noise_mean', Parameter(torch.tensor(logvar)))
+        self.register_parameter('noise_logvar', Parameter(torch.tensor(0.)))
+        self.register_parameter('noise_prior_mean', Parameter(torch.tensor(logvar), requires_grad=False))
+        self.register_parameter('noise_prior_logvar', Parameter(torch.tensor(0.), requires_grad=False))
+    
+    @torch.no_grad()
+    def update(self, x, u):
+        xu = torch.cat([x, u], dim=-1)
+        cidx = torch.multinomial(torch.ones(self.n_basis), self.n_basis)
+        center = xu[cidx]
+        pdist = functional.pdist(center)
+        self.logscale.fill_(torch.log(pdist.max() / math.sqrt(self.n_basis)))
+        self.centroid = center
+    
+    def velocity(self, x, u):
+        eps = 1e-8
+        x = torch.cat([x, u], dim=-1)
+        h = rbf(x, self.centroid, self.logscale.exp())
+        if self.normalized:
+            h = h / (h.sum(-1, keepdim=True) + eps)
+        
+        w = reparametrize((self.w_mean, self.w_logvar))
+        b = reparametrize((self.b_mean, self.b_logvar)) if self.bias else None
+        return functional.linear(h, w, b)
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                leak: float = 0.) -> Tensor:
+        dx = self.velocity(x, u)
+        return (1 - leak) * x + dx
+
+    def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
+        logvar = reparametrize((self.noise_mean, self.noise_logvar))
+        return gaussian_loss(pt, qt, logvar)
+
+    def kl(self):
+        kl_b = gaussian_kl((self.b_mean, self.b_logvar), (self.b_prior_mean, self.b_prior_logvar)) if self.bias else 0.
+        kl_w = gaussian_kl((self.w_mean, self.w_logvar), (self.w_prior_mean, self.w_prior_logvar)) 
+        kl_noise = gaussian_kl((self.noise_mean, self.noise_logvar), (self.noise_prior_mean, self.noise_prior_logvar))
+        return kl_b + kl_w + kl_noise
+
+
 class RFFDS(Transition):
     def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, logvar=0.):
         """
@@ -368,24 +437,19 @@ class RFFDS(Transition):
         param udim: input dimensionality
         param n_basis: number of radial basis functions
         """
-        super().__init__()
+        super().__init__(logvar)
         self.add_module('predict', RFF(in_features=xdim + udim, out_features=xdim, n_basis=n_basis))
-        self.register_parameter('logvar',
-                                Parameter(torch.tensor(logvar),
-                                          requires_grad=False))  # state noise
     
     def velocity(self, x, u):
         x = torch.cat([x, u], dim=-1)
-        return self.predict(x) - x
+        return self.predict(x)
 
     def forward(self,
                 x: Tensor,
                 u: Tensor,
                 leak: float = 0.) -> Tensor:
-        x = torch.cat([x, u], dim=-1)
-        return self.predict(x)
-        # dx = self.velocity(x, u)
-        # return (1 - leak) * x + dx
+        dx = self.velocity(x, u)
+        return (1 - leak) * x + dx
 
 
 class GRUDS(Transition):
@@ -394,14 +458,9 @@ class GRUDS(Transition):
         param xdim: state dimensionality
         param udim: input dimensionality
         """
-        super().__init__()
+        super().__init__(logvar)
         self.add_module('predict', GRUCell(input_size=udim, hidden_size=xdim, bias=bias))
         self.add_module('linear', nn.Linear(xdim, xdim))
-        # self.add_module('input_dropout', nn.Dropout(0.1))
-        # self.add_module('output_dropout', nn.Dropout(0.1))
-        self.register_parameter('logvar',
-                                Parameter(torch.tensor(logvar),
-                                          requires_grad=False))  # state noise
     
     def velocity(self, x, u):
         return self.linear(self.predict(u, x)) - x
@@ -420,14 +479,9 @@ class RNNDS(Transition):
         param xdim: state dimensionality
         param udim: input dimensionality
         """
-        super().__init__()
+        super().__init__(logvar)
         self.add_module('predict', RNNCell(input_size=udim, hidden_size=xdim, bias=bias))
         self.add_module('linear', nn.Linear(xdim, xdim))
-        # self.add_module('input_dropout', nn.Dropout(0.1))
-        # self.add_module('output_dropout', nn.Dropout(0.1))
-        self.register_parameter('logvar',
-                                Parameter(torch.tensor(logvar),
-                                          requires_grad=False))  # state noise
     
     def velocity(self, x, u):
         return self.linear(self.predict(u, x)) - x
@@ -438,6 +492,32 @@ class RNNDS(Transition):
                 leak: float = 0.) -> Tensor:
         # u = self.input_dropout(u)
         return self.linear(self.predict(u, x))
+
+
+class MLPDS(Transition):
+    def __init__(self, xdim: int, udim: int, hidden_size: int, bias=True, logvar=0.):
+        """
+        param xdim: state dimensionality
+        param udim: input dimensionality
+        param hidden_size
+        """
+        super().__init__(logvar)
+        self.add_module('predict', nn.Sequential(
+            nn.Linear(xdim + udim, hidden_size),
+            nn.Tanh(), 
+            nn.Linear(hidden_size, xdim)
+            )
+        )
+    
+    def velocity(self, x, u):
+        return self.predict(torch.cat([x, u], dim=-1))
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                leak: float = 0.) -> Tensor:
+        
+        return self.velocity(x, u) + x
 
 
 def train(model: VJF,
@@ -544,6 +624,12 @@ def train_seq(model: VJF,
                 
                 m_list.append(m)
                 logvar_list.append(lv)
+
+            if hasattr(model.transition, 'update'):
+                # print(m_list[0].shape)
+                x2d = torch.concat([m[0, 1:, :] for m in m_list], dim=0)
+                u2d = torch.concat([u for u in ulist], dim=0)
+                model.transition.update(x2d, u2d)
             
             if epoch_loss.isclose(running_loss, rtol=rtol):
                 print('\nConverged.\n')
