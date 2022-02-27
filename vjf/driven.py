@@ -302,6 +302,10 @@ class VJF(Module):
 
 
 class Transition(Module, metaclass=ABCMeta):
+    def __init__(self, logvar=0.) -> None:
+        super().__init__()
+        self.register_parameter('logvar', Parameter(torch.tensor(logvar), requires_grad=False))  # state noise
+
     @abstractmethod
     def velocity(x, u):
         pass
