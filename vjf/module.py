@@ -147,22 +147,27 @@ class RBFN(Module):
     """Radial basis function network
     Not Bayesian
     """
-    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = True, normalized: bool = False):
         """
         param in_features: dimensionality of input
         param out_features: dimensionality of output
         param n_basis: number of RBFs
         param bias: If set to False, the output layer will not learn an additive bias. Default: True
+        param normalized: normalized RBFN
         """
         super().__init__()
         self.n_basis = n_basis
         self.bias = bias
+        self.normalized = normalized
         self.register_parameter('centroid', Parameter(torch.randn(n_basis, in_features)))
         self.register_parameter('logscale', Parameter(torch.zeros(1, n_basis)))  # singleton dim for broadcast over batches
         self.add_module('basis2output', nn.Linear(in_features=n_basis, out_features=out_features, bias=bias))
 
     def forward(self, x: Tensor) -> Tensor:
+        eps = 1e-8
         h = rbf(x, self.centroid, self.logscale.exp())
+        if self.normalized:
+            h = h / (h.sum(-1, keepdim=True) + eps)
         return self.basis2output(h)
 
 
