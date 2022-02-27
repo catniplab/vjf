@@ -232,20 +232,23 @@ class VJF(Module):
         # dynamics
         l_dynamics = self.transition.loss(m1, x1)  # TODO: use posterior variance
         # entropy
-        h = entropy(Gaussian(m, lv))
+        h = gaussian_entropy(Gaussian(m, lv))
+        kl = self.transition.kl()  # KL
 
         assert torch.isfinite(l_recon), l_recon.item()
         assert torch.isfinite(l_dynamics), l_dynamics.item()
         assert torch.isfinite(h), h.item()
 
-        loss = l_recon - h
+        loss = l_recon - h + kl
         if not warm_up:
             loss = loss + l_dynamics
 
+        batch = y.shape[0]
+
         if components:
-            return loss, l_recon, l_dynamics, h
+            return loss / batch, l_recon / batch, l_dynamics / batch, h / batch
         else:
-            return loss
+            return loss / batch
 
     @classmethod
     def make_model(cls,
