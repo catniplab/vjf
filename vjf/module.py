@@ -179,7 +179,7 @@ class RFF(Module):
         self.out_features = out_features
         self.n_basis = n_basis
         self.intercept = intercept
-        self.register_parameter('w', Parameter(torch.rand(n_basis, in_features), requires_grad=False))  # requires_grad should always be False
+        self.register_parameter('w', Parameter(torch.randn(n_basis, in_features) * math.sqrt(2./n_basis), requires_grad=False))  # requires_grad should always be False
         self.register_parameter('b', Parameter(2 * math.pi * torch.rand(n_basis), requires_grad=False))
         self.add_module('linear', nn.Linear(n_basis, out_features, bias=False))
 
