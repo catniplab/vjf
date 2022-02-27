@@ -1,7 +1,6 @@
 """
-input-driven system
-batch training
-non-Bayesian state model
+Offline mode
+For autonomous systems, use 0D input
 """
 from abc import ABCMeta, abstractmethod
 import math
@@ -260,6 +259,7 @@ class VJF(Module):
                    hidden_sizes: Sequence[int],
                    likelihood: str = 'poisson',
                    ds: str = 'rbf',
+                   normalized_rbfn: bool = False,
                    state_logvar: float = 0.,
                    *args,
                    **kwargs):
@@ -269,19 +269,27 @@ class VJF(Module):
             likelihood = GaussianLikelihood()
         
         if ds == 'rbf':
-            model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, ds_bias, state_logvar),
+            model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+        if ds == 'bayesrbf':
+            model = VJF(ydim, xdim, udim, likelihood, BayesRBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar),
                             GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                             **kwargs)
         elif ds == 'rff':
-            model = VJF(ydim, xdim, udim, likelihood, RFFDS(xdim, udim, n_rbf, ds_bias, state_logvar),
+            model = VJF(ydim, xdim, udim, likelihood, RFFDS(xdim, udim, n_rbf, False, state_logvar),
                             GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                             **kwargs)
         elif ds == 'gru':
-            model = VJF(ydim, xdim, udim, likelihood, GRUDS(xdim, udim, ds_bias, state_logvar),
+            model = VJF(ydim, xdim, udim, likelihood, GRUDS(xdim, udim, True, state_logvar),
                             GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                             **kwargs)
         elif ds == 'rnn':
-            model = VJF(ydim, xdim, udim, likelihood, RNNDS(xdim, udim, ds_bias, state_logvar),
+            model = VJF(ydim, xdim, udim, likelihood, RNNDS(xdim, udim, True, state_logvar),
+                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
+                            **kwargs)
+        elif ds == 'mlp':
+            model = VJF(ydim, xdim, udim, likelihood, MLPDS(xdim, udim, n_rbf, True, state_logvar),
                             GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
                             **kwargs)
 
