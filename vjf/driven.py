@@ -126,15 +126,17 @@ class LinearDecoder(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         w = self.weight
-        if self.norm != 'none':
-            if self.norm == 'fro':
-                normalizer = torch.linalg.norm(w, keepdim=True)
-            elif self.norm == 'row':
-                normalizer = torch.linalg.norm(w, dim=0, keepdim=True)
-            elif self.norm == 'col':
-                normalizer = torch.linalg.norm(w, dim=1, keepdim=True)
-            
-            w = w / normalizer
+        normalizer = 1.
+        if self.norm == 'svd':
+            w = linalg.svd(w, False).U
+        elif self.norm == 'fro':
+            normalizer = torch.linalg.norm(w, keepdim=True)
+        elif self.norm == 'row':
+            normalizer = torch.linalg.norm(w, dim=0, keepdim=True)
+        elif self.norm == 'col':
+            normalizer = torch.linalg.norm(w, dim=1, keepdim=True)
+        
+        w = w / normalizer
         return functional.linear(x, w, self.bias)
 
 
@@ -193,7 +195,7 @@ class VJF(Module):
         self.add_module('likelihood', likelihood)
         self.add_module('transition', transition)
         self.add_module('encode', encoder)
-        self.add_module('decode', LinearDecoder(xdim, ydim))
+        self.add_module('decode', LinearDecoder(xdim, ydim, norm='svd'))
 
     def forward(self, y: Tensor, u: Tensor) -> Tuple:
         """
