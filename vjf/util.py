@@ -3,7 +3,7 @@ from typing import Tuple, Union
 import operator
 
 import torch
-from torch import Tensor
+from torch import Tensor, linalg
 
 from .distribution import Gaussian
 
@@ -74,6 +74,20 @@ def flat2d(a):
             return a.reshape(prod(shape[:-1]), 0)
         else:
             return a.reshape(-1, a.shape[-1])
+
+
+def ensure_2d(a: Tensor) -> Tensor:
+    if a.ndim < 2:
+        a = torch.atleast_1d(a)
+        a = a.unsqueeze(0)
+    return a
+
+
+def ensure_3d(a: Tensor) -> Tensor:
+    if a.ndim < 3:
+        a = ensure_2d(a)
+        a = a.unsqueeze(0)
+    return a
 
 
 def prod(a):
