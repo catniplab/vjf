@@ -536,60 +536,6 @@ class BayesRFFDS(Transition):
         return kl_b + kl_w + kl_noise
 
 
-def train(model: VJF,
-          y: Tensor,
-          u: Tensor,
-          *,
-          max_iter: int = 200,
-          beta: float = 0.,
-          verbose: bool = False,
-          rtol: float = 1e-5,
-          lr: float = 1e-3,
-          lr_decay: float = .99):
-    optimizer = AdamW(model.parameters(), lr=lr)
-    scheduler = ExponentialLR(optimizer, gamma=lr_decay)
-
-    y = torch.as_tensor(y, dtype=torch.get_default_dtype())
-    y = torch.atleast_2d(y)
-
-    u = torch.as_tensor(u, dtype=torch.get_default_dtype())
-    u = torch.atleast_2d(u)
-
-    N, L, _ = y.shape  # 3D, time first
-    losses = []
-    with trange(max_iter) as progress:
-        running_loss = torch.tensor(float('nan'))
-        for i in progress:
-            # collections
-
-            yhat, m, lv, x0, x1, m1 = model.forward(y, u)
-            total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
-            
-            # kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
-            kl_scale = 1.
-            total_loss = loss_recon + kl_scale * (loss_dynamics - h)
-
-            optimizer.zero_grad()
-            total_loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.)
-            optimizer.step()
-            if total_loss.isclose(running_loss, rtol=rtol):
-                print('\nConverged.\n')
-                break
-
-            running_loss = beta * running_loss + (1 - beta) * total_loss if i > 0 else total_loss
-            # print(total_loss)
-
-            progress.set_postfix({
-                'Loss': running_loss.item(),
-                # 'KL scale': kl_scale.item(),
-            })
-            losses.append(total_loss.item())
-            # scheduler.step()
-
-    return losses, m, lv
-
-
 def train_seq(model: VJF,
           y: List,
           u: List,
