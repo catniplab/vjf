@@ -597,7 +597,7 @@ def train_seq(model: VJF,
           max_iter: int = 200,
           beta: float = 0.,
           verbose: bool = False,
-          rtol: float = 1e-5,
+          rtol: float = 1e-05,
           lr: float = 1e-3,
           lr_decay: float = .99):
     optimizer = AdamW(model.parameters(), lr=lr)
@@ -611,42 +611,39 @@ def train_seq(model: VJF,
         for i in progress:
             # collections
             epoch_loss = 0.
-            m_list = []
+            mu_list = []
             logvar_list = []
+            Ls = 0
             for y, u in zip(ylist, ulist):
                 y = torch.as_tensor(y, dtype=torch.get_default_dtype())
-                y = torch.atleast_2d(y)
-                y = y.unsqueeze(0)
+                y = ensure_3d(y)
 
                 u = torch.as_tensor(u, dtype=torch.get_default_dtype())
-                u = torch.atleast_2d(u)
-                u = u.unsqueeze(0)
+                u = ensure_3d(u)
 
                 N, L, _ = y.shape  # 3D, time first
 
-                yhat, m, lv, x0, x1, m1 = model.forward(y, u)
-                total_loss, loss_recon, loss_dynamics, h = model.loss(y, yhat, m, lv, x1, m1, components=True, warm_up=False)
+                p_0, q_0, q_t = model.forward(y, u)
+                trial_loss = model.loss(y, u, p_0, q_0, q_t)
             
                 # kl_scale = torch.sigmoid(torch.tensor(i, dtype=torch.get_default_dtype()) - 10)
-                kl_scale = 1.
-                total_loss = loss_recon + kl_scale * (loss_dynamics - h)
-
+                # kl_scale = 1.
+                # total_loss = loss_recon + kl_scale * (loss_dynamics - h)
                 optimizer.zero_grad()
-                total_loss.backward()
+                trial_loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.)
                 optimizer.step()
             
-                epoch_loss += total_loss
+                epoch_loss += trial_loss.detach()
+                Ls += L
                 
-                m_list.append(m)
-                logvar_list.append(lv)
-
-            if hasattr(model.transition, 'train'):
-                # print(m_list[0].shape)
-                model.transition.train(m_list, ulist)
-                # model.transition.update(x2d, u2d)
+                mu_list.append(q_t[0].detach())
+                logvar_list.append(q_t[1].detach())
             
-            if epoch_loss.isclose(running_loss, rtol=rtol):
+            # epoch_loss += model.transition.kl()
+            epoch_loss /= Ls
+
+            if torch.isclose(epoch_loss, running_loss, rtol=rtol):
                 print('\nConverged.\n')
                 break
 
@@ -654,11 +651,11 @@ def train_seq(model: VJF,
             # print(total_loss)
 
             progress.set_postfix({
-                'Loss': running_loss.item(),
+                'Loss': f'{running_loss:.5f}',
                 # 'KL scale': kl_scale.item(),
             })
-            losses.append(epoch_loss.item())
+            losses.append(epoch_loss)
 
             # scheduler.step()
 
-    return losses, m_list, logvar_list
+    return losses, mu_list, logvar_list
