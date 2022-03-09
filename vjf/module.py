@@ -147,7 +147,7 @@ class RBFN(Module):
     """Radial basis function network
     Not Bayesian
     """
-    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = True, normalized: bool = False):
+    def __init__(self, in_features: int, out_features: int, n_basis: int, bias: bool = False, normalized: bool = False):
         """
         param in_features: dimensionality of input
         param out_features: dimensionality of output
@@ -159,13 +159,20 @@ class RBFN(Module):
         self.n_basis = n_basis
         self.bias = bias
         self.normalized = normalized
-        self.register_parameter('centroid', Parameter(torch.randn(n_basis, in_features)))
-        self.register_parameter('logscale', Parameter(torch.zeros(1, n_basis)))  # singleton dim for broadcast over batches
+        
+        center = (torch.rand(n_basis, in_features) - .5) * 2  # (-1, 1)
+        # center = center + torch.randn_like(center)  # jitter        
+        pdist = functional.pdist(center)
+        logscale = torch.log(pdist.max() / math.sqrt(2 * n_basis))
+
+        self.register_parameter('center', Parameter(center, requires_grad=False))
+        self.register_parameter('logscale', Parameter(torch.full((1, n_basis), fill_value=logscale), requires_grad=False))  # singleton dim for broadcast over batches
+
         self.add_module('basis2output', nn.Linear(in_features=n_basis, out_features=out_features, bias=bias))
 
     def forward(self, x: Tensor) -> Tensor:
         eps = 1e-8
-        h = rbf(x, self.centroid, self.logscale.exp())
+        h = rbf(x, self.center, self.logscale.exp())
         if self.normalized:
             h = h / (h.sum(-1, keepdim=True) + eps)
         return self.basis2output(h)
