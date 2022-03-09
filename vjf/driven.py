@@ -448,13 +448,13 @@ class BayesRBFDS(Transition):
         self.lm = LinearModel(feature, xdim, beta=math.exp(-logvar))
 
     @torch.no_grad()
-    def train(self, x, u):
+    def update(self, x, u):
         x2d0 = torch.concat([m.squeeze()[:-1, :] for m in x], dim=0)  # x0...
         x2d1 = torch.concat([m.squeeze()[1:, :] for m in x], dim=0)  # x1...
         dx2d = x2d1 - x2d0
         u2d = torch.concat([u for u in u], dim=0)
         xu = torch.cat([x2d0, u2d], dim=-1)
-        self.lm.train(xu, dx2d)
+        self.lm.update(xu, dx2d)
     
     def velocity(self, x, u):
         xu = torch.cat([x, u], dim=-1)
@@ -498,13 +498,13 @@ class BayesRFFDS(Transition):
         self.lm = LinearModel(feature, xdim, beta=math.exp(-logvar))
 
     @torch.no_grad()
-    def train(self, x, u):
+    def update(self, x, u):
         x2d0 = torch.concat([m.squeeze()[:-1, :] for m in x], dim=0)  # x0...
         x2d1 = torch.concat([m.squeeze()[1:, :] for m in x], dim=0)  # x1...
         dx2d = x2d1 - x2d0
         u2d = torch.concat([u for u in u], dim=0)
         xu = torch.cat([x2d0, u2d], dim=-1)
-        self.lm.train(xu, dx2d)
+        self.lm.update(xu, dx2d)
     
     def velocity(self, x, u):
         xu = torch.cat([x, u], dim=-1)
