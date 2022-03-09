@@ -208,52 +208,63 @@ class VJF(Module):
         :return:
         """
         # encode
-
-        y = torch.atleast_2d(y)
-        u = torch.atleast_2d(u)
-        m, lv = self.encode(y, u)
-        x = reparametrize((m, lv))  # (N, L + 1, X)
-        x0 = x[:, :-1, :]  # (N, L, X), 0...T-1
-        x1 = x[:, 1:, :]  # (N, L, X), 1...T
-        m1 = self.transition(flat2d(x0), flat2d(u))
-        m1 = m1.reshape(*x1.shape)
-        # lv1 = torch.ones_like(m1) * self.transition.logvar
-        # decode
-        yhat = self.decode(x1)  # NOTE: closed-form did not work well
-
-        return yhat, m, lv, x0, x1, m1
+        y = ensure_3d(y)
+        u = ensure_3d(u)
+        q_0, q_t = self.encode(y, u)
+        mu_0, logvar_0 = q_0
+        p_0 = (torch.zeros_like(mu_0), torch.zeros_like(logvar_0))
+        return p_0, q_0, q_t
 
     def loss(self,
              y: Tensor,
-             yhat,
-             m,
-             lv,
-             x1,
-             m1,
-             components: bool = True,
-             warm_up: bool = False):
+             u: Tensor,
+             p_0: Tuple[Tensor, Tensor],
+             q_0: Tuple[Tensor, Tensor],
+             q_t: Tuple[Tensor, Tensor],
+             ):
+        y = ensure_3d(y)
+        u = ensure_3d(u)
+
+        x_0 = reparametrize(q_0)  # (N, X)
+        x_t = reparametrize(q_t)  # (N, L, X)
+        
+        # x_t_pred = self.generate(x_0, u)
+        x_t_cond = torch.concat([x_0.unsqueeze(1), x_t[:, :-1, :]], dim=1)  # x_{0, ..., L-1}
+        x_t_pred = self.transition(flat2d(x_t_cond), flat2d(u))
+        x_t_pred = x_t_pred.reshape(*x_t_cond.shape)
+        assert x_t.shape == x_t_pred.shape
+
+        yhat = self.decode(x_t)  # NOTE: closed-form did not work well
+
         # recon
         l_recon = self.likelihood.loss(yhat, y)
-        # dynamics
-        l_dynamics = self.transition.loss(m1, x1)  # TODO: use posterior variance
-        # entropy
-        h = gaussian_entropy(Gaussian(m, lv))
-        kl = self.transition.kl()  # KL
 
-        assert torch.isfinite(l_recon), l_recon.item()
-        assert torch.isfinite(l_dynamics), l_dynamics.item()
-        assert torch.isfinite(h), h.item()
+        p_t = (x_t_pred, torch.ones_like(x_t_pred) * self.transition.logvar)
+        kl_t = gaussian_kl(q_t, p_t)
+        kl_0 = gaussian_kl(q_0, p_0)
 
-        loss = l_recon - h + kl
-        if not warm_up:
-            loss = loss + l_dynamics
+        assert torch.isfinite(l_recon)
+        assert torch.isfinite(kl_t)
+        assert torch.isfinite(kl_0)
 
-        batch = y.shape[0]
+        loss = l_recon + kl_t + kl_0
+        
+        return loss
 
-        if components:
-            return loss / batch, l_recon / batch, l_dynamics / batch, h / batch
-        else:
-            return loss / batch
+    def generate(self, x_0, u):
+        x_0 = ensure_2d(x_0)  # (N, X)
+        u = ensure_3d(u)  # (N, L, U)
+        L = u.shape[1]
+
+        x = torch.empty(L + 1, *x_0.shape)
+        x[0] = x_0
+
+        for t in range(L):
+            x[t + 1, ...] = self.transition(x[t], u[:, t, :])
+        
+        x = x[1:, ...]
+        return x.transpose(0, 1)
+
 
     @classmethod
     def make_model(cls,
@@ -261,8 +272,9 @@ class VJF(Module):
                    xdim: int,
                    udim: int,
                    n_rbf: int,
+                   n_layer: int,
                    ds_bias: bool,
-                   hidden_sizes: Sequence[int],
+                   edim: int,
                    likelihood: str = 'poisson',
                    ds: str = 'rbf',
                    normalized_rbfn: bool = False,
@@ -274,18 +286,16 @@ class VJF(Module):
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
         
+        encoder = GRUEncoder(ydim, xdim, udim, edim)
         if ds == 'rbf':
-            model = VJF(ydim, xdim, udim, likelihood, RBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar),
-                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
-                            **kwargs)
+            state = RBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar)
         if ds == 'bayesrbf':
-            model = VJF(ydim, xdim, udim, likelihood, BayesRBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar),
-                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
-                            **kwargs)
+            state = BayesRBFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar)
         elif ds == 'bayesrff':
-            model = VJF(ydim, xdim, udim, likelihood, BayesRFFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar),
-                            GRUEncoder(ydim, xdim, udim, hidden_sizes), *args,
-                            **kwargs)
+            state = BayesRFFDS(xdim, udim, n_rbf, ds_bias, normalized_rbfn, state_logvar)
+        elif ds == 'mlp':
+            state = MLPDS(xdim, udim, n_rbf, n_layer, state_logvar)
+        model = VJF(ydim, xdim, udim, likelihood, state, encoder, *args, **kwargs)
 
         return model
 
@@ -521,8 +531,8 @@ class BayesRFFDS(Transition):
         self.bias = bias
         self.normalized = normalized
 
-        feature = RFFFeature(xdim + udim, xdim, ndim=n_basis, logscale=logvar)
-        self.lm = LinearModel(feature, xdim, beta=math.exp(-logvar))
+        feature = RFFFeature2(xdim + udim, xdim, ndim=n_basis, logscale=logvar)
+        self.lm = LinearModel2(feature, xdim, beta=math.exp(-logvar))
 
     @torch.no_grad()
     def update(self, x, u):
