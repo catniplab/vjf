@@ -177,8 +177,8 @@ class GRUEncoder(Module):
         logvar_0 = self.hidden2logvar_0(e_n)  # (N, D*H) -> (N, X)
         logvar_t = self.hidden2logvar_t(e_t)  # (N, L, D*H) -> (N, L, X)
 
-        w_x_t = linalg.svd(self.w_x_t, full_matrices=False).Vh  # normalize
-        w_x_0 = linalg.svd(self.w_x_0, full_matrices=False).Vh
+        w_x_t = linalg.svd(self.w_x_t, full_matrices=False).Vh / math.sqrt(self.w_x_t.shape[0])  # normalize F-norm of V is sqrt(min(m, n))
+        w_x_0 = linalg.svd(self.w_x_0, full_matrices=False).Vh / math.sqrt(self.w_x_0.shape[0])
 
         mu_0 = functional.linear(e_n, w_x_0)  # (N, D*H) -> (N, X)
         mu_t = functional.linear(e_t, w_x_t)  # (N, L, D*H) -> (N, L, X)
