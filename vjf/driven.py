@@ -333,8 +333,35 @@ class Transition(Module, metaclass=ABCMeta):
         return torch.tensor(0.)
         
 
+class MLPDS(Transition):
+    def __init__(self, xdim: int, udim: int, hidden_size: int, n_layer: int, logvar=0.):
+        """
+        param xdim: state dimensionality
+        param udim: input dimensionality
+        param n_basis: number of radial basis functions
+        """
+        super().__init__(logvar)
+        layers = [nn.Linear(xdim + udim, hidden_size), nn.Tanh()]
+        for k in range(n_layer):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.Tanh())
+        layers.append(nn.Linear(hidden_size, xdim))
+
+        self.add_module('predict', nn.Sequential(*layers))
+    
+    def velocity(self, x, u):
+        x = torch.cat([x, u], dim=-1)
+        return self.predict(x)
+
+    def forward(self,
+                x: Tensor,
+                u: Tensor,
+                leak: float = 0.) -> Tensor:
+        dx = self.velocity(x, u)
+        return x + dx
+
 class RBFDS(Transition):
-    def __init__(self, xdim: int, udim: int, n_basis: int, bias=True, normalized=False, logvar=0.):
+    def __init__(self, xdim: int, udim: int, n_basis: int, bias=False, normalized=False, logvar=0.):
         """
         param xdim: state dimensionality
         param udim: input dimensionality
