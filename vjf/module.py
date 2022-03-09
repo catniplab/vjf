@@ -161,7 +161,7 @@ class RBFN(Module):
         self.normalized = normalized
         
         center = (torch.rand(n_basis, in_features) - .5) * 2  # (-1, 1)
-        # center = center + torch.randn_like(center)  # jitter        
+        center = center + torch.randn_like(center)  # jitter        
         pdist = functional.pdist(center)
         logscale = torch.log(pdist.max() / math.sqrt(2 * n_basis))
 
