@@ -15,7 +15,7 @@ from tqdm import trange
 
 from .distribution import Gaussian
 from .module import RBFN
-from .util import reparametrize, flat2d, at_least2d
+from .util import ensure_2d, ensure_3d, reparametrize, flat2d, at_least2d
 from .functional import rbf
 
 
@@ -111,9 +111,8 @@ class PoissonLikelihood(Module):
 
 
 class LinearDecoder(Module):
-    def __init__(self, xdim: int, ydim: int, norm='fro'):
+    def __init__(self, xdim: int, ydim: int, norm='none'):
         super().__init__()
-        # self.add_module('decode', Linear(xdim, ydim))
         self.norm = norm
         self.register_parameter('weight', Parameter(torch.empty(ydim, xdim)))  # (out, in)
         self.register_parameter('bias', Parameter(torch.empty(ydim)))
@@ -128,6 +127,9 @@ class LinearDecoder(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         w = self.weight
+        if self.norm == 'none':
+            return functional.linear(x, w, self.bias)
+
         normalizer = 1.
         if self.norm == 'svd':
             w = linalg.svd(w, False).U
@@ -143,45 +145,45 @@ class LinearDecoder(Module):
 
 
 class GRUEncoder(Module):
-    def __init__(self, ydim: int, xdim: int, udim: int, hidden_size: int, batch_first: bool = True):
+    def __init__(self, ydim: int, xdim: int, udim: int, hidden_size: int):
         super().__init__()
 
         self.add_module(
             'gru',
             GRU(input_size=ydim + udim,
                 hidden_size=hidden_size,
-                batch_first=batch_first,
+                batch_first=True,
                 bidirectional=True))
-        # self.add_module('input_dropout', nn.Dropout(0.1))
-        # self.add_module('output_dropout', nn.Dropout(0.1))
 
         D = 2  # bidirectional
-        self.register_parameter('h0', Parameter(torch.zeros(D, hidden_size)))  # (D, H)
-
-        self.add_module('hidden2posterior', Linear(hidden_size * D, xdim * 2, bias=True))  # q_t
-        self.add_module('hidden2initial', Linear(hidden_size * D, xdim * 2, bias=True))  # q_0
+        self.register_parameter('e_0', Parameter(torch.zeros(D, hidden_size)))  # initial encoder hidden state (D, H)
+        
+        self.register_parameter('w_x_t', Parameter(torch.randn(xdim, hidden_size * D)))  # output layer weight for state mean
+        self.register_parameter('w_x_0', Parameter(torch.randn(xdim, hidden_size * D)))  # output layer weight for initial state mean
+        self.add_module('hidden2logvar_t', Linear(hidden_size * D, xdim, bias=True))  # logvar_t
+        self.add_module('hidden2logvar_0', Linear(hidden_size * D, xdim, bias=True))  # logvar_0
 
     def forward(self, y: Tensor, u: Tensor) -> Gaussian:
         y = torch.cat([y, u], dim=-1)  # append input
-        if y.ndim == 2:
-            y = y.unsqueeze(1)
-        N, L, ydim = y.shape
-        h0 = self.h0.unsqueeze(1).expand(-1, N, -1)  # expand batch axis, (D, N, H)
-        # y = self.input_dropout(y)
-        h_t, h_n = self.gru(y, h0)  # (N, L, Y), (D, N, H) -> (N, L, D*H), (D, N, H)
-        
-        h_n = torch.swapaxes(h_n, 0, 1)  # (D, N, H) -> (N, D, H)
-        h_n = h_n.reshape(N, -1).unsqueeze(1)  # (D, N, H) -> (N, D*H) -> (N, 1, D*H)
-        
-        # h_t = self.output_dropout(h_t)
-        o_t = self.hidden2posterior(h_t)  # (N, L, D*H) -> (N, L, 2X)
-        o_0 = self.hidden2initial(h_n)  # (N, 1, D*H) -> (N, 1, 2X)
+        y = ensure_3d(y)
+        N, _, _ = y.shape
 
-        o = torch.concat([o_0, o_t], dim=1)  # (N, L + 1, 2X)
-        # o = self.output_dropout(o)
-        mean, logvar = o.chunk(2, -1)  # (N, L + 1, X), (N, L + 1, X)
-        # mean = torch.tanh(mean)
-        return mean, logvar
+        e_0 = self.e_0.unsqueeze(1).expand(-1, N, -1)  # expand batch axis, (D, N, H)
+        e_t, e_n = self.gru(y, e_0)  # (N, L, Y), (D, N, H) -> (N, L, D*H), (D, N, H)
+        
+        e_n = torch.swapaxes(e_n, 0, 1)  # (D, N, H) -> (N, D, H)
+        e_n = e_n.reshape(N, -1)  # (D, N, H) -> (N, D*H)
+        
+        logvar_0 = self.hidden2logvar_0(e_n)  # (N, D*H) -> (N, X)
+        logvar_t = self.hidden2logvar_t(e_t)  # (N, L, D*H) -> (N, L, X)
+
+        w_x_t = linalg.svd(self.w_x_t, full_matrices=False).Vh  # normalize
+        w_x_0 = linalg.svd(self.w_x_0, full_matrices=False).Vh
+
+        mu_0 = functional.linear(e_n, w_x_0)  # (N, D*H) -> (N, X)
+        mu_t = functional.linear(e_t, w_x_t)  # (N, L, D*H) -> (N, L, X)
+
+        return (mu_0, logvar_0), (mu_t, logvar_t)
 
 
 class VJF(Module):
@@ -197,7 +199,7 @@ class VJF(Module):
         self.add_module('likelihood', likelihood)
         self.add_module('transition', transition)
         self.add_module('encode', encoder)
-        self.add_module('decode', LinearDecoder(xdim, ydim, norm='svd'))
+        self.add_module('decode', LinearDecoder(xdim, ydim, norm='none'))
 
     def forward(self, y: Tensor, u: Tensor) -> Tuple:
         """
