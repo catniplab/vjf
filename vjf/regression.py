@@ -191,7 +191,7 @@ class LinearModel2(Module):
         self.P = P
         self.w = w
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, variance=False) -> Tuple[Tensor, Tensor]:
         output_shape = (x.shape[0], self.n_output)
         F = self.feature(x)  # (O, B, F)
         w = self.w  # (O, F, 1)
@@ -203,7 +203,10 @@ class LinearModel2(Module):
         s = s.diagonal(0, dim1=-2, dim2=-1).t()  # (O, B, B) => (O, B) => (B, O)
         assert m.shape == output_shape
         assert s.shape == output_shape
-        return m, s
+        if variance:
+            return m, s
+        else:
+            return m
 
     def sample(self, x: Tensor) -> Tensor:
         m, s = self.forward(x)
