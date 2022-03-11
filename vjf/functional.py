@@ -79,3 +79,19 @@ def normed_linear(x, w, bias):
         w**2, dim=1, keepdim=True))  # TODO: use torch.linalg.norm
     w = w / w_row_norms
     return functional.linear(x, w.T, bias)
+
+
+def gaussian_kl(q, p):
+    """
+    Elementwise KL(q|p) = 0.5 * [tr(v_q/v_p) - 1 + (m_q - m_p)^2 / v_p + log(var_p/var_q)]
+    """
+    m_q, logvar_q = q
+    m_p, logvar_p = p
+
+    var_p = torch.exp(logvar_p)
+
+    trace = torch.exp(logvar_p - logvar_q)
+    logdet = logvar_q - logvar_p
+
+    kl = .5 * ((m_q - m_p)**2 / var_p + logdet + trace - 1)
+    return kl.sum()
