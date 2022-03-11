@@ -117,8 +117,30 @@ class LinearModel(Module):
         return reparametrize((m, s))
 
 
-### Distinct features for multi-output
-class RFFFeature2(Module):
+### Different features for multi-output
+class RBFFeature2(nn.Module):
+    def __init__(self, center: Tensor, logscale: Tensor, output_ndim: int, *, normalized=False) -> None:
+        super().__init__()
+        self.ndim = center.shape[0]
+        self.output_ndim = output_ndim
+        self.center = center
+        self.logscale = logscale
+        self.normalized = normalized
+
+    def forward(self, x, eps=1e-8):
+        h = rbf(x, self.center, self.logscale.exp())
+        if self.normalized:
+            h = h / (h.sum(-1, keepdim=True) + eps)
+        h = h.expand(self.output_ndim, -1, -1)
+        return h
+
+    @torch.no_grad()
+    def update(self, x):
+        cidx = torch.multinomial(torch.ones(self.ndim), self.ndim)
+        center = x[cidx]
+        pdist = functional.pdist(center)
+        self.center = center
+        self.logscale.fill_(torch.log(pdist.max() / math.sqrt(2 * self.ndim)))
     """Random Fourier Features"""
     def __init__(self, input_ndim: int, output_ndim: int, ndim: int, logscale: float=0.):
         super().__init__()
