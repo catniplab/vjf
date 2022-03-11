@@ -571,6 +571,9 @@ class VIRBFDS(Transition):
         xu_2d = torch.cat((x_0_2d, u_2d), -1)
         self.lm.update(xu_2d, dx_2d)
         pass
+    
+    def sample(self):
+        self.lm.sample()
 
     def velocity(self, x, u):
         xu = torch.cat([x, u], dim=-1)

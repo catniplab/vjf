@@ -317,12 +317,12 @@ class LinearModelVI(nn.Module):
     @torch.no_grad()
     def update(self, x, y):
         self.feature.update(x)
+        
+    def sample(self):
+        self.w = reparametrize((self.w_mean, self.w_logvar))
 
-    def forward(self, x: Tensor, sample: bool=True) -> Tensor:
-        if sample:
-            w = reparametrize((self.w_mean, self.w_logvar))
-        else:
-            w = self.w_mean
+    def forward(self, x: Tensor) -> Tensor:
+        w = self.w
         feat = self.feature(x)
         return functional.linear(feat, w)
 
