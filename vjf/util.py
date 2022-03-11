@@ -92,3 +92,10 @@ def ensure_3d(a: Tensor) -> Tensor:
 
 def prod(a):
     return reduce(operator.mul, a, 1)
+
+
+def eye(m, n):
+    """
+    Great a 3D tensor (m, n, n). Each slice is an identity matrix.
+    """
+    return torch.diag_embed(torch.ones(m, n))
