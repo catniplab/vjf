@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from vjf.driven import VJF, train_seq
+from vjf.driven import VJF, train
 
 # %%
 # using double precision
@@ -48,11 +48,21 @@ likelihood = 'gaussian'  # gaussian or poisson
 normalized_rbfn = True
 # likelihood = 'poisson'  # gaussian or poisson
 
-model = VJF.make_model(ydim, xdim, udim, n_rbf=n_rbf, n_layer=n_layer, ds_bias=False, normalized_rbfn=normalized_rbfn, edim=edim, likelihood=likelihood, ds='rbf', state_logvar=-5.)
+model = VJF.make_model(ydim,
+                       xdim,
+                       udim,
+                       n_rbf=n_rbf,
+                       n_layer=n_layer,
+                       ds_bias=False,
+                       normalized_rbfn=normalized_rbfn,
+                       edim=edim,
+                       likelihood=likelihood,
+                       ds='rbf',
+                       state_logvar=-5.)
 # %%
 y = [y]
 
-losses, mu, logvar = train_seq(model, y, u, max_iter=1000, lr=1e-3, lr_decay=.99)
+losses, mu, logvar = train(model, y, u, max_iter=5000, lr=1e-3)
 
 mu = mu[0].detach().numpy().squeeze()
 
@@ -63,6 +73,7 @@ ax = fig.add_subplot(222)
 ax.plot(mu)
 plt.title('Posterior mean')
 
+
 # Draw velocity field
 # make mesh for velocity field
 def grid(n, lims):
@@ -72,24 +83,30 @@ def grid(n, lims):
     grids = np.column_stack([X.reshape(-1), Y.reshape(-1)])
     return X, Y, grids
 
+
 ax = fig.add_subplot(223)
 r = np.mean(np.abs(mu).max())  # determine the limits of plot
 
-Xm, Ym, XYm = grid(51, [-1.1*r, 1.1*r])
-Um, Vm = model.transition.velocity(torch.tensor(XYm), torch.zeros(XYm.shape[0], udim)).detach().numpy().T  # get velocity
+Xm, Ym, XYm = grid(51, [-1.1 * r, 1.1 * r])
+Um, Vm = model.transition.velocity(
+    torch.tensor(XYm), torch.zeros(XYm.shape[0],
+                                   udim)).detach().numpy().T  # get velocity
 Um = np.reshape(Um, Xm.shape)
 Vm = np.reshape(Vm, Ym.shape)
 plt.streamplot(Xm, Ym, Um, Vm)
-if hasattr(model.transition.predict, 'center'):
-    center = model.transition.predict.center.detach().numpy()
-    print(center.shape)
-    plt.scatter(*center.T, s=10, c='r')
+# if hasattr(model.transition.predict, 'center'):
+#     center = model.transition.predict.center.detach().numpy()
+#     print(center.shape)
+#     plt.scatter(*center.T, s=10, c='r')
 plt.plot(*mu.T, color='C1', alpha=0.5, zorder=5)
 plt.title('Velocity field')
 
 # %% Forecast state and observation
 ax = fig.add_subplot(224)
-x, y = model.forecast(x0=mu[9, ...], u=torch.zeros(1, int(100 / dt), udim), n_step=int(100 / dt), noise=True)
+x, y = model.forecast(x0=mu[9, ...],
+                      u=torch.zeros(1, int(100 / dt), udim),
+                      n_step=int(100 / dt),
+                      noise=True)
 x = x.detach().numpy().squeeze()
 plt.plot(x)
 plt.title('Forecast')
