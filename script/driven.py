@@ -62,7 +62,7 @@ model = VJF.make_model(ydim,
 # %%
 y = [y]
 
-losses, mu, logvar = train(model, y, u, max_iter=5000, lr=1e-3)
+losses, mu, logvar = train(model, y, u, max_iter=1000, lr=1e-3)
 
 mu = mu[0].detach().numpy().squeeze()
 
