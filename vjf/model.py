@@ -1,19 +1,21 @@
+import logging
 from itertools import zip_longest
-from typing import Tuple, Sequence, Union
+from typing import Sequence, Tuple, Union
 
 import torch
 from torch import Tensor, nn
-from torch.nn import Module, Linear, Parameter
+from torch.nn import Linear, Module, Parameter
 from torch.optim import SGD
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
 from .distribution import Gaussian
-from .functional import gaussian_entropy as entropy, gaussian_loss
+from .functional import gaussian_entropy as entropy
+from .functional import gaussian_loss
 from .likelihood import GaussianLikelihood, PoissonLikelihood
-from .module import LinearRegression, RBF
+from .module import RBF, LinearRegression
 from .recognition import Recognition
-from .util import reparametrize, symmetric, running_var, nonecat
+from .util import nonecat, reparametrize, running_var, symmetric
 
 
 class LinearDecoder(Module):
@@ -47,7 +49,7 @@ def detach(q: Gaussian) -> Gaussian:
 
 class VJF(Module):
     def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module,
-                 *, lr_decay: float = .9):
+                 *, lr: float = 1e-4, lr_decay: float = .9):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
@@ -129,9 +131,18 @@ class VJF(Module):
         # entropy
         h = entropy(qt)
 
-        assert torch.isfinite(l_recon), l_recon.item()
-        assert torch.isfinite(l_dynamics), l_dynamics.item()
-        assert torch.isfinite(h), h.item()
+        # assert torch.isfinite(l_recon), l_recon.item()
+        # assert torch.isfinite(l_dynamics), l_dynamics.item()
+        # assert torch.isfinite(h), h.item()
+
+        if not torch.isfinite(l_recon):
+            l_recon = torch.tensor(0.)
+        
+        if not torch.isfinite(l_dynamics):
+            l_dynamics = torch.tensor(0.)
+
+        if not torch.isfinite(h):
+            h = torch.tensor(0.)
 
         loss = l_recon - h
         if not warm_up:
@@ -193,10 +204,14 @@ class VJF(Module):
         else:
             loss = output
         if sgd:
-            self.optimizer.zero_grad()
-            loss.backward()  # accumulate grad if not trained
-            nn.utils.clip_grad_value_(self.parameters(), 1.)
-            self.optimizer.step()
+            try:
+                self.optimizer.zero_grad()
+                loss.backward()  # accumulate grad if not trained
+                nn.utils.clip_grad_value_(self.parameters(), 1.)
+                self.optimizer.step()
+            except RuntimeError as err:
+                logging.warning(err)
+                self.optimizer.zero_grad()
         if update:
             self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
 

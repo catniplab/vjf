@@ -24,7 +24,6 @@ C = torch.randn(xdim, ydim)  # loading matrix
 d = torch.randn(ydim)  # bias
 
 t = torch.arange(0, T, step=dt)  # time point evaluated
-print(t.shape)
 x = torch.column_stack((torch.sin(t), torch.cos(t)))  # limit cycle
 x = x + torch.randn_like(x) * 0.1  # add some noise
 
