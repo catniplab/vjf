@@ -64,7 +64,6 @@ class VJF(Module):
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
-        lr = 1e-4
         self.optimizer = SGD(
             [
                 {'params': self.likelihood.parameters(), 'lr': lr},
