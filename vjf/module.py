@@ -105,7 +105,7 @@ class LinearRegression(Module):
             #attempt for fixing negative eigenvalue by adding smallest eigenvalue to diagonal
             smallest_eig = torch.min(torch.eig(P)[0])
             self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.abs(smallest_eig)*2) #is multiplication with 2 enough? so far it seems to be
-            #self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.sum(torch.diagonal(P))) #a bit rougher correction to make pos-def #memming made me do this
+            #self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.sum(torch.diagonal(P))) #a bit rougher correction to make pos-def
             self.w_precision = P
             self.w_mean = g.cholesky_solve(self.w_pchol)
             self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
