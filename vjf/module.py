@@ -95,13 +95,20 @@ class LinearRegression(Module):
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
         P = P * shrink + scaled_feat.t().mm(scaled_feat)
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
-        try:
+       try:
             self.w_pchol = linalg.cholesky(P)
             self.w_precision = P
             self.w_mean = g.cholesky_solve(self.w_pchol)
             self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
             # (feature, feature) (feature, output) => (feature, output)
         except RuntimeError:
+            #attempt for fixing negative eigenvalue by adding smallest eigenvalue to diagonal
+            smallest_eig = torch.min(torch.eig(P)[0])
+            self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.abs(smallest_eig)*2) #is multiplication with 2 enough? so far it seems to be
+            #self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.sum(torch.diagonal(P))) #a bit rougher correction to make pos-def #memming made me do this
+            self.w_precision = P
+            self.w_mean = g.cholesky_solve(self.w_pchol)
+            self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
             warnings.warn('RLS failed.')
 
     @torch.no_grad()
