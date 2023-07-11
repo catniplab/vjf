@@ -7,10 +7,10 @@ license = "MIT"
 
 [tool.poetry.dependencies]
 python = ">=3.8"
-torch = "^1.9.0"
-scipy = "^1.7.0"
-numpy = "^1.21.0"
-tqdm = "^4.61.2"
+torch = ">=1.9.0"
+scipy = ">=1.7.0"
+numpy = ">=1.21.0"
+tqdm = ">=4.61.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.4"
