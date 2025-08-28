@@ -95,7 +95,7 @@ class LinearRegression(Module):
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
         P = P * shrink + scaled_feat.t().mm(scaled_feat)
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
-       try:
+        try:
             self.w_pchol = linalg.cholesky(P)
             self.w_precision = P
             self.w_mean = g.cholesky_solve(self.w_pchol)
