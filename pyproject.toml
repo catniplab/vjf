@@ -6,14 +6,14 @@ authors = ["yuan <yuanz271@gmail.com>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = ">=3.8"
+python = ">=3.10"
 torch = ">=1.9.0"
 scipy = ">=1.7.0"
 numpy = ">=1.21.0"
 tqdm = ">=4.61.2"
 
 [tool.poetry.dev-dependencies]
-pytest = "^6.2.4"
+pytest = "^9.0.3"
 matplotlib = "^3.4.2"
 scikit-learn = "^1.0.1"
 yapf = "^0.31.0"
