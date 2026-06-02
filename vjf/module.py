@@ -103,7 +103,9 @@ class LinearRegression(Module):
             # (feature, feature) (feature, output) => (feature, output)
         except RuntimeError:
             #attempt for fixing negative eigenvalue by adding smallest eigenvalue to diagonal
-            smallest_eig = torch.min(torch.eig(P)[0])
+            # P is a symmetric precision matrix; eigvalsh returns real eigenvalues ascending.
+            # (torch.eig was removed in torch 2.0.)
+            smallest_eig = torch.linalg.eigvalsh(P).min()
             self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.abs(smallest_eig)*2) #is multiplication with 2 enough? so far it seems to be
             #self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.sum(torch.diagonal(P))) #a bit rougher correction to make pos-def
             self.w_precision = P
