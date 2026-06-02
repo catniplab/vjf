@@ -9,5 +9,5 @@ setup(
     author="yuan",
     author_email="yuanz271@gmail.com",
     description="",
-    requires=["scipy", "numpy", "torch", "tqdm"],
+    install_requires=["scipy", "numpy", "torch>=2.8.0", "tqdm"],
 )
