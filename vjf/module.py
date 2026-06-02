@@ -88,7 +88,7 @@ class LinearRegression(Module):
         # eye = torch.eye(self.w_precision.shape[0])
         P = self.w_precision
         feat = self.feature(x)  # (sample, feature)
-        s = torch.sqrt(v)
+        s = torch.as_tensor(v, dtype=feat.dtype, device=feat.device).sqrt()
         scaled_feat = feat / s
         scaled_target = target / s
         g = P.mm(self.w_mean) * shrink + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
@@ -102,14 +102,19 @@ class LinearRegression(Module):
             self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
             # (feature, feature) (feature, output) => (feature, output)
         except RuntimeError:
-            #attempt for fixing negative eigenvalue by adding smallest eigenvalue to diagonal
-            smallest_eig = torch.min(torch.eig(P)[0])
-            self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.abs(smallest_eig)*2) #is multiplication with 2 enough? so far it seems to be
-            #self.w_pchol = linalg.cholesky(P+torch.eye(P.shape[0])*torch.sum(torch.diagonal(P))) #a bit rougher correction to make pos-def
+            # P is a symmetric precision matrix; eigvalsh returns real eigenvalues ascending.
+            # (torch.eig was removed in torch 2.0.)
+            smallest_eig = torch.linalg.eigvalsh(P).min()
+            scale = P.diagonal().abs().max().clamp_min(1.)
+            jitter = 10 * torch.finfo(P.dtype).eps * scale
+            shift = (-smallest_eig).clamp_min(0.) + jitter
+            eye = torch.eye(P.shape[0], dtype=P.dtype, device=P.device)
+            P = P + eye * shift
+            self.w_pchol = linalg.cholesky(P)
             self.w_precision = P
             self.w_mean = g.cholesky_solve(self.w_pchol)
             self.w_chol = linalg.inv(self.w_pchol.t())  # well, this is not lower triangular
-            warnings.warn('RLS failed.')
+            warnings.warn('RLS precision matrix was not positive definite; added diagonal jitter.')
 
     @torch.no_grad()
     def kalman(self, x: Tensor, target: Tensor, v: Union[Tensor, float], diffusion: float = 0.):

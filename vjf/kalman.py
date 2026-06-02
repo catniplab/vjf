@@ -83,6 +83,10 @@ def update(y: Tensor,
     L = linalg.cholesky(S)
     # K = H.cholesky_solve(L).mm(Vhat)  # L^{-1}HV
     # K = H.mm(Vhat).cholesky_solve(L)  # L^{-1}HV
+    # DEPRECATED: Tensor.triangular_solve is deprecated and slated for removal.
+    # Replace with torch.linalg.solve_triangular(L, B, upper=False) (note: args reversed,
+    # returns the solution directly). This branch is currently unreachable - kalman.update
+    # is commented out at all call sites - so it is a latent bug, not a live crash.
     G = H.mm(Vhat).triangular_solve(L, upper=False).solution.t()
     # G' = L^{-1}HV, gain K = VH'S^{-1} = VH'(LL')^{-1} = VH'L'^{-1}L^{-1} = G L^{-1}
 

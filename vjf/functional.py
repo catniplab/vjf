@@ -68,7 +68,7 @@ def gaussian_loss(a: Union[Tensor, Gaussian], b: Union[Tensor, Gaussian], logvar
     elif logv1 is None:
         trace = torch.exp(logv2 - logvar)
     else:
-        trace = torch.exp(logv1 + logv2 - logvar)
+        trace = torch.exp(logv1 - logvar) + torch.exp(logv2 - logvar)
 
     nll = nll + .5 * trace
 
