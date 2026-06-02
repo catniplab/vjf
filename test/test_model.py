@@ -1,7 +1,6 @@
 import torch
 
 from vjf.model import RBFDS, VJF
-from vjf.model import RBFDS, VJF
 from vjf.recognition import Recognition
 from vjf.distribution import Gaussian
 
@@ -12,7 +11,6 @@ def test_RBFLDS():
     lds = RBFDS(n_rbf, xdim, udim)
 
     N = 20
-    xu = torch.randn(N, xdim + udim)
     x = torch.randn(N, xdim)
 
     lds.loss(x, x)
