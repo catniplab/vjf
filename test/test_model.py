@@ -1,7 +1,9 @@
 import torch
 
 from vjf.model import RBFDS, VJF
+from vjf.model import RBFDS, VJF
 from vjf.recognition import Recognition
+from vjf.distribution import Gaussian
 
 
 def test_RBFLDS():
@@ -10,22 +12,24 @@ def test_RBFLDS():
     lds = RBFDS(n_rbf, xdim, udim)
 
     N = 20
-    u = torch.randn(N, udim)
     xu = torch.randn(N, xdim + udim)
     x = torch.randn(N, xdim)
 
     lds.loss(x, x)
-    lds.update(x, x, u)
+    lds.update(x, x, torch.randn(N, udim))
 
 
 def test_Recognition():
     ydim = 10
     xdim = 3
-    recog = Recognition(ydim, xdim, [5, 5])
+    udim = 2
+    recog = Recognition(ydim, xdim, udim, [5, 5])
     N = 20
     y = torch.randn(N, ydim)
     x = torch.randn(N, xdim)
-    mean, logvar = recog(y, x)
+    u = torch.randn(N, udim)
+    q = Gaussian(x, torch.zeros_like(x))
+    mean, logvar = recog(y, q, u)
     assert mean.shape == (N, xdim) and logvar.shape == (N, xdim)
 
 
