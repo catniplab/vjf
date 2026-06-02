@@ -64,6 +64,22 @@ def r2_with(A, c, mu, z):
     return 1.0 - sse / (tss + 1e-12)
 
 
+def transition_mean(model, mu, device, chunk=2000):
+    """Mean one-step prediction over many states, chunked.
+
+    VJF's LinearRegression.forward(sampling=False) forms an N x N matrix
+    (FL @ FL.T) to read its diagonal, so calling it on the full stream is
+    O(T^2) memory. Chunking keeps it bounded.
+    """
+    out = np.empty_like(mu)
+    with torch.no_grad():
+        for i in range(0, len(mu), chunk):
+            out[i:i + chunk] = model.transition(
+                torch.as_tensor(mu[i:i + chunk], device=device), None, sampling=False
+            ).mean.cpu().numpy()
+    return out
+
+
 def grid_field(model, A, c, device, lim=2.4, n=16):
     """Learned velocity field on a z-space grid (arrows mapped from mu-space)."""
     gx = np.linspace(-lim, lim, n)
@@ -201,9 +217,7 @@ def run_condition(z, cal, n_neurons, cfg, device):
 
     # One-step prediction R^2 in z-space (mask any non-finite predictions from
     # skipped/diverged steps so a single bad value doesn't NaN the metric).
-    with torch.no_grad():
-        nxt = model.transition(torch.as_tensor(mu_all, device=device), None,
-                               sampling=False).mean.cpu().numpy()
+    nxt = transition_mean(model, mu_all, device)
     pred_z = nxt[:-1] @ A.T + c
     ok = np.isfinite(pred_z).all(1)
     zt = z[1:][ok]; pz = pred_z[ok]
