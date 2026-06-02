@@ -835,3 +835,6 @@ poetry.lock
 *.npz
 notebook
 script
+
+# experiment run outputs (regenerated on GCP)
+experiments/*/results/
