@@ -331,15 +331,19 @@ class RBFDS(Module):
         #   'rls' - online recursive least squares (original VJF; fast convergence
         #           but the precision matrix grows/ill-conditions over very long
         #           streams and the weights can explode).
+        #   'srrls' - square-root (Potter) RLS: same fast convergence as 'rls' but
+        #           propagates the covariance Cholesky factor directly (PD by
+        #           construction, no precision accumulation/inversion), so it is
+        #           numerically stable over very long streams. Preferred.
         #   'sgd' - weights are an nn.Parameter trained by SGD via the dynamics
         #           ELBO term (gradient-clipped in VJF.filter). Stable over long
         #           streams: unexcited RBF weights get ~zero gradient and stay at
         #           their lstsq-warm-started init instead of drifting.
-        if flow_learner not in ('rls', 'sgd'):
-            raise ValueError(f"flow_learner must be 'rls' or 'sgd', got {flow_learner!r}")
+        if flow_learner not in ('rls', 'srrls', 'sgd'):
+            raise ValueError(f"flow_learner must be 'rls', 'srrls' or 'sgd', got {flow_learner!r}")
         self.flow_learner = flow_learner
         self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim,
-                                                     bayes=(flow_learner == 'rls')))
+                                                     bayes=(flow_learner != 'sgd')))
         self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
         # RLS forgetting + ridge ('rls' flow only). Defaults reproduce the original
@@ -387,11 +391,12 @@ class RBFDS(Module):
         xu = nonecat(xs, ut)
         xt = torch.atleast_2d(xt)  # TODO: use qt, add qt.logvar to state noise
         dx = xt - xs
-        if not warm_up and self.velocity.bayes:
-            # RLS weight update (bayes flow only). The SGD flow (bayes=False) is
-            # trained by the main optimizer via the dynamics ELBO instead.
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
-            # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
+        if not warm_up:
+            if self.flow_learner == 'rls':
+                self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
+            elif self.flow_learner == 'srrls':
+                self.velocity.srls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink)
+            # 'sgd' flow is trained by the main optimizer via the dynamics ELBO instead.
         residual = dx - self._velocity_mean(xu)
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
@@ -404,7 +409,10 @@ class RBFDS(Module):
         xt = torch.atleast_2d(xt)
         xu = nonecat(xs, ut)
         mse = (xt - xs).pow(2).mean()
-        self.velocity.initialize(xu, xt - xs, mse)
+        if self.flow_learner == 'srrls':
+            self.velocity.init_srls(xu, xt - xs)
+        else:
+            self.velocity.initialize(xu, xt - xs, mse)
         d = self._velocity_mean(xu)
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()

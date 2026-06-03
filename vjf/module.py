@@ -172,6 +172,49 @@ class LinearRegression(Module):
             self.w_mean.data.copy_(torch.linalg.lstsq(feat, target).solution)
         # self.kalman(x, target, torch.tensor(.1))
 
+    @torch.no_grad()
+    def init_srls(self, x: Tensor, target: Tensor, p0: float = 1.0):
+        """Initialize the square-root RLS state: features, lstsq warm-start of
+        w_mean, and the covariance square root w_chol = sqrt(p0)*I (P = w_chol w_chol')."""
+        r = x.norm(dim=1).max().item()
+        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        nn.init.constant_(self.feature.logwidth, math.log(r))
+        feat = self.feature(x)
+        self.w_mean = torch.linalg.lstsq(feat, target).solution
+        n = self.feature.n_feature
+        self.w_chol = (p0 ** 0.5) * torch.eye(n, dtype=feat.dtype, device=feat.device)
+
+    @torch.no_grad()
+    def srls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
+        """Square-root (Potter) recursive least squares update.
+
+        Propagates the covariance Cholesky factor `w_chol` (P = w_chol w_chol')
+        directly via rank-1 Potter updates -- guaranteed positive-definite, no
+        precision matrix to accumulate/invert, so it stays numerically stable over
+        very long streams where the plain `rls` precision form blows up. RLS-speed
+        convergence; unexcited directions keep their prior (weights stay at init).
+        `v` is the per-sample noise variance; `shrink`<1 is exponential forgetting.
+        """
+        feat = self.feature(x)  # (sample, feature)
+        r = torch.as_tensor(v, dtype=feat.dtype, device=feat.device).reshape(())
+        S = self.w_chol
+        W = self.w_mean
+        inv_sl = shrink ** -0.5
+        for i in range(feat.shape[0]):
+            phi = feat[i:i + 1]                 # (1, feature)
+            if shrink < 1.:
+                S = S * inv_sl                  # forgetting inflates the covariance
+            f = S.t().mm(phi.t())               # (feature, 1)
+            Sf = S.mm(f)                        # (feature, 1) = P phi'
+            a = 1.0 / (f.t().mm(f) + r)         # (1, 1)
+            K = a * Sf                          # (feature, 1) Kalman gain
+            gamma = a / (1.0 + torch.sqrt(a * r))
+            S = S - gamma * Sf.mm(f.t())        # rank-1 Potter downdate (stays a valid sqrt)
+            e = target[i:i + 1] - phi.mm(W)     # (1, output) innovation
+            W = W + K.mm(e)                      # (feature, output)
+        self.w_chol = S
+        self.w_mean = W
+
 
 class RBFN(Module):
     """Radial basis function network

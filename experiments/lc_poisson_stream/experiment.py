@@ -506,11 +506,11 @@ def main():
         "target_mean_rate": 0.1,          # 20 Hz at 5 ms bins
         "target_max_rate": 0.5,           # 100 Hz peak
         "obs_chunk": 20000,               # streaming Poisson chunk size
-        "n_rbf": 50,
-        "rbf_width_scale": 0.5,           # narrow the RBF bumps vs the default (=state radius);
-                                          # ~doubles the forecast horizon (54 -> >=100 steps)
-        "transition_flow": "sgd",         # 'sgd' = SGD-trained flow (stable over long streams);
-                                          # 'rls' = original RLS flow (faster but explodes at long T)
+        "n_rbf": 100,                     # richer flow basis (sharper field); srrls handles it
+        "rbf_width_scale": 0.5,           # narrow the RBF bumps vs the default (=state radius)
+        "transition_flow": "srrls",       # square-root RLS: stable over long streams AND
+                                          # RLS-speed convergence (forecast horizon ~k=100).
+                                          # 'rls' explodes at long T; 'sgd' is stable but slow.
         "hidden_sizes": [100, 100],
         "lr": 1e-3,
         "warmup_frac": 0.15,
