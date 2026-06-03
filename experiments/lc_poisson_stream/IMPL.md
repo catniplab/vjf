@@ -70,34 +70,33 @@ weights drift and blow up (wmax ~1e8-1e17), killing the forecast while the
 encoder/filter stays fine (R^2 ~0.84). Forgetting + ridge stops the *crash* but
 not the weight explosion.
 
-Current rework (`RBFDS(bayes=False)`, used here): the flow weights are an
-`nn.Parameter` trained by **SGD** through the dynamics ELBO, gradient-clipped in
-`VJF.filter`. Unexcited RBFs get ~zero gradient and stay at their (lstsq-warm-
-started) init, so it's stable over long streams.
+**SOLUTION (used here): square-root RLS** (`flow_learner='srrls'`). Potter
+rank-1 square-root RLS propagates the weight-covariance Cholesky factor directly
+(PD by construction, no precision accumulation/inversion), so it is numerically
+stable over 200k+ steps AND keeps RLS-speed convergence. Unexcited RBF directions
+keep their prior (weights stay at init), so the non-identifiability no longer
+causes drift. References: Potter square-root filter / Bierman, *Factorization
+Methods for Discrete Sequential Estimation* (1977); Haykin, *Adaptive Filter
+Theory*; Sayed, *Adaptive Filters*.
 
-**TODO -- numerically stable RLS (preferred: RLS converges far faster than SGD).**
-Replace the naive `P`-accumulating RLS with a square-root / array form that
-propagates the covariance Cholesky/UD factor (guaranteed PD, no explicit
-inversion), plus regularization for insufficient excitation:
-- Square-root / QR-decomposition RLS, inverse-QR RLS (Givens rotations) -- Haykin,
-  *Adaptive Filter Theory*; Sayed, *Adaptive Filters*.
-- Bierman U-D factorization / Potter square-root filter -- Bierman, *Factorization
-  Methods for Discrete Sequential Estimation* (1977).
-- Regularized RLS (ridge / Levenberg) and **directional forgetting** (Kulhavy) or
-  constant-trace / covariance-resetting RLS to handle unexcited directions.
-Target: bounded, well-conditioned covariance over 200k+ steps with RLS-speed
-convergence, then compare forecast horizon vs the SGD flow.
+Two other `flow_learner` options remain available:
+- `'rls'` -- original; fast but precision blows up past T~100k (do not use long).
+- `'sgd'` -- nn.Parameter trained by the dynamics ELBO (gradient-clipped); stable
+  but converges too slowly to forecast well (kHor 1-3 at T=200k).
 
-**More dynamics parameters (n_rbf).** The learned field at n_rbf=50 is too smooth
-(low capacity). Raising n_rbf is the capacity fix, BUT under the SGD flow more
-RBFs don't help at practical stream lengths -- the flow stays undertrained
-(kHor=0 at n_rbf 50/150/400, T=30k), and more params just slow SGD further.
-So **more params only pays off with the fast, stable RLS above**: square-root RLS
-converges in ~one pass and would exploit a finer RBF basis. Plan: land stable RLS,
-then sweep n_rbf up (e.g. 100-400, narrower widths) for a sharper field + longer
-forecast horizon. Better RBF placement (k-means on visited states) is a further
-lever vs the current uniform grid.
+**Remaining TODO (future, lower priority).** Directional forgetting (Kulhavy) for
+non-stationary dynamics; data-driven RBF placement (k-means on visited states)
+vs the uniform grid; sweep n_rbf > 100 / narrower widths for an even sharper field.
 
-Full 1000 s GCP result (commit 3f27ab0, SGD flow, n_rbf=50): stable (diverge=0),
-latent R^2 0.73/0.84/0.88 across 50/150/250 neurons (~3/6/8 dB), rotational field
-emerges but smooth, forecast horizon only 1-3 steps (SGD undertraining).
+## Results
+
+Full 1000 s (T=200000, 5 ms bins) GCP runs, oracle readout, stable (diverge=0):
+
+| flow (commit) | n_rbf | 50n ~3dB | 150n ~6dB | 250n ~8dB |
+|---|---|---|---|---|
+| sgd (3f27ab0)   |  50 | R^2 0.73, kHor 1  | R^2 0.84, kHor 2   | R^2 0.88, kHor 3   |
+| **srrls (e317bdb)** | 100 | R^2 0.73, kHor 32 | R^2 0.86, kHor 100 | R^2 0.91, kHor 100 |
+
+srrls recovers the latent (R^2 rising with SNR), learns a rotational velocity
+field, and forecasts the full k=100 horizon at mid/high SNR -- the 50n case is
+SNR-limited (kHor 32), not estimator-limited.
