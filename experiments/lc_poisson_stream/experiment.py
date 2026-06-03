@@ -502,7 +502,8 @@ def main():
         "t_eff": 2000 if args.quick else args.t_eff,
         "stride": 1,
         "dt": 5e-3,                       # 5 ms bins
-        "angular_velocity": 3.0,
+        "angular_velocity": 30.0,         # ~42 steps/cycle: strong rotational signal,
+                                          # safe from aliasing (omega*dt=0.15 rad/step)
         "target_mean_rate": 0.1,          # 20 Hz at 5 ms bins
         "target_max_rate": 0.5,           # 100 Hz peak
         "obs_chunk": 20000,               # streaming Poisson chunk size
