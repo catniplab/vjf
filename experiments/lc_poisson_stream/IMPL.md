@@ -87,3 +87,17 @@ inversion), plus regularization for insufficient excitation:
   constant-trace / covariance-resetting RLS to handle unexcited directions.
 Target: bounded, well-conditioned covariance over 200k+ steps with RLS-speed
 convergence, then compare forecast horizon vs the SGD flow.
+
+**More dynamics parameters (n_rbf).** The learned field at n_rbf=50 is too smooth
+(low capacity). Raising n_rbf is the capacity fix, BUT under the SGD flow more
+RBFs don't help at practical stream lengths -- the flow stays undertrained
+(kHor=0 at n_rbf 50/150/400, T=30k), and more params just slow SGD further.
+So **more params only pays off with the fast, stable RLS above**: square-root RLS
+converges in ~one pass and would exploit a finer RBF basis. Plan: land stable RLS,
+then sweep n_rbf up (e.g. 100-400, narrower widths) for a sharper field + longer
+forecast horizon. Better RBF placement (k-means on visited states) is a further
+lever vs the current uniform grid.
+
+Full 1000 s GCP result (commit 3f27ab0, SGD flow, n_rbf=50): stable (diverge=0),
+latent R^2 0.73/0.84/0.88 across 50/150/250 neurons (~3/6/8 dB), rotational field
+emerges but smooth, forecast horizon only 1-3 steps (SGD undertraining).
