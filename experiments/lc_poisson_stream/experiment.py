@@ -366,6 +366,33 @@ def make_plots(results, cfg):
     fig.suptitle("Free-run forecast of learned dynamics"); fig.tight_layout()
     fig.savefig(RESULTS / "forecast.png", dpi=130); plt.close(fig)
 
+    # 4b. Single-trial forecast examples: from several marked start states, free-run
+    #     the learned dynamics K steps (dashed) vs the true trajectory (solid).
+    K = cfg["kpred_max"]
+    fig, axes = plt.subplots(1, len(results), figsize=(5 * len(results), 4.8), squeeze=False)
+    for ax, r in zip(axes[0], results):
+        z, mu, A, c, model = r["_z"], r["_mu"], r["_A"], r["_c"], r["_model"]
+        dev = next(model.parameters()).device
+        half = len(z) // 2
+        starts = np.linspace(half, len(z) - K - 2, 6).astype(int)
+        ax.plot(z[half:half + 4000, 0], z[half:half + 4000, 1], lw=0.4, alpha=0.25, color="grey")
+        cols = plt.cm.turbo(np.linspace(0.08, 0.92, len(starts)))
+        for s, col in zip(starts, cols):
+            with torch.no_grad():
+                st = torch.as_tensor(mu[s], device=dev).reshape(1, 2)
+                traj = [st]
+                for _ in range(K):
+                    st = _mean(model.transition(st, None, sampling=False))
+                    traj.append(st)
+                roll_z = torch.cat(traj, 0).cpu().numpy() @ A.T + c
+            true_seg = z[s:s + K + 1]
+            ax.plot(true_seg[:, 0], true_seg[:, 1], color=col, lw=1.3, alpha=0.85)
+            ax.plot(roll_z[:, 0], roll_z[:, 1], color=col, lw=1.1, ls="--", alpha=0.95)
+            ax.plot(true_seg[0, 0], true_seg[0, 1], "o", color=col, ms=4)
+        ax.set_title(f"{r['label']}  ({K}-step)"); ax.set_aspect("equal")
+    fig.suptitle("Single-trial forecast examples (solid=true, dashed=VJF free-run, o=start)")
+    fig.tight_layout(); fig.savefig(RESULTS / "forecast_examples.png", dpi=130); plt.close(fig)
+
     # 5. Rate reconstruction (predicted vs true, example neuron trace + scatter).
     fig, axes = plt.subplots(2, len(results), figsize=(5 * len(results), 7), squeeze=False)
     for j, r in enumerate(results):
