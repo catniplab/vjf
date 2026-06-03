@@ -64,6 +64,11 @@ def r2_with(A, c, mu, z):
     return 1.0 - sse / (tss + 1e-12)
 
 
+def _mean(out):
+    """Mean of a transition output: Gaussian (RLS flow) -> .mean; Tensor (SGD flow) -> itself."""
+    return out.mean if isinstance(out, tuple) else out
+
+
 def transition_mean(model, mu, device, chunk=2000):
     """Mean one-step prediction over many states, chunked.
 
@@ -74,9 +79,8 @@ def transition_mean(model, mu, device, chunk=2000):
     out = np.empty_like(mu)
     with torch.no_grad():
         for i in range(0, len(mu), chunk):
-            out[i:i + chunk] = model.transition(
-                torch.as_tensor(mu[i:i + chunk], device=device), None, sampling=False
-            ).mean.cpu().numpy()
+            o = model.transition(torch.as_tensor(mu[i:i + chunk], device=device), None, sampling=False)
+            out[i:i + chunk] = _mean(o).cpu().numpy()
     return out
 
 
@@ -86,8 +90,8 @@ def grid_field(model, A, c, device, lim=2.4, n=16):
     grid_z = np.stack(np.meshgrid(gx, gx), -1).reshape(-1, 2).astype(np.float32)
     grid_mu = ((grid_z - c) @ np.linalg.pinv(A).T).astype(np.float32)
     with torch.no_grad():
-        nxt = model.transition(torch.as_tensor(grid_mu, device=device), None,
-                               sampling=False).mean.cpu().numpy()
+        nxt = _mean(model.transition(torch.as_tensor(grid_mu, device=device), None,
+                                     sampling=False)).cpu().numpy()
     return grid_z, (nxt - grid_mu) @ A.T
 
 
@@ -106,7 +110,7 @@ def kstep_skill(model, mu_all, z, A, c, lo, hi, K, M, device):
     with torch.no_grad():
         state = torch.as_tensor(mu_all[starts], device=device)
         for k in range(1, K + 1):
-            state = model.transition(state, None, sampling=False).mean
+            state = _mean(model.transition(state, None, sampling=False))
             pred_z = state.cpu().numpy() @ A.T + c
             true_z = z[starts + k]
             sse_m = ((true_z - pred_z) ** 2).sum()
@@ -137,7 +141,7 @@ def run_condition(z, cal, n_neurons, cfg, device):
     model = VJF.make_model(
         ydim=N, xdim=2, udim=0, n_rbf=cfg["n_rbf"],
         hidden_sizes=cfg["hidden_sizes"], likelihood="poisson",
-        lr=cfg["lr"], lr_decay=1.0,
+        lr=cfg["lr"], lr_decay=1.0, transition_flow=cfg["transition_flow"],
     ).to(device)
 
     # Oracle readout: pin the decoder to the generator's true (C, b) and freeze.
@@ -352,7 +356,7 @@ def make_plots(results, cfg):
             st = torch.as_tensor(mu[len(mu) // 2], device=dev).reshape(1, 2)
             traj = [st]
             for _ in range(1000):
-                st = model.transition(st, None, sampling=False).mean
+                st = _mean(model.transition(st, None, sampling=False))
                 traj.append(st)
             roll = torch.cat(traj, 0).cpu().numpy()
         roll_z = roll @ A.T + c
@@ -505,6 +509,8 @@ def main():
         "n_rbf": 50,
         "rbf_width_scale": 0.5,           # narrow the RBF bumps vs the default (=state radius);
                                           # ~doubles the forecast horizon (54 -> >=100 steps)
+        "transition_flow": "sgd",         # 'sgd' = SGD-trained flow (stable over long streams);
+                                          # 'rls' = original RLS flow (faster but explodes at long T)
         "hidden_sizes": [100, 100],
         "lr": 1e-3,
         "warmup_frac": 0.15,

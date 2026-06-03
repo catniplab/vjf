@@ -308,14 +308,14 @@ class VJF(Module):
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', *args, **kwargs):
+                   likelihood: str = 'poisson', *args, transition_flow: str = 'rls', **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
-                    *args, **kwargs)
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, flow_learner=transition_flow),
+                    Recognition(ydim, xdim, udim, hidden_sizes), *args, **kwargs)
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
@@ -325,11 +325,31 @@ class VJF(Module):
 
 
 class RBFDS(Module):
-    def __init__(self, n_rbf: int, xdim: int, udim: int):
+    def __init__(self, n_rbf: int, xdim: int, udim: int, flow_learner: str = 'rls'):
         super().__init__()
-        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        # How the velocity (flow) weights are learned:
+        #   'rls' - online recursive least squares (original VJF; fast convergence
+        #           but the precision matrix grows/ill-conditions over very long
+        #           streams and the weights can explode).
+        #   'sgd' - weights are an nn.Parameter trained by SGD via the dynamics
+        #           ELBO term (gradient-clipped in VJF.filter). Stable over long
+        #           streams: unexcited RBF weights get ~zero gradient and stay at
+        #           their lstsq-warm-started init instead of drifting.
+        if flow_learner not in ('rls', 'sgd'):
+            raise ValueError(f"flow_learner must be 'rls' or 'sgd', got {flow_learner!r}")
+        self.flow_learner = flow_learner
+        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim,
+                                                     bayes=(flow_learner == 'rls')))
         self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
+        # RLS forgetting + ridge ('rls' flow only). Defaults reproduce the original
+        # (shrink=1, ridge=0). Set shrink<1 with ridge>0 to bound the precision.
+        self.rls_shrink = 1.0
+        self.rls_ridge = 0.0
+
+    def _velocity_mean(self, xu: Tensor) -> Tensor:
+        out = self.velocity(xu, sampling=False)
+        return out.mean if isinstance(out, Gaussian) else out
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
@@ -367,10 +387,12 @@ class RBFDS(Module):
         xu = nonecat(xs, ut)
         xt = torch.atleast_2d(xt)  # TODO: use qt, add qt.logvar to state noise
         dx = xt - xs
-        if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
+        if not warm_up and self.velocity.bayes:
+            # RLS weight update (bayes flow only). The SGD flow (bayes=False) is
+            # trained by the main optimizer via the dynamics ELBO instead.
+            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
             # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
-        residual = dx - self.velocity(xu, sampling=False).mean
+        residual = dx - self._velocity_mean(xu)
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
         self.logvar.data = var.log()
@@ -383,7 +405,7 @@ class RBFDS(Module):
         xu = nonecat(xs, ut)
         mse = (xt - xs).pow(2).mean()
         self.velocity.initialize(xu, xt - xs, mse)
-        d, V = self.velocity(xu, sampling=False)
+        d = self._velocity_mean(xu)
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()
 

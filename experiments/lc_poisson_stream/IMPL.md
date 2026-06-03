@@ -58,3 +58,32 @@ uv pip install --python .venv/bin/python -r experiments/lc_poisson_stream/requir
 .venv/bin/python experiments/lc_poisson_stream/experiment.py --quick    # tiny smoke test
 .venv/bin/python experiments/lc_poisson_stream/experiment.py --t-eff 20000   # medium
 ```
+
+## Dynamics-estimator notes & TODO
+
+VJF's default flow learner is **RLS** (`RBFDS(bayes=True)`). Over very long
+streams (T > ~80-100k) its precision matrix grows unbounded (`shrink=1`) and
+becomes ill-conditioned; combined with **non-identifiability** of RBF weights in
+regions the trajectory never visits (a null-space / free-direction problem, not
+a latent-scale invariance -- the oracle decoder pins the latent frame), the
+weights drift and blow up (wmax ~1e8-1e17), killing the forecast while the
+encoder/filter stays fine (R^2 ~0.84). Forgetting + ridge stops the *crash* but
+not the weight explosion.
+
+Current rework (`RBFDS(bayes=False)`, used here): the flow weights are an
+`nn.Parameter` trained by **SGD** through the dynamics ELBO, gradient-clipped in
+`VJF.filter`. Unexcited RBFs get ~zero gradient and stay at their (lstsq-warm-
+started) init, so it's stable over long streams.
+
+**TODO -- numerically stable RLS (preferred: RLS converges far faster than SGD).**
+Replace the naive `P`-accumulating RLS with a square-root / array form that
+propagates the covariance Cholesky/UD factor (guaranteed PD, no explicit
+inversion), plus regularization for insufficient excitation:
+- Square-root / QR-decomposition RLS, inverse-QR RLS (Givens rotations) -- Haykin,
+  *Adaptive Filter Theory*; Sayed, *Adaptive Filters*.
+- Bierman U-D factorization / Potter square-root filter -- Bierman, *Factorization
+  Methods for Discrete Sequential Estimation* (1977).
+- Regularized RLS (ridge / Levenberg) and **directional forgetting** (Kulhavy) or
+  constant-trace / covariance-resetting RLS to handle unexcited directions.
+Target: bounded, well-conditioned covariance over 200k+ steps with RLS-speed
+convergence, then compare forecast horizon vs the SGD flow.
