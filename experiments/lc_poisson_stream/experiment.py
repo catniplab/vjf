@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import platform
 import subprocess
 import sys
@@ -193,6 +194,8 @@ def run_condition(z, cal, n_neurons, cfg, device):
     win = {k: [] for k in ("recon", "dynamics", "entropy")}
     snapshots = []
     n_diverge = 0
+    filter_time = 0.0  # cumulative time inside model.filter() over post-warmup bins
+    n_filter = 0       # number of post-warmup filter steps timed
 
     q = None
     t0 = time.time()
@@ -208,6 +211,7 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 # radius regardless of count; smaller widths sharpen the flow and
                 # greatly extend the forecast horizon.
                 model.transition.velocity.feature.logwidth.data += math.log(cfg["rbf_width_scale"])
+            _tf = time.perf_counter()
             try:
                 qt, loss, recon, dynamics, entropy = model.filter(
                     cc[i], None, q, sgd=True, update=True, verbose=True, warm_up=warm
@@ -216,6 +220,9 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 n_diverge += 1
                 model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)
                 q = None; mu_all[t] = mu_all[t - 1]; t += 1; continue
+            if not warm:  # time the steady online-filtering cost (post warm-up)
+                filter_time += time.perf_counter() - _tf
+                n_filter += 1
             model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)  # keep long run stable
             mu = qt.mean.detach()
             if not torch.isfinite(mu).all() or mu.abs().max() > 1e3:
@@ -309,6 +316,8 @@ def run_condition(z, cal, n_neurons, cfg, device):
         "n_diverge": n_diverge,
         "still_rising": bool(len(r2_arr) >= 5 and r2_arr[-1] > r2_arr[-5] + 0.02),
         "wall_total": time.time() - t0,
+        "per_bin_filter_ms": float(filter_time / max(n_filter, 1) * 1e3),  # pure model.filter() per bin
+        "n_filter_steps": int(n_filter),
         "log": {k: np.asarray(v).tolist() for k, v in log.items()},
         "_mu": mu_all, "_z": z, "_A": A, "_c": c, "_model": model,
         "_counts_win": counts_win, "_C": C,
@@ -528,7 +537,20 @@ def provenance(cfg):
         "torch": torch.__version__,
         "numpy": np.__version__,
         "platform": platform.platform(),
+        "cpu_count": os.cpu_count(),
+        "torch_num_threads": torch.get_num_threads(),
     }
+    # CPU model (Linux /proc/cpuinfo, else platform.processor()).
+    cpu_model = platform.processor()
+    try:
+        with open("/proc/cpuinfo") as fh:
+            for line in fh:
+                if line.startswith("model name"):
+                    cpu_model = line.split(":", 1)[1].strip()
+                    break
+    except Exception:
+        pass
+    info["cpu_model"] = cpu_model
     try:
         import scipy
         info["scipy"] = scipy.__version__
@@ -622,8 +644,8 @@ def main():
         r = run_condition(z, cal, n_neurons, cfg, device)
         print(f"    R^2_final={r['r2_final']:.3f}  onestep_R^2={r['onestep_r2']:.3f}  "
               f"rate_corr={r['rate_corr']:.3f}  kpred_horizon={r['kpred_horizon']}  "
-              f"ttt_step={r['ttt_step']}  diverge={r['n_diverge']}  "
-              f"wall={r['wall_total']:.0f}s", flush=True)
+              f"diverge={r['n_diverge']}  wall={r['wall_total']:.0f}s  "
+              f"per_bin_filter={r['per_bin_filter_ms']:.3f}ms", flush=True)
         results.append(r)
 
     make_plots(results, cfg)
