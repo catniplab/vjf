@@ -2,6 +2,7 @@
 % Notation follows Zhao & Park, "Variational online learning of neural dynamics"
 % (Frontiers Comput. Neurosci. 2020); eq. labels reference that manuscript.
 \documentclass[11pt]{article}
+\usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb,bm}
 \newcommand{\vx}{\bm{x}}\newcommand{\vy}{\bm{y}}\newcommand{\vu}{\bm{u}}
 \newcommand{\vC}{\bm{C}}\newcommand{\vb}{\bm{b}}\newcommand{\vW}{\bm{W}}
@@ -40,22 +41,27 @@ an $n\!\to\!m$ map that is hard to learn at low SNR.
 
 \paragraph{Update (two coupled changes; the ELBO and generative model are unchanged).}
 \textbf{(1) Recognition input.} Replace the raw observation $\vy_t$ in (recog) by a
-deterministic, $\vC$-dependent feature --- the least-squares projection of the
-causally-smoothed log-rate onto the current loading subspace:
+deterministic, $\vC$-dependent feature --- the least-squares projection of a link-matched
+observation feature onto the current loading subspace:
 \begin{align}
-  \vnu_t &= (1-\alpha)\,\vnu_{t-1} + \alpha\,\vy_t, \quad \alpha=1/\tau
-     &&\text{(causal EMA smoothing)}\\
-  \vl_t  &= \log(\vnu_t + c) &&\text{(log-rate feature)}\\
-  \vpi_t &= \vC^{+}\,(\vl_t-\vb), \qquad \vC^{+}=(\vC^\top\vC)^{-1}\vC^\top\in\R^{m\times n}
+  \vpi_t &= \vC^{+}\,(\tilde g(\vy_t)-\vb), \qquad \vC^{+}=(\vC^\top\vC)^{-1}\vC^\top\in\R^{m\times n},
      &&\text{(subspace projection)}\\
-  [\vmu_t,\vs_t] &= h(\vpi_t,\vu_{t-1},\vmu_{t-1},\vs_{t-1}). &&\text{(recog$'$)}
+  [\vmu_t,\vs_t] &= h(\vpi_t,\vu_{t-1},\vmu_{t-1},\vs_{t-1}), &&\text{(recog$'$)}
 \end{align}
+where $\tilde g(\cdot)$ is an observation-model-specific, variance-stabilizing feature
+(an approximate inverse link) and $\vb$ is the running mean of $\tilde g(\vy_t)$. For the
+point-process/Poisson case $\tilde g(\vy_t)=\log(\vnu_t+c)$ with a causally-smoothed count
+$\vnu_t=(1-\alpha)\vnu_{t-1}+\alpha\vy_t$ ($\alpha=1/\tau$); for Gaussian observations
+$\tilde g=$ identity.
 $\vpi_t$ is the readout's own approximate inverse, so $h$ need only perform an $m\!\to\!m$
 correction rather than invert $n$ channels. Because $q(\vx_t)$ may be \emph{any}
-data-dependent distribution, restricting its parameterization to depend on $\vy_t$ through
-$\vpi_t$ leaves the bound $\hat{\mathcal L}$ valid (same likelihood, dynamics, entropy);
-only the amortization family changes. $\vC^{+}$ is recomputed only when $\vC$ is refreshed
-(below) and reused as one $O(nm)$ map per step --- not re-solved per bin.
+data-dependent distribution, parameterizing it through $\vpi_t$ leaves the bound
+$\hat{\mathcal L}$ valid (same likelihood, dynamics, entropy); only the amortization family
+changes. $\vC^{+}$ is recomputed only when $\vC$ is refreshed (below) and reused as one
+$O(nm)$ map per step --- not re-solved per bin. Any feature timescale $\tau$ is a fixed
+hyperparameter ($\tau\ll$ the dynamics timescale), \emph{not} ELBO-learned: it affects only
+the recognition input ($h$ also sees $\vmu_{t-1}$ to compensate the lag), is differentiable
+in $\alpha$, and could be learned, but we set or sweep it.
 
 \textbf{(2) Decoupled online readout estimation.} Replace $\partial\hat{\mathcal L}/\partial\vC$
 by an online incremental-PCA estimate $\hat\vC_t$ of the centered smoothed log-rate: track
@@ -76,9 +82,9 @@ $\hat\vC_t\equiv\vC$ (known/oracle readout) recovers a fixed projection; $\vpi_t
 $\vC$ learned by $\partial\hat{\mathcal L}/\partial\vC$ recovers the original VJF. Per-step
 cost stays $O(nm)$ (same order as the decoder), preserving real-time complexity.
 
-\paragraph{Empirical (this experiment).}
-From a cheap small-window initial $\hat\vC$, the online estimate recovers the asymptotic
-PCA subspace, and the projection-input recognition reaches the oracle filtering accuracy at
-all SNR --- and \emph{exceeds} raw-$\vy_t$ recognition even when $\vC$ is known
-($R^2\approx0.87/0.95/0.97$ vs.\ $0.71/0.84/0.91$ at $n=50/150/250$).
+\paragraph{Behavior.}
+From a cheap small-window initial $\hat\vC$, the decoupled estimator recovers the asymptotic
+readout subspace online, and the projection-input recognition attains the known-readout
+(oracle) filtering accuracy --- and can \emph{exceed} raw-$\vy_t$ recognition, since $h$ no
+longer has to invert $n$ (possibly sparse) channels.
 \end{document}
