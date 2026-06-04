@@ -166,6 +166,13 @@ not the *identifiability of C* (~10^4 params, under-determined per step).
   headroom. **Fix: larger causal PCA window** (`pca_init_mult` 10 -> 60); R^2 is
   then stably at/above oracle across all SNR with zero extra machinery.
 
+- **Encoder-input projection (new best, online-refinable).** Feeding the
+  recognition the subspace projection `pinv(C)(g(y)-b)` (2-D) instead of raw spikes
+  makes the encoder a trivial 2->2 map: it (a) lets an online-refined C reach the
+  oracle ceiling (start-cheap-improve-online solved), and (b) strictly beats
+  raw-spike recognition even with known C (R^2 0.87/0.95/0.97 vs 0.71/0.84/0.91 at
+  50/150/250 n). See PLAN_online_readout.md. To promote to `readout='pca_proj_online'`.
+
 Experiment knob: `cfg["readout"] = 'oracle' | 'learned' | 'pca'` (default `pca`),
 with `pca_init_mult` (=60) and `pca_smooth_sigma` (=8 bins).
 

@@ -312,3 +312,25 @@ the deep encoder net only ever does a fixed 2->2 refinement. No SGD chase.
 Next: confirm across SNR; then promote to a real `readout='pca_proj_online'` mode
 in experiment.py (recognition takes the projected input; decoder/likelihood keep
 counts; online CCIPCA + Procrustes-anchored decoder refresh).
+
+### Confirmed across SNR (T=100k), and an implementation note
+
+| condition | proj_online (late) | proj_oracle | raw-spike oracle |
+|---|---|---|---|
+| 50n ~3 dB  | 0.871 | 0.874 | 0.71 |
+| 150n ~6 dB | 0.951 | 0.947 | 0.84 |
+| 250n ~8 dB | 0.968 | 0.967 | 0.91 |
+
+Online refinement reaches the oracle ceiling at every SNR, and the projection
+front-end beats raw-spike recognition everywhere (0.87/0.95/0.97 vs 0.71/0.84/0.91).
+
+**pinv vs least-squares:** the projection operator `pinv(C)` (2xN) is recomputed
+ONLY on a decoder refresh (every K bins; C is piecewise-constant), then reused as a
+single O(N) mat-vec per bin: `x_in = pinv(C) (g(y)-b)`. Do NOT re-solve lstsq(C,.)
+per bin (re-factorizes an unchanged C). C^T C is 2x2 so the pinv is tiny/stable.
+
+**Status: SOLVED.** Promote to `readout='pca_proj_online'` in experiment.py
+(recognition input = projected spikes; decoder/likelihood = counts; online CCIPCA
++ Procrustes-anchored decoder refresh; pinv(C) recomputed per refresh, reused/bin).
+Consider making the projection front-end the default even for known C (it strictly
+beats raw-spike recognition).
