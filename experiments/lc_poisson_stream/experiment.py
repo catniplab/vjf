@@ -168,8 +168,12 @@ def run_condition(z, cal, n_neurons, cfg, device):
     #               refinement (vjf.readout.OnlineReadout); the recognition reads the
     #               subspace projection pinv(C)(g~(y)-b) instead of raw spikes. Recovers
     #               the asymptotic readout online without a large init window.
+    #   encoder ('spikes'|'projection') is an independent axis: 'projection' feeds the
+    #   recognition pinv(C)(g~(y)-b) for ANY readout (so e.g. an oracle-C projection
+    #   ceiling is comparable to the online estimate). 'pca_proj_online' forces it.
     readout = cfg["readout"]
-    encoder = "projection" if readout == "pca_proj_online" else "spikes"
+    encoder = ("projection" if readout == "pca_proj_online"
+               or cfg.get("encoder") == "projection" else "spikes")
     front = None  # OnlineReadout for the projection encoder (None for spike encoders)
 
     torch.manual_seed(cfg["seed"])
@@ -209,6 +213,15 @@ def run_condition(z, cal, n_neurons, cfg, device):
                          f"'pca_proj_online', got {readout!r}")
     # 'learned' leaves the default-initialized decoder trainable (expect collapse).
 
+    # Projection encoder with a FIXED (C, b) (oracle/pca/learned): build a frozen front
+    # that only forms pi_t = pinv(C)(g~(y)-b); no online PCA update or refresh.
+    front_online = readout == "pca_proj_online"
+    if encoder == "projection" and front is None:
+        from vjf.readout import OnlineReadout
+        front = OnlineReadout(N, 2, smooth_tau=cfg["proj_tau"], refresh_K=0, link="log")
+        front.set_fixed(model.decoder.decode.weight.detach().cpu().numpy(),
+                        model.decoder.decode.bias.detach().cpu().numpy())
+
     mu_all = np.zeros((T, 2), dtype=np.float32)
     log = {k: [] for k in ("step", "wall", "recon", "dynamics", "entropy", "r2")}
     win = {k: [] for k in ("recon", "dynamics", "entropy")}
@@ -236,8 +249,9 @@ def run_condition(z, cal, n_neurons, cfg, device):
             _tf = time.perf_counter()
             y_enc = None
             if front is not None:
-                g = front.feature(cc[i].cpu().numpy())
-                front.update(g)
+                g = front.feature(cc[i].cpu().numpy(), update_mean=front_online)
+                if front_online:
+                    front.update(g)
                 y_enc = torch.as_tensor(front.project(g), device=device)
             try:
                 qt, loss, recon, dynamics, entropy = model.filter(
@@ -248,7 +262,7 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 n_diverge += 1
                 model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)
                 q = None; mu_all[t] = mu_all[t - 1]; t += 1; continue
-            if front is not None:
+            if front is not None and front_online:
                 front.maybe_refresh(model.decoder, t)  # Procrustes-anchored (C,b) refresh
             if not warm:  # time the steady online-filtering cost (post warm-up)
                 filter_time += time.perf_counter() - _tf
@@ -604,8 +618,15 @@ def main():
     ap.add_argument("--readout", default=None,
                     choices=["oracle", "learned", "pca", "pca_proj_online"],
                     help="override cfg['readout']")
+    ap.add_argument("--encoder", default=None, choices=["spikes", "projection"],
+                    help="override cfg['encoder'] (recognition input)")
+    ap.add_argument("--tag", default=None,
+                    help="write results to results/<tag>/ (for multi-mode sweeps)")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
+    global RESULTS
+    if args.tag:
+        RESULTS = HERE / "results" / args.tag
 
     cfg = {
         # SNR is set by population size at biological firing rates (mean ~20 Hz,
@@ -631,6 +652,7 @@ def main():
         "warmup_frac": 0.15,
         "warmup_cap": 20000,              # cap warm-up steps for very long streams
         "readout": "pca",                 # 'oracle' | 'learned' | 'pca' (causal warm-start, frozen)
+        "encoder": "spikes",              # 'spikes' | 'projection' (recognition input)
         "pca_init_mult": 60,             # PCA warm-start window = first pca_init_mult*N bins (causal).
                                           # 60-100*N gives a stable ~oracle C across SNR; 10*N is
                                           # high-variance at low SNR (Phase-0 subspace-angle study).
