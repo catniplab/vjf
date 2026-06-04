@@ -156,12 +156,18 @@ not the *identifiability of C* (~10^4 params, under-determined per step).
   reaches the bound (the encoder compensates), so there is *no headroom*, only
   the downside of the rotation/scaling identifiability ambiguity + low-rate gradient pulling
   it back to the trivial solution.
-- **SNR-graded** (as expected): PCA matches oracle at 150/250n but is worse at
-  50n (0.61 vs 0.69) — the smoothed-spike estimate of `(C,b)` is noisier when
-  spikes are sparse.
+- **The apparent low-SNR gap was an init-window + single-seed artifact, not an
+  estimator limitation** (Phase-0 study, see `PLAN_online_readout.md`). The PCA
+  `C` estimate from only the first `10*N` bins is high-variance at low SNR
+  (subspace angle to true C: 50n = 23.8 deg +- 4.4 over 5 seeds), so the original
+  single-seed "0.61 vs 0.69" was within seed noise. With more bins the angle
+  converges to ~2-3 deg = the true subspace, **tying `oracle-x`** (regress on the
+  TRUE latent) -> so refining `C` from filtered latents (online-EM) has no
+  headroom. **Fix: larger causal PCA window** (`pca_init_mult` 10 -> 60); R^2 is
+  then stably at/above oracle across all SNR with zero extra machinery.
 
 Experiment knob: `cfg["readout"] = 'oracle' | 'learned' | 'pca'` (default `pca`),
-with `pca_init_mult` (=10) and `pca_smooth_sigma` (=8 bins).
+with `pca_init_mult` (=60) and `pca_smooth_sigma` (=8 bins).
 
 ---
 
