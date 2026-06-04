@@ -622,6 +622,8 @@ def main():
                     help="override cfg['encoder'] (recognition input)")
     ap.add_argument("--tag", default=None,
                     help="write results to results/<tag>/ (for multi-mode sweeps)")
+    ap.add_argument("--proj-tau", type=float, default=None,
+                    help="override cfg['proj_tau']; tau=1 disables the causal EMA smoothing")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
     global RESULTS
@@ -672,6 +674,10 @@ def main():
     }
     if args.readout is not None:
         cfg["readout"] = args.readout
+    if args.encoder is not None:
+        cfg["encoder"] = args.encoder
+    if args.proj_tau is not None:
+        cfg["proj_tau"] = args.proj_tau
     if args.quick:
         cfg["conditions"] = [(50, 3.0), (150, 6.0)]
         cfg["warmup_cap"] = 300
