@@ -69,6 +69,25 @@ def _mean(out):
     return out.mean if isinstance(out, tuple) else out
 
 
+def pca_readout_init(counts_win, sigma=8.0, d=2):
+    """Causal PLDS/GPFA-style readout warm-start from an initial spike window.
+
+    Gaussian-smooth counts in time, log-transform, PCA across neurons -> (C, b),
+    with the latent rescaled to unit variance per dim (scale folded into C so the
+    rate exp(x C^T + b) is unchanged). Uses ONLY the given initial window -- no
+    look-ahead. References: Macke et al. 2011 (PLDS init), Yu et al. 2009 (GPFA).
+    """
+    from scipy.ndimage import gaussian_filter1d
+    Y = gaussian_filter1d(counts_win.astype(np.float64), sigma, axis=0)
+    L = np.log(Y + 1e-2)
+    b = L.mean(0, keepdims=True)
+    U, S, Vt = np.linalg.svd(L - b, full_matrices=False)
+    X = U[:, :d] * S[:d]
+    C = Vt[:d].T
+    std = X.std(0, keepdims=True) + 1e-8
+    return (C * std).astype("float32"), b.astype("float32")
+
+
 def transition_mean(model, mu, device, chunk=2000):
     """Mean one-step prediction over many states, chunked.
 
@@ -144,15 +163,30 @@ def run_condition(z, cal, n_neurons, cfg, device):
         lr=cfg["lr"], lr_decay=1.0, transition_flow=cfg["transition_flow"],
     ).to(device)
 
-    # Oracle readout: pin the decoder to the generator's true (C, b) and freeze.
-    # eta = z C^T + b matches VJF's Linear(xdim->ydim) with weight=C (N,2), bias=b.
-    # This anchors the latent frame (removes affine ambiguity) and isolates whether
-    # VJF learns the dynamics given a correct readout (LESSONS bottleneck).
-    if cfg["oracle_readout"]:
+    # Readout: how the decoder (C, b) is obtained.
+    #   'oracle'  - pin to the generator's true (C, b), frozen (upper bound).
+    #   'learned' - default init, trained by SGD (collapses under low-rate Poisson).
+    #   'pca'     - causal PLDS/GPFA-style warm-start from the FIRST ~mult*N spike
+    #               bins (Gaussian-smooth -> log -> PCA across neurons), then frozen.
+    #               Recovers the oracle bound without knowing (C,b) at high SNR;
+    #               expected to degrade at low SNR. Fine-tuning only hurts.
+    readout = cfg["readout"]
+    if readout == "oracle":
         with torch.no_grad():
             model.decoder.decode.weight.copy_(torch.as_tensor(C, device=device))
             model.decoder.decode.bias.copy_(torch.as_tensor(b.reshape(-1), device=device))
         model.decoder.requires_grad_(False)
+    elif readout == "pca":
+        n_init = cfg["pca_init_mult"] * N                       # causal: first ~10*N bins only
+        cw = sample_counts(z[:n_init], C, b, np.random.default_rng(cfg["seed"] + 5))
+        Cp, bp = pca_readout_init(cw, sigma=cfg["pca_smooth_sigma"])
+        with torch.no_grad():
+            model.decoder.decode.weight.copy_(torch.as_tensor(Cp, device=device))
+            model.decoder.decode.bias.copy_(torch.as_tensor(bp.reshape(-1), device=device))
+        model.decoder.requires_grad_(False)
+    elif readout != "learned":
+        raise ValueError(f"readout must be 'oracle', 'learned' or 'pca', got {readout!r}")
+    # 'learned' leaves the default-initialized decoder trainable (expect collapse).
 
     mu_all = np.zeros((T, 2), dtype=np.float32)
     log = {k: [] for k in ("step", "wall", "recon", "dynamics", "entropy", "r2")}
@@ -174,8 +208,6 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 # radius regardless of count; smaller widths sharpen the flow and
                 # greatly extend the forecast horizon.
                 model.transition.velocity.feature.logwidth.data += math.log(cfg["rbf_width_scale"])
-                if cfg["freeze_decoder_after_warmup"] and not cfg["oracle_readout"]:
-                    model.decoder.requires_grad_(False)
             try:
                 qt, loss, recon, dynamics, entropy = model.filter(
                     cc[i], None, q, sgd=True, update=True, verbose=True, warm_up=warm
@@ -543,8 +575,9 @@ def main():
         "lr": 1e-3,
         "warmup_frac": 0.15,
         "warmup_cap": 20000,              # cap warm-up steps for very long streams
-        "oracle_readout": True,           # pin decoder to true (C, b) -- isolates dynamics learning
-        "freeze_decoder_after_warmup": True,
+        "readout": "pca",                 # 'oracle' | 'learned' | 'pca' (causal warm-start, frozen)
+        "pca_init_mult": 10,              # PCA warm-start uses the first pca_init_mult*N bins (causal)
+        "pca_smooth_sigma": 8.0,         # Gaussian smoothing (bins) for the PCA warm-start
         "log_every": 50 if args.quick else 1000,
         "align_window": 5000,            # trailing window for online R^2 alignment
         "rate_sub_n": 5000,              # subsample size for rate-recon metrics
