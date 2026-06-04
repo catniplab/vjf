@@ -678,7 +678,7 @@ def main():
         cfg["align_window"] = 400
         cfg["obs_chunk"] = 1000
 
-    RESULTS.mkdir(exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     device = torch.device(args.device)
     if device.type == "cuda":
         torch.set_default_device("cuda")  # VJF creates some tensors via default device
