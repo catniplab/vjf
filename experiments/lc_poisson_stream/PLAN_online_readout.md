@@ -216,3 +216,35 @@ window PCA** on smoothed log-spikes (library: Oja/CCIPCA/GROUSE), Procrustes-
 anchored to the first estimate, srrls flow re-initialized on C update — NOT the
 filtered-latent online-EM (which Phase-0 showed has no headroom). This is the only
 remaining item worth building, and only for the streaming-from-t0 use case.
+
+---
+
+## Online incremental-PCA refinement: empirical results (2026-06-04)
+
+Validated the user's directive (cheap small init + slowly improve), in two parts.
+
+**(a) Subspace tracking works.** Incremental PCA (CCIPCA) on *causally* (EMA)
+smoothed log-spikes, started from a cheap 10*N batch-PCA init, converges the
+subspace toward the batch asymptote (max principal angle to true C, deg):
+50n 18.3->1.9, 150n 10.9->2.2, 250n 8.6->2.3 (asymptotes 1.8/2.2/2.3). O(N*2)/bin.
+
+**(b) Feeding the improving C into VJF: directional but slow.** End-to-end R^2
+(50n, seed 20260602 = the genuinely-bad-10N-init seed):
+- T=40000: online refinement HURTS (0.39 < frozen 0.44) -- not enough recovery time.
+- T=120000: online gentle (alpha=0.05, K=1000) **rises 0.35 -> 0.49 and beats frozen
+  (0.36)**, still climbing; single-swap@40k ~0.38; oracle ~0.71.
+
+**Conclusion.** The idea has real signal -- continuous *small* updates the
+recognition can track > one big swap > frozen, and it improves over time. BUT it
+is slow and stays well below oracle, because the recognition net + srrls flow must
+**re-adapt by SGD to the moving latent frame and always lag**. Two-timescale
+damping trades rate for stability. This is the genuine "online" hard core.
+
+**To actually close it (next):** stop making SGD chase the frame -- **absorb** each
+C-update's linear frame change in closed form:
+- insert an explicit linear alignment map after the recognition output and update
+  it in closed form on each C change (so the encoder net doesn't re-learn), and
+- rotate the RBF flow centroids by the same map (pure rotation is exact; scale
+  needs width rescaling) so the srrls flow is re-expressed, not re-learned.
+Alternatives to compare: faster recognition lr (two-timescale) ; longer T (it was
+still rising at 120k) ; refine-then-freeze once the CCIPCA estimate stabilizes.
