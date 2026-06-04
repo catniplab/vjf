@@ -154,7 +154,7 @@ not the *identifiability of C* (~10^4 params, under-determined per step).
   decoder lr 0.1x degrades (0.71); 0.01x is safe but identical to freeze (no
   gain). Why: a frozen "good-enough" readout + a flexible recognition net already
   reaches the bound (the encoder compensates), so there is *no headroom*, only
-  the downside of the gauge (rotation/scale) freedom + low-rate gradient pulling
+  the downside of the rotation/scaling identifiability ambiguity + low-rate gradient pulling
   it back to the trivial solution.
 - **SNR-graded** (as expected): PCA matches oracle at 150/250n but is worse at
   50n (0.61 vs 0.69) — the smoothed-spike estimate of `(C,b)` is noisier when

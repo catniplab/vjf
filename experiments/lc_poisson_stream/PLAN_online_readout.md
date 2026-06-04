@@ -11,10 +11,11 @@ failure modes we already hit:
 1. **NLL-gradient collapse**: learning `C` by SGD on the Poisson reconstruction
    likelihood drives it to the trivial "mean-rate via bias" solution (rate-scaled
    `dNLL/dC` is tiny; trivial basin).
-2. **Gauge drift**: `C` and the latent share a rotation/scale freedom; a free,
-   co-trained `C` rotates/scales the latent frame, invalidating the dynamics
-   (flow learned in the old frame) and the recognition. Unfreezing PCA collapsed
-   for this reason.
+2. **Latent identifiability (rotation/scaling) drift**: the `C`-`x` factorization
+   is identifiable only up to an invertible linear transform; a free, co-trained
+   `C` rotates/scales the latent coordinate frame, invalidating the dynamics (flow
+   learned in the old frame) and the recognition. Unfreezing PCA collapsed for
+   this reason.
 
 The clean offline answer is EM (E: filter with current `C`; M: refit `C`; iterate).
 VJF is **single-pass online**, so we need an online (recursive) approximation.
@@ -32,7 +33,7 @@ Make the readout an **online M-step**, not a free SGD parameter:
   basin.
 - **`C` slaved to the recognition frame.** Because `C` is a deterministic
   function (RLS solution) of the recognition's latents, it carries **no
-  independent gauge freedom** — it just tracks whatever frame the recognition
+  independent rotation/scaling ambiguity** — it just tracks whatever frame the recognition
   produces. This removes one whole degree of the drift problem (the failure mode
   that killed naive fine-tuning).
 - **Filtered latents > raw spikes.** PCA uses the instantaneous spike covariance;
@@ -62,19 +63,19 @@ Anchor / regularize toward the PCA init: shrink `C` toward `C_pca` (ridge in the
 M-step, or a prior pseudo-count in the sufficient statistics) so early/low-SNR
 updates can't run away.
 
-## Gauge & stability (the crux — must be designed in)
+## Latent-frame identifiability & stability (the crux)
 
 Even with `C` slaved, the recognition frame itself can slowly rotate/scale. Plan:
 
 1. **Two-timescale**: fast filtering; slow `C` (and recognition) drift. Update
    `C` from stats on a slow cadence with strong shrinkage to `C_pca`.
-2. **Gauge-fix the latent**: keep the filtered latent whitened (unit covariance)
+2. **Anchor the latent frame**: keep the filtered latent whitened (unit covariance)
    via the running `S_xx`; pick a canonical rotation by Procrustes-aligning the
    updated `C` to the previous `C` each update, and apply the inverse linear map
    to the recognition output / dynamics state so the flow stays in one frame
    (don't let the frame jump between M-steps).
 3. **Consistency pressure already present**: the dynamics term penalizes frame
-   drift (the flow is learned in the current frame), which helps anchor the gauge
+   drift (the flow is learned in the current frame), which helps anchor the latent frame
    — but is not sufficient alone; (1)+(2) are the safeguards.
 4. **Damp EM error amplification**: at low SNR the filtered latents are noisy and
    EM can amplify errors; conservative update rate + shrinkage-to-init guard this.
@@ -87,7 +88,7 @@ Score everything against the **oracle upper bound** and the **frozen-PCA** basel
 - Does online-refined `C` **beat frozen-PCA toward the oracle, especially at low
   SNR** (close the 0.61 -> 0.69 gap)?
 - **Subspace angle** between learned `C` and true `C` (principal angles) *over
-  time* — does it shrink monotonically (refinement) or drift (gauge failure)?
+  time* — does it shrink monotonically (refinement) or drift (frame-identifiability failure)?
 - **Stability** over the full 1000 s (no collapse/drift; `n_diverge`=0).
 - Forecast horizon, rate-reconstruction corr, per-bin compute (extra M-step cost).
 
@@ -95,12 +96,12 @@ Ablations:
 - M-step RLS  vs  NLL-SGD (the collapse)  vs  frozen-PCA (the cap).
 - regressor = filtered latent  vs  raw `g(y_t)` (online PCA) — test the "use
   filtered latents" claim.
-- with / without gauge-fixing; with / without shrinkage-to-init.
+- with / without frame-anchoring; with / without shrinkage-to-init.
 - surrogate `g`: log vs Anscombe; update cadence K; forgetting `lambda`.
 
 ## Risks / open questions
 
-- **Gauge drift** destabilizing the dynamics is the main risk → (1)+(2) above; if
+- **Frame drift** destabilizing the dynamics is the main risk → (1)+(2) above; if
   it persists, fall back to "refine subspace, but re-anchor the flow by
   re-`initialize`-ing the srrls in the new frame on a window of recent latents".
 - **EM feedback runaway** at low SNR → shrinkage + slow cadence; possibly only
@@ -117,8 +118,8 @@ Ablations:
 ## Phasing
 
 1. Sufficient-statistics online M-step for `C,b` from filtered latents (Gaussian
-   surrogate), slaved + shrinkage-to-PCA, **no** gauge-fix yet — measure drift.
-2. Add gauge-fixing (whiten + Procrustes-anchor) if drift appears; verify subspace
+   surrogate), slaved + shrinkage-to-PCA, **no** frame-anchoring yet — measure drift.
+2. Add frame-anchoring (whiten + Procrustes-anchor) if drift appears; verify subspace
    angle shrinks and low-SNR gap closes.
 3. Ablations (regressor source, surrogate, cadence, forgetting) + the optional
    single damped Poisson-Newton refinement.
@@ -134,8 +135,8 @@ gain a `'pca+online'` mode. Keep it a `flow`-style selectable, backward-compatib
 A skeptical review found the central premise is wrong and the plan is likely
 over-engineered. Key corrections:
 
-- **"C slaved => no gauge freedom" is FALSE.** The recognition net is SGD-trained
-  against the same C (shared optimizer), so the rotation/scale gauge lives in the
+- **"C slaved => no rotation/scaling ambiguity" is FALSE.** The recognition net is SGD-trained
+  against the same C (shared optimizer), so the rotation/scaling ambiguity lives in the
   (C, recognition) pair; slaving C just makes it follow the recognition's drift.
   This is a closed EM feedback loop with no external anchor except the C_pca
   shrinkage and the dynamics term -- so it may simply stay pinned to C_pca (the
@@ -145,11 +146,11 @@ over-engineered. Key corrections:
   the regime we want to fix. Must smooth before the surrogate; expect a ceiling.
 - **Procrustes-to-previous-C is a random walk, not an anchor** (drift composes).
   Anchor to a FIXED reference (C_pca).
-- **Gauge map through the RBF flow**: a pure rotation can be pushed through by
+- **Pushing a linear transform through the RBF flow**: a pure rotation can be pushed through by
   rotating the centroids too (distances preserved); scale/general maps cannot,
   so re-initializing the srrls flow in the new frame is the safe primary
   mechanism (budget its forecast perturbation), not a fallback.
-- **Subspace angle is blind to gauge drift that degrades the flow** -- use
+- **Subspace angle is blind to frame drift that degrades the flow** -- use
   forecast-horizon-over-time + srrls wmax/trP/n_diverge as the primary stability
   metrics. Single seed (n=1) is insufficient: use >=5-10 seeds, paired, report
   mean +/- SD.
@@ -175,7 +176,7 @@ Drop online-EM as the headline. Default to **expanding-window log-PCA refit at a
 slow cadence, anchored to C_pca, with the flow re-initialized in the new frame**.
 Only pursue the filtered-latent M-step if (1) says the gap is estimator-limited
 AND the window-PCA baseline leaves real headroom -- and then with raw smoothed
-g(y) for the *subspace* and filtered latents only for *gauge*, fixed-anchor
+g(y) for the *subspace* and filtered latents only for *frame alignment*, fixed-anchor
 Procrustes, multi-seed, forecast-horizon stability metric.
 
 Full critique: subagent review, 2026-06-04.
