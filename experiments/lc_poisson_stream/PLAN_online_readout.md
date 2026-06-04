@@ -248,3 +248,31 @@ C-update's linear frame change in closed form:
   needs width rescaling) so the srrls flow is re-expressed, not re-learned.
 Alternatives to compare: faster recognition lr (two-timescale) ; longer T (it was
 still rising at 120k) ; refine-then-freeze once the CCIPCA estimate stabilizes.
+
+---
+
+## Absorb-the-frame-change: tried, insufficient (2026-06-04)
+
+Prototyped the redesign: on each readout refresh, re-express in closed form by the
+induced 2x2 transform T (recognition mean-head <- T W; rotate RBF centroids by T and
+velocity weights by T^T; carry the posterior mean). Result (50n, seed 20260602,
+T=120k): **absorb == online, no gain** (both late R^2 0.547; frozen 0.362; oracle 0.705).
+
+**Diagnosis (important):** the readout improvement is an **N-dimensional subspace
+tilt** (which neuron combinations C reads), NOT a 2x2 latent rotation. Procrustes
+already removes the in-plane component, so T ~= I and the 2x2 absorb is a near-no-op.
+The quantity that must change is the **encoder's N->2 readout** (the recognition's
+spike-reading weights), which has no closed form -> only SGD re-learns it, and that
+is the rate limiter. So "absorb the latent frame" targets the wrong DOF.
+
+**Better lever (next):** refine the **encoder INPUT projection**, not the latent
+frame. Feed the recognition a subspace projection of the (smoothed) spikes, e.g.
+`x_in = C^T g(y)` (or pinv(C) g(y)), so the encoder operates in 2-D; when the online
+PCA improves C, the projection improves and the encoder barely re-learns. This
+couples encoder + decoder to the SAME online subspace estimate. Open: still needs
+the flow re-expressed under the 2x2 in-plane part (the absorb machinery handles
+that), and the recognition currently takes raw y -> a structural change.
+
+Status: online incremental-PCA refinement is **directionally validated** (climbs
+0.36 -> 0.55, beats frozen) but **does not reach oracle**; the encoder re-learning
+its input subspace is the bottleneck, and the latent-frame absorb does not address it.
