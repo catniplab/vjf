@@ -93,10 +93,18 @@ class OnlineReadout:
         self.nu = np.zeros(self.n)          # reset EMA for the streaming phase
         return self.C.copy(), self.mean_b.astype(np.float32).copy()
 
-    def feature(self, y) -> np.ndarray:
+    def feature(self, y, update_mean: bool = True) -> np.ndarray:
         f = self._feat(y)
-        self._accumulate_mean(f)
+        if update_mean:
+            self._accumulate_mean(f)
         return f
+
+    def set_fixed(self, C, b):
+        """Freeze the projection to a known (C, b) (e.g. oracle); the EMA still runs but
+        the running mean and PCA state are not updated (use feature(update_mean=False))."""
+        self.C = np.asarray(C, dtype=np.float32)
+        self.C_pinv = np.linalg.pinv(self.C).astype(np.float32)
+        self.mean_b = np.asarray(b, dtype=np.float64).ravel()
 
     def project(self, feat: np.ndarray) -> np.ndarray:
         """Recognition input ``pinv(C) (feat - b)`` (m,). O(n m); C_pinv cached."""
