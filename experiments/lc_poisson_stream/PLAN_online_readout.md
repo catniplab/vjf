@@ -126,3 +126,56 @@ Ablations:
 
 (Reuses: `srrls` square-root RLS machinery; the experiment's readout option would
 gain a `'pca+online'` mode. Keep it a `flow`-style selectable, backward-compatible.)
+
+---
+
+## Revision after adversarial critique (supersedes the optimism above)
+
+A skeptical review found the central premise is wrong and the plan is likely
+over-engineered. Key corrections:
+
+- **"C slaved => no gauge freedom" is FALSE.** The recognition net is SGD-trained
+  against the same C (shared optimizer), so the rotation/scale gauge lives in the
+  (C, recognition) pair; slaving C just makes it follow the recognition's drift.
+  This is a closed EM feedback loop with no external anchor except the C_pca
+  shrinkage and the dynamics term -- so it may simply stay pinned to C_pca (the
+  same "no headroom" outcome we already found for fine-tuning), or slowly collapse.
+- **Gaussian surrogate is degenerate on sparse counts.** log(y+c) on mostly-0/1
+  bins is ~binary, c-dominated, and biased (Jensen + floor) *worst at low SNR* --
+  the regime we want to fix. Must smooth before the surrogate; expect a ceiling.
+- **Procrustes-to-previous-C is a random walk, not an anchor** (drift composes).
+  Anchor to a FIXED reference (C_pca).
+- **Gauge map through the RBF flow**: a pure rotation can be pushed through by
+  rotating the centroids too (distances preserved); scale/general maps cannot,
+  so re-initializing the srrls flow in the new frame is the safe primary
+  mechanism (budget its forecast perturbation), not a fallback.
+- **Subspace angle is blind to gauge drift that degrades the flow** -- use
+  forecast-horizon-over-time + srrls wmax/trP/n_diverge as the primary stability
+  metrics. Single seed (n=1) is insufficient: use >=5-10 seeds, paired, report
+  mean +/- SD.
+
+### Decisive cheap experiments to run FIRST (before building anything)
+
+1. **Oracle-x M-step probe.** Regress the (smoothed) spikes onto the TRUE latent
+   z and refit (C,b); score. If this barely beats frozen-PCA, the low-SNR gap is
+   **information-limited, not estimator-limited** -> STOP, no refinement helps.
+2. **Expanding/sliding-window log-PCA baseline.** Recompute PCA on smoothed
+   log-spikes over a growing/sliding window, Procrustes-anchored to C_pca, srrls
+   re-initialized in the new frame on each update. Causal, library-backed
+   (incremental PCA: Oja/CCIPCA/GROUSE), no recognition circularity, no
+   surrogate-on-x bias, and it directly accumulates information -- the right cure
+   if the gap is noise-limited. If this closes 0.61 -> ~0.69, the online-EM
+   M-step is unnecessary.
+3. **Longer initial PCA window** (50*N / 100*N vs 10*N) as a trivial control for
+   "is the gap just initial-window noise?"
+
+### Revised recommendation
+
+Drop online-EM as the headline. Default to **expanding-window log-PCA refit at a
+slow cadence, anchored to C_pca, with the flow re-initialized in the new frame**.
+Only pursue the filtered-latent M-step if (1) says the gap is estimator-limited
+AND the window-PCA baseline leaves real headroom -- and then with raw smoothed
+g(y) for the *subspace* and filtered latents only for *gauge*, fixed-anchor
+Procrustes, multi-seed, forecast-horizon stability metric.
+
+Full critique: subagent review, 2026-06-04.
