@@ -4,6 +4,7 @@
 \documentclass[11pt]{article}
 \usepackage[margin=2cm]{geometry}
 \usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
 \newcommand{\vx}{\bm{x}}\newcommand{\vy}{\bm{y}}\newcommand{\vu}{\bm{u}}
 \newcommand{\vC}{\bm{C}}\newcommand{\vb}{\bm{b}}\newcommand{\vW}{\bm{W}}
 \newcommand{\vR}{\bm{R}}\newcommand{\vmu}{\bm{\mu}}\newcommand{\vs}{\bm{s}}
@@ -12,6 +13,7 @@
 \newcommand{\vc}{\bm{c}}
 \newcommand{\vv}{\bm{v}}\newcommand{\ve}{\bm{e}}\newcommand{\vU}{\bm{U}}
 \newcommand{\vV}{\bm{V}}\newcommand{\vI}{\bm{I}}\newcommand{\vSig}{\bm{\Sigma}}
+\newcommand{\vz}{\bm{z}}
 \newcommand{\half}{\tfrac12}
 \begin{document}
 \begin{center}\large\textbf{Projection-input recognition and decoupled readout estimation}\end{center}
@@ -32,7 +34,9 @@ recognition MLP $h$, optimizing the reparameterized filtering ELBO
      + \E_{q(\vx_t)}\log p(\vx_t\mid\tilde\vx_{t-1},\theta) + H(q(\vx_t)). \tag{ELBO}
 \end{align}
 The paper notes (lik) is identifiable only up to an invertible $\vR$:
-$\vC\vx_t=(\vC\vR)(\vR^{-1}\vx_t)$, and ``normalizes $\vC$ each iteration.''
+$\vC\vx_t=(\vC\vR)(\vR^{-1}\vx_t)$; it initializes $\vC$ by factor analysis and
+\emph{column-wise $\ell_2$-normalizes} $\vC$ every iteration, which fixes the column scale (the
+diagonal of $\vR$) but leaves the rotation/reflection free.
 
 \paragraph{The problem.}
 Estimating $\vC$ by $\partial\hat{\mathcal L}/\partial\vC$ under sparse, low-rate Poisson
@@ -56,7 +60,10 @@ point-process/Poisson case $\tilde g(\vy_t)=\log(\vnu_t+c)$ with a causally-smoo
 $\vnu_t=(1-\alpha)\vnu_{t-1}+\alpha\vy_t$ ($\alpha=1/\tau$); for Gaussian observations
 $\tilde g=$ identity.
 $\vpi_t$ is the readout's own approximate inverse, so $h$ need only perform an $m\!\to\!m$
-correction rather than invert $n$ channels. Because $q(\vx_t)$ may be \emph{any}
+correction rather than invert $n$ channels. Crucially the recognition input shrinks from $\R^n$
+to $\R^m$ with $m\!\ll\!n$ (here $2$ vs.\ $50$--$250$): the MLP's input layer no longer scales
+with the population and never sees the raw, high-dimensional, sparse spike vector --- only its
+$m$-dimensional subspace coordinate. Because $q(\vx_t)$ may be \emph{any}
 data-dependent distribution, parameterizing it through $\vpi_t$ leaves the bound
 $\hat{\mathcal L}$ valid (same likelihood, dynamics, entropy); only the amortization family
 changes. $\vC^{+}$ is recomputed only when $\vC$ is refreshed (below) and reused as one
@@ -73,13 +80,28 @@ appears in the decoder (lik) and in the projection $\vpi_t$. This is an online M
 (second-moment estimator), well-conditioned and free of the rate-scaled-gradient collapse.
 $\hat\vC_t$ is refreshed every $K$ steps.
 
-\textbf{(3) Identifiability / normalization.} The paper's ``normalize $\vC$ each iteration''
-(for $\vC\vx_t=(\vC\vR)(\vR^{-1}\vx_t)$) becomes: on each refresh choose $\vR$ by orthogonal
-Procrustes to align $\hat\vC_t$ to the previous estimate, fixing the latent coordinate frame
-so the dynamics $f=\vW\vphi$ stay valid. For a pure rotation $\vR$ the RBF flow is
-re-expressed exactly by rotating the centers $\vc_i\mapsto\vR\vc_i$ (and $\vW$ accordingly).
+\textbf{(3) Identifiability / normalization.} The paper's column-$\ell_2$ normalization fixes
+only the \emph{scale} gauge (diagonal of $\vR$). Our setting needs more: each incremental-PCA
+refresh returns a subspace basis with an \emph{arbitrary} rotation and sign (eigenvectors are
+signed, near-degenerate eigenvalues rotate freely), so we fix the full orthogonal gauge by
+aligning $\hat\vC_t$ to the previous estimate with orthogonal Procrustes (below), and fix the
+scale by the unit-variance column scaling of (2), $\vc_i=\ve_i\sqrt{\lambda_i}$. This pins the
+latent coordinate frame across refreshes so the dynamics $f=\vW\vphi$ stay valid. For a pure
+rotation $\vR^\star$ the RBF flow is re-expressed exactly by rotating the centers
+$\vc_i\mapsto\vR^\star\vc_i$ (and $\vW$ accordingly).
 
-\paragraph{Estimator details (CCIPCA and Procrustes).}
+\paragraph{Estimator details (feature, CCIPCA, Procrustes).}
+\emph{Link-matched feature (causal exponential smoothing).} Both the recognition input and the
+incremental PCA consume the variance-stabilized feature $\vl_t=\tilde g(\vy_t)$, an exponential
+moving average of the counts followed by the inverse link:
+\begin{align}
+  \vnu_t = (1-\alpha)\,\vnu_{t-1} + \alpha\,\vy_t,\qquad
+  \tilde g(\vy_t) = \log(\vnu_t + c)\ \ (\text{Poisson}),\quad \tilde g=\mathrm{id}\ \ (\text{Gaussian}),
+  \tag{EMA}
+\end{align}
+with smoothing rate $\alpha=1/\tau$ (memory ${\sim}\tau$ bins); $\tau{=}1$ gives $\vnu_t=\vy_t$,
+i.e.\ no smoothing. The running mean $\bar\vb_t$ of $\vl_t$ supplies the bias $\vb$.
+
 \emph{Incremental PCA (CCIPCA; Weng et al.\ 2003).} For the centered feature
 $\vu_t=\vl_t-\bar\vb_t$ we maintain $m$ vectors $\vv_1,\dots,\vv_m$, each converging to
 $\lambda_i\ve_i$ (eigenvalue $\times$ eigenvector of the feature covariance
@@ -120,18 +142,19 @@ $T{=}200{,}000$; $n{=}50/150/250$ neurons $\to{\sim}3/6/8$\,dB), filtered-latent
 \hline
 recognition input / readout & $3$\,dB & $6$\,dB & $8$\,dB\\
 \hline
+proj.\ enc., oracle $\vC$ (ceiling)             & 0.86 & 0.94 & 0.96\\
 spike enc., oracle $\vC$ (raw-VJF bound)        & 0.69 & 0.84 & 0.91\\
-proj.\ enc., oracle $\vC$ (ceiling)             & \textbf{0.86} & \textbf{0.94} & \textbf{0.96}\\
-proj.\ enc., online $\hat\vC_t$ ($\tau{=}8$)    & 0.84 & 0.86 & 0.85\\
+proj.\ enc., online $\hat\vC_t$ ($\tau{=}8$)    & \textbf{0.84} & 0.86 & 0.85\\
 proj.\ enc., online $\hat\vC_t$ ($\tau{=}1$)    & 0.73 & 0.84 & 0.88\\
-spike enc., frozen PCA $\vC$                     & 0.72 & 0.87 & 0.92\\
+spike enc., frozen PCA $\vC$                     & 0.72 & \textbf{0.87} & \textbf{0.92}\\
 \hline
 \end{tabular}
 \end{center}
 \textbf{(1)} The projection input is a clear, robust win at \emph{fixed} $\vC$: projection-oracle
 dominates spike-oracle everywhere, most strongly on one-step prediction
 ($0.84/0.95/0.97$ vs.\ $0.60/0.85/0.92$) --- confirming that $\vpi_t=\vC^+(\tilde g(\vy_t)-\vb)$
-spares $h$ the $n\!\to\!m$ inversion. \textbf{(2)} The \emph{online} readout reaches the
+spares $h$ the $n\!\to\!m$ inversion and shrinks its input from $\R^n$ to $\R^m$
+($2$ vs.\ $50$--$250$). \textbf{(2)} The \emph{online} readout reaches the
 projection ceiling only at low SNR ($3$\,dB: $0.84$ vs.\ frozen-PCA $0.72$, spike-oracle $0.69$);
 at high SNR it underperforms even a well-initialized frozen PCA ($0.85$ vs.\ $0.92$ at $8$\,dB)
 and lags its own oracle ceiling. The periodic Procrustes refresh keeps moving the latent frame,
@@ -144,4 +167,66 @@ adds lag that mildly hurts high-SNR latent $R^2$. Per-bin online cost is flat ${
 \emph{Open problem.} Make $\hat\vC_t$ converge to the oracle subspace at high SNR with less frame
 churn --- e.g.\ slower / annealed refresh, freezing once the subspace stabilizes, or rotating the
 flow with $\vR^\star$ at each refresh so the dynamics track the frame exactly.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_summary.png}
+\caption{Headline metrics across the five methods ($x$-axis), each shown as three bars for SNR
+($3/6/8$\,dB $=50/150/250$ neurons). Methods vary on two axes: the \emph{recognition input}
+(\emph{spike} $=$ raw counts vs.\ \emph{proj} $=$ the subspace projection
+$\vpi_t=\vC^{+}(\tilde g(\vy_t)-\vb)$) and how $\vC$ \emph{is obtained} (\emph{oracle} $=$ true
+loading; \emph{online} $\hat\vC_t=$ cheap $10n$-bin PCA init then CCIPCA${+}$Procrustes
+refinement; \emph{frozen PCA} $=$ $60n$-bin batch PCA, fixed). The two shaded columns are the
+fixed-oracle-$\vC$ references. Panels: filtered latent $R^2$ (posterior mean vs.\ truth),
+one-step prediction $R^2$ (quality of the learned flow $f$), rate correlation (decoded vs.\ true
+rate), and forecast horizon (largest free-run $k$ with $R^2\!\ge\!0$). Projection${+}$oracle
+(col.\ 2) beats spike${+}$oracle (col.\ 1) on every metric and SNR --- the projection input is the
+win. Online $\hat\vC_t$ (cols.\ 3--4) matches the ceiling only at $3$\,dB; by $8$\,dB it trails
+even frozen PCA (col.\ 5) and, sharply, on one-step prediction and horizon, because the periodic
+Procrustes refresh keeps moving the latent frame and the dynamics fit a moving target.
+Dropping the smoothing ($\tau{=}1$, col.\ 4) costs rate correlation most.}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_curves.png}
+\caption{Aligned latent $R^2$ vs.\ stream position, one panel per method, one curve per SNR. The
+fixed-$\vC$ methods (spike/proj oracle, frozen PCA) lock in within ${\sim}1$ cycle and stay flat.
+The online estimator at $\tau{=}8$ (top right) rises slowly and at $8$\,dB (black) is still
+climbing at $1000$\,s without reaching the oracle plateau --- the CCIPCA subspace has not
+converged, which is exactly the high-SNR shortfall in Fig.~1.}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_raster.png}
+\caption{Example input. Spike raster over a $3$\,s steady-state window (neurons sorted by
+preferred phase) at the three SNR levels. The biological log-linear Poisson stream has mean
+${\sim}20$\,Hz and peak ${\le}100$\,Hz at $5$\,ms bins; the rotational structure is barely
+visible at $n{=}50$ ($3$\,dB) and sharp at $n{=}250$ ($8$\,dB).}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_forecast.png}
+\caption{Single-trial $100$-step free-run forecasts of the proj.\ enc.\ online-$\hat\vC_t$
+($\tau{=}8$) model (dashed; $\circ=$ start) against the true trajectory (solid), from six start
+states per SNR. The learned flow tracks the limit cycle across SNR; a few high-SNR runs relax
+onto a slightly smaller orbit --- the learned dynamics' own attractor, the same frame-churn
+effect that caps the high-SNR one-step accuracy.}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.72\textwidth]{fig_kstep.png}
+\caption{$k$-step free-run forecast $R^2$ of the \emph{final} proj.\ enc.\ online-$\hat\vC_t$
+($\tau{=}8$) model --- the dynamics after the full $1000$\,s online pass --- rolled forward
+$k{=}1\!:\!100$ steps from $500$ start states spanning the stream and scored against
+$\vz_{t+k}$ (solid), versus a zero-flow baseline that predicts $\vz_{t+k}=\vz_t$
+(dotted; it oscillates because the periodic orbit returns near its start every ${\sim}42$ bins).
+The learned dynamics beat the baseline at all
+but the shortest horizons; at $n{=}50$ ($3$\,dB) forecast skill decays to chance by $k{\approx}12$
+(the horizon reported in Fig.~1), whereas at $n{=}150/250$ it holds $R^2{>}0$ out to
+$k{\approx}82/100$ (${\sim}2.4$ cycles, $0.4$--$0.5$\,s ahead).}
+\end{figure}
 \end{document}
