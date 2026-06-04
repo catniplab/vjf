@@ -598,7 +598,9 @@ def main():
         "warmup_frac": 0.15,
         "warmup_cap": 20000,              # cap warm-up steps for very long streams
         "readout": "pca",                 # 'oracle' | 'learned' | 'pca' (causal warm-start, frozen)
-        "pca_init_mult": 10,              # PCA warm-start uses the first pca_init_mult*N bins (causal)
+        "pca_init_mult": 60,             # PCA warm-start window = first pca_init_mult*N bins (causal).
+                                          # 60-100*N gives a stable ~oracle C across SNR; 10*N is
+                                          # high-variance at low SNR (Phase-0 subspace-angle study).
         "pca_smooth_sigma": 8.0,         # Gaussian smoothing (bins) for the PCA warm-start
         "log_every": 50 if args.quick else 1000,
         "align_window": 5000,            # trailing window for online R^2 alignment

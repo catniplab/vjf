@@ -180,3 +180,39 @@ g(y) for the *subspace* and filtered latents only for *frame alignment*, fixed-a
 Procrustes, multi-seed, forecast-horizon stability metric.
 
 Full critique: subagent review, 2026-06-04.
+
+---
+
+## OUTCOME (Phase-0 executed, 2026-06-04) — online-EM NOT pursued
+
+Ran the two cheap decisive experiments first (no VJF / fast). Verdict: **the
+fancy online-EM is unnecessary; a larger causal PCA window suffices.**
+
+Max principal angle between estimated and true C (deg, mean over 5 seeds):
+
+| condition | PCA @10N | PCA @30k | oracle-x @30k (true latent) |
+|---|---|---|---|
+| 50n ~3 dB  | 23.8 | 2.3 | 2.1 |
+| 150n ~6 dB | 13.8 | 2.8 | 2.6 |
+| 250n ~8 dB |  9.4 | 2.8 | 2.6 |
+
+- **Estimator- or information-limited? Neither — initial-window-limited.** PCA at
+  the 10*N init is high-variance (esp. low SNR); with more bins it converges to
+  ~2-3 deg, i.e. essentially the true subspace.
+- **oracle-x (regress on the TRUE latent) ties PCA-on-spikes** (2.1 vs 2.3 deg) ->
+  the "filtered latents > raw spikes" premise is false here; the online-EM M-step
+  would buy ~nothing.
+- **End-to-end (T=40k, seed 20260604):** PCA@10N already ~oracle for 50n at this
+  seed (R^2 0.69 vs oracle 0.70); PCA@60-100N is stably at/above oracle across SNR
+  (50n 0.71, 150n 0.87). The earlier "0.61 at 50n" was **single-seed noise** at the
+  tiny 10*N window (the critique's n=1 warning, confirmed).
+
+**Action taken:** `pca_init_mult` 10 -> 60 (still causal, ~oracle and stable
+across SNR; no online-EM, no extra machinery).
+
+**If/when an online-from-the-start refinement is wanted** (so the system isn't
+blind for the first 60*N bins), the principled version is **expanding/incremental
+window PCA** on smoothed log-spikes (library: Oja/CCIPCA/GROUSE), Procrustes-
+anchored to the first estimate, srrls flow re-initialized on C update — NOT the
+filtered-latent online-EM (which Phase-0 showed has no headroom). This is the only
+remaining item worth building, and only for the streaming-from-t0 use case.
