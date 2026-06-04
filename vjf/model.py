@@ -94,11 +94,13 @@ class VJF(Module):
 
         return Gaussian(mean, logvar)
 
-    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None) -> Tuple:
+    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None, y_enc: Tensor = None) -> Tuple:
         """
-        :param y: new observation
+        :param y: new observation (used by the decoder/likelihood)
         :param qs: posterior before new observation
         :param u: input, None if autonomous
+        :param y_enc: optional separate input for the recognition network (e.g. a
+            subspace projection of y). Defaults to y (the original behavior).
         :return:
             pt: prediction before observation
             qt: posterior after observation
@@ -113,7 +115,8 @@ class VJF(Module):
         pt = self.transition(xs, u, sampling=False)
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, qs, u)
+        y_enc = y if y_enc is None else torch.atleast_2d(y_enc)
+        qt = self.recognition(y_enc, qs, u)
 
         # decode
         xt = reparametrize(qt)
@@ -177,7 +180,8 @@ class VJF(Module):
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False):
+               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
+               y_enc: Tensor = None):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -197,7 +201,9 @@ class VJF(Module):
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
 
-        xs, pt, qt, xt, py = self.forward(y, qs, u)
+        if y_enc is not None:
+            y_enc = torch.as_tensor(y_enc, dtype=torch.get_default_dtype())
+        xs, pt, qt, xt, py = self.forward(y, qs, u, y_enc=y_enc)
         output = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
         if verbose:
             loss, *elbos = output
@@ -308,14 +314,22 @@ class VJF(Module):
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', *args, transition_flow: str = 'rls', **kwargs):
+                   likelihood: str = 'poisson', *args, transition_flow: str = 'rls',
+                   encoder: str = 'spikes', **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
+        # encoder='spikes' (default): recognition reads the ydim-dim observation.
+        # encoder='projection': recognition reads an xdim-dim feature (e.g. a subspace
+        # projection of the observation) passed via filter(..., y_enc=...).
+        if encoder not in ('spikes', 'projection'):
+            raise ValueError(f"encoder must be 'spikes' or 'projection', got {encoder!r}")
+        rec_in = xdim if encoder == 'projection' else ydim
+
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, flow_learner=transition_flow),
-                    Recognition(ydim, xdim, udim, hidden_sizes), *args, **kwargs)
+                    Recognition(rec_in, xdim, udim, hidden_sizes), *args, **kwargs)
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:

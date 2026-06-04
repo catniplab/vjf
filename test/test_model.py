@@ -44,3 +44,22 @@ def test_VJF():
     model = VJF.make_model(ydim, xdim, udim, n_rbf, hidden_sizes=[5, 5])
     model.fit(y, u, max_iter=1)
     model.forecast(x[0, ...], u, n_step=N)
+
+
+def test_spikes_encoder_backward_compat():
+    ydim, xdim, n_rbf = 12, 2, 8
+    m = VJF.make_model(ydim, xdim, 0, n_rbf, hidden_sizes=[8, 8])  # default encoder='spikes'
+    assert m.recognition.mlp[0].in_features == ydim + 2 * xdim
+    q, loss = m.filter(torch.randint(0, 2, (ydim,)).float(), None, None)
+    assert q.mean.shape[-1] == xdim and torch.isfinite(loss.detach())
+
+
+def test_projection_encoder():
+    # recognition reads an xdim-dim feature via y_enc; decoder/likelihood read y.
+    ydim, xdim, n_rbf = 12, 2, 8
+    m = VJF.make_model(ydim, xdim, 0, n_rbf, hidden_sizes=[8, 8], encoder='projection')
+    assert m.recognition.mlp[0].in_features == 3 * xdim  # xdim + udim(0) + 2*xdim
+    y = torch.randint(0, 2, (ydim,)).float()
+    y_enc = torch.randn(xdim)
+    q, loss = m.filter(y, None, None, y_enc=y_enc)
+    assert q.mean.shape[-1] == xdim and torch.isfinite(loss.detach())
