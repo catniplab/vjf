@@ -157,13 +157,6 @@ def run_condition(z, cal, n_neurons, cfg, device):
     snap_steps = sorted({min(int(f * T), T) for f in cfg["snapshots"]})
     rng = np.random.default_rng(cfg["seed"] + 1)  # streaming Poisson sampler
 
-    torch.manual_seed(cfg["seed"])
-    model = VJF.make_model(
-        ydim=N, xdim=2, udim=0, n_rbf=cfg["n_rbf"],
-        hidden_sizes=cfg["hidden_sizes"], likelihood="poisson",
-        lr=cfg["lr"], lr_decay=1.0, transition_flow=cfg["transition_flow"],
-    ).to(device)
-
     # Readout: how the decoder (C, b) is obtained.
     #   'oracle'  - pin to the generator's true (C, b), frozen (upper bound).
     #   'learned' - default init, trained by SGD (collapses under low-rate Poisson).
@@ -171,7 +164,22 @@ def run_condition(z, cal, n_neurons, cfg, device):
     #               bins (Gaussian-smooth -> log -> PCA across neurons), then frozen.
     #               Recovers the oracle bound without knowing (C,b) at high SNR;
     #               expected to degrade at low SNR. Fine-tuning only hurts.
+    #   'pca_proj_online' - cheap small-window PCA init + ONLINE incremental-PCA
+    #               refinement (vjf.readout.OnlineReadout); the recognition reads the
+    #               subspace projection pinv(C)(g~(y)-b) instead of raw spikes. Recovers
+    #               the asymptotic readout online without a large init window.
     readout = cfg["readout"]
+    encoder = "projection" if readout == "pca_proj_online" else "spikes"
+    front = None  # OnlineReadout for the projection encoder (None for spike encoders)
+
+    torch.manual_seed(cfg["seed"])
+    model = VJF.make_model(
+        ydim=N, xdim=2, udim=0, n_rbf=cfg["n_rbf"],
+        hidden_sizes=cfg["hidden_sizes"], likelihood="poisson",
+        lr=cfg["lr"], lr_decay=1.0, transition_flow=cfg["transition_flow"],
+        encoder=encoder,
+    ).to(device)
+
     if readout == "oracle":
         with torch.no_grad():
             model.decoder.decode.weight.copy_(torch.as_tensor(C, device=device))
@@ -185,8 +193,20 @@ def run_condition(z, cal, n_neurons, cfg, device):
             model.decoder.decode.weight.copy_(torch.as_tensor(Cp, device=device))
             model.decoder.decode.bias.copy_(torch.as_tensor(bp.reshape(-1), device=device))
         model.decoder.requires_grad_(False)
+    elif readout == "pca_proj_online":
+        from vjf.readout import OnlineReadout
+        n_init = cfg["proj_init_mult"] * N                      # cheap small init window
+        cw = sample_counts(z[:n_init], C, b, np.random.default_rng(cfg["seed"] + 5))
+        front = OnlineReadout(N, 2, smooth_tau=cfg["proj_tau"],
+                              refresh_K=cfg["proj_refresh_K"], link="log")
+        Cp, bp = front.warm_start(cw)                           # batch-PCA init of (C, b)
+        with torch.no_grad():
+            model.decoder.decode.weight.copy_(torch.as_tensor(Cp, device=device))
+            model.decoder.decode.bias.copy_(torch.as_tensor(bp.reshape(-1), device=device))
+        model.decoder.requires_grad_(False)                    # readout owns C, b (not SGD)
     elif readout != "learned":
-        raise ValueError(f"readout must be 'oracle', 'learned' or 'pca', got {readout!r}")
+        raise ValueError("readout must be 'oracle', 'learned', 'pca' or "
+                         f"'pca_proj_online', got {readout!r}")
     # 'learned' leaves the default-initialized decoder trainable (expect collapse).
 
     mu_all = np.zeros((T, 2), dtype=np.float32)
@@ -211,15 +231,25 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 # radius regardless of count; smaller widths sharpen the flow and
                 # greatly extend the forecast horizon.
                 model.transition.velocity.feature.logwidth.data += math.log(cfg["rbf_width_scale"])
+            # Projection encoder: feature -> incremental-PCA update -> recognition input.
+            # All inside the timed region (part of the per-bin online cost).
             _tf = time.perf_counter()
+            y_enc = None
+            if front is not None:
+                g = front.feature(cc[i].cpu().numpy())
+                front.update(g)
+                y_enc = torch.as_tensor(front.project(g), device=device)
             try:
                 qt, loss, recon, dynamics, entropy = model.filter(
-                    cc[i], None, q, sgd=True, update=True, verbose=True, warm_up=warm
+                    cc[i], None, q, sgd=True, update=True, verbose=True, warm_up=warm,
+                    y_enc=y_enc,
                 )
             except AssertionError:  # gaussian_loss non-finite guard tripped
                 n_diverge += 1
                 model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)
                 q = None; mu_all[t] = mu_all[t - 1]; t += 1; continue
+            if front is not None:
+                front.maybe_refresh(model.decoder, t)  # Procrustes-anchored (C,b) refresh
             if not warm:  # time the steady online-filtering cost (post warm-up)
                 filter_time += time.perf_counter() - _tf
                 n_filter += 1
@@ -571,6 +601,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     ap.add_argument("--t-eff", type=int, default=200_000)  # 5 ms bins, 1000 s
+    ap.add_argument("--readout", default=None,
+                    choices=["oracle", "learned", "pca", "pca_proj_online"],
+                    help="override cfg['readout']")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
 
@@ -602,6 +635,10 @@ def main():
                                           # 60-100*N gives a stable ~oracle C across SNR; 10*N is
                                           # high-variance at low SNR (Phase-0 subspace-angle study).
         "pca_smooth_sigma": 8.0,         # Gaussian smoothing (bins) for the PCA warm-start
+        "proj_init_mult": 10,            # pca_proj_online: cheap small init window (first 10*N bins);
+                                          # the online estimator recovers the asymptotic C from here
+        "proj_tau": 8.0,                 # causal EMA timescale (bins) for the link-matched feature
+        "proj_refresh_K": 1000,          # refresh decoder (C,b) from the online PCA every K bins
         "log_every": 50 if args.quick else 1000,
         "align_window": 5000,            # trailing window for online R^2 alignment
         "rate_sub_n": 5000,              # subsample size for rate-recon metrics
@@ -611,6 +648,8 @@ def main():
         "r2_threshold": 0.8,
         "seed": 20260602,
     }
+    if args.readout is not None:
+        cfg["readout"] = args.readout
     if args.quick:
         cfg["conditions"] = [(50, 3.0), (150, 6.0)]
         cfg["warmup_cap"] = 300
