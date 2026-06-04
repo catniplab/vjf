@@ -77,12 +77,17 @@ class LinearRegression(Module):
             return Gaussian(functional.linear(feat, w.t()), logvar)
     
     @torch.no_grad()
-    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
+    def rls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1., ridge: float = 0.):
         """RLS weight update
         :param x: (sample, dim)
         :param target: (sample, dim)
         :param v: observation noise
         :param shrink: forgetting factor, 1 meaning no forgetfulness. 0.98 ~ 1
+        :param ridge: regularization floor combined with forgetting. With shrink<1,
+            adds (1-shrink)*ridge*I to the precision each step so unexcited feature
+            directions floor at `ridge` instead of decaying to zero (prevents the
+            covariance wind-up / blow-up that plain forgetting causes with sparse
+            features). 0 (default) reproduces the original update.
         :return:
         """
         # eye = torch.eye(self.w_precision.shape[0])
@@ -91,9 +96,15 @@ class LinearRegression(Module):
         s = torch.as_tensor(v, dtype=feat.dtype, device=feat.device).sqrt()
         scaled_feat = feat / s
         scaled_target = target / s
-        g = P.mm(self.w_mean) * shrink + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
+        # Forgetting on the gain (g <- shrink*g_prev + new info); the ridge floor
+        # (1-shrink)*ridge*I is added to P only (not g), so it both keeps P
+        # well-conditioned AND lightly shrinks w toward 0 -- preventing both the
+        # precision blow-up (shrink=1) and the wind-up that plain forgetting causes.
+        g = (P * shrink).mm(self.w_mean) + scaled_feat.t().mm(scaled_target)  # what's it called, gain?
         # (feature, feature) (feature, output) + (feature, sample) (sample, output) => (feature, output)
         P = P * shrink + scaled_feat.t().mm(scaled_feat)
+        if ridge > 0. and shrink < 1.:
+            P = P + (1. - shrink) * ridge * torch.eye(P.shape[0], dtype=P.dtype, device=P.device)
         # (feature, feature) + (feature, sample) (sample, feature) => (feature, feature)
         try:
             self.w_pchol = linalg.cholesky(P)
@@ -151,8 +162,58 @@ class LinearRegression(Module):
         r = x.norm(dim=1).max().item()
         nn.init.uniform_(self.feature.centroid, a=-r, b=r)
         nn.init.constant_(self.feature.logwidth, math.log(r))
-        self.rls(x, target, v)
+        if self.bayes:
+            self.rls(x, target, v)
+        else:
+            # SGD flow: least-squares warm-start into the weight Parameter's data
+            # (rls would rebind the Parameter to a plain tensor). lstsq returns the
+            # min-norm solution, so unexcited RBF weights start at ~0.
+            feat = self.feature(x)
+            self.w_mean.data.copy_(torch.linalg.lstsq(feat, target).solution)
         # self.kalman(x, target, torch.tensor(.1))
+
+    @torch.no_grad()
+    def init_srls(self, x: Tensor, target: Tensor, p0: float = 1.0):
+        """Initialize the square-root RLS state: features, lstsq warm-start of
+        w_mean, and the covariance square root w_chol = sqrt(p0)*I (P = w_chol w_chol')."""
+        r = x.norm(dim=1).max().item()
+        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+        nn.init.constant_(self.feature.logwidth, math.log(r))
+        feat = self.feature(x)
+        self.w_mean = torch.linalg.lstsq(feat, target).solution
+        n = self.feature.n_feature
+        self.w_chol = (p0 ** 0.5) * torch.eye(n, dtype=feat.dtype, device=feat.device)
+
+    @torch.no_grad()
+    def srls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
+        """Square-root (Potter) recursive least squares update.
+
+        Propagates the covariance Cholesky factor `w_chol` (P = w_chol w_chol')
+        directly via rank-1 Potter updates -- guaranteed positive-definite, no
+        precision matrix to accumulate/invert, so it stays numerically stable over
+        very long streams where the plain `rls` precision form blows up. RLS-speed
+        convergence; unexcited directions keep their prior (weights stay at init).
+        `v` is the per-sample noise variance; `shrink`<1 is exponential forgetting.
+        """
+        feat = self.feature(x)  # (sample, feature)
+        r = torch.as_tensor(v, dtype=feat.dtype, device=feat.device).reshape(())
+        S = self.w_chol
+        W = self.w_mean
+        inv_sl = shrink ** -0.5
+        for i in range(feat.shape[0]):
+            phi = feat[i:i + 1]                 # (1, feature)
+            if shrink < 1.:
+                S = S * inv_sl                  # forgetting inflates the covariance
+            f = S.t().mm(phi.t())               # (feature, 1)
+            Sf = S.mm(f)                        # (feature, 1) = P phi'
+            a = 1.0 / (f.t().mm(f) + r)         # (1, 1)
+            K = a * Sf                          # (feature, 1) Kalman gain
+            gamma = a / (1.0 + torch.sqrt(a * r))
+            S = S - gamma * Sf.mm(f.t())        # rank-1 Potter downdate (stays a valid sqrt)
+            e = target[i:i + 1] - phi.mm(W)     # (1, output) innovation
+            W = W + K.mm(e)                      # (feature, output)
+        self.w_chol = S
+        self.w_mean = W
 
 
 class RBFN(Module):

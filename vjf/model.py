@@ -94,11 +94,13 @@ class VJF(Module):
 
         return Gaussian(mean, logvar)
 
-    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None) -> Tuple:
+    def forward(self, y: Tensor, qs: Gaussian, u: Tensor = None, y_enc: Tensor = None) -> Tuple:
         """
-        :param y: new observation
+        :param y: new observation (used by the decoder/likelihood)
         :param qs: posterior before new observation
         :param u: input, None if autonomous
+        :param y_enc: optional separate input for the recognition network (e.g. a
+            subspace projection of y). Defaults to y (the original behavior).
         :return:
             pt: prediction before observation
             qt: posterior after observation
@@ -113,7 +115,8 @@ class VJF(Module):
         pt = self.transition(xs, u, sampling=False)
 
         y = torch.atleast_2d(y)
-        qt = self.recognition(y, qs, u)
+        y_enc = y if y_enc is None else torch.atleast_2d(y_enc)
+        qt = self.recognition(y_enc, qs, u)
 
         # decode
         xt = reparametrize(qt)
@@ -177,7 +180,8 @@ class VJF(Module):
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
-               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False):
+               sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
+               y_enc: Tensor = None):
         """
         Filter a step or a sequence
         :param y: observation, assumed axis order (time, batch, dim). missing axis will be prepended.
@@ -197,7 +201,9 @@ class VJF(Module):
             u = torch.as_tensor(u, dtype=torch.get_default_dtype())
             u = torch.atleast_2d(u)
 
-        xs, pt, qt, xt, py = self.forward(y, qs, u)
+        if y_enc is not None:
+            y_enc = torch.as_tensor(y_enc, dtype=torch.get_default_dtype())
+        xs, pt, qt, xt, py = self.forward(y, qs, u, y_enc=y_enc)
         output = self.loss(y, xs, pt, qt, xt, py, components=verbose, warm_up=warm_up)
         if verbose:
             loss, *elbos = output
@@ -308,14 +314,22 @@ class VJF(Module):
 
     @classmethod
     def make_model(cls, ydim: int, xdim: int, udim: int, n_rbf: int, hidden_sizes: Sequence[int],
-                   likelihood: str = 'poisson', *args, **kwargs):
+                   likelihood: str = 'poisson', *args, transition_flow: str = 'rls',
+                   encoder: str = 'spikes', **kwargs):
         if likelihood.lower() == 'poisson':
             likelihood = PoissonLikelihood()
         elif likelihood.lower() == 'gaussian':
             likelihood = GaussianLikelihood()
 
-        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim), Recognition(ydim, xdim, udim, hidden_sizes),
-                    *args, **kwargs)
+        # encoder='spikes' (default): recognition reads the ydim-dim observation.
+        # encoder='projection': recognition reads an xdim-dim feature (e.g. a subspace
+        # projection of the observation) passed via filter(..., y_enc=...).
+        if encoder not in ('spikes', 'projection'):
+            raise ValueError(f"encoder must be 'spikes' or 'projection', got {encoder!r}")
+        rec_in = xdim if encoder == 'projection' else ydim
+
+        model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, flow_learner=transition_flow),
+                    Recognition(rec_in, xdim, udim, hidden_sizes), *args, **kwargs)
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
@@ -325,11 +339,35 @@ class VJF(Module):
 
 
 class RBFDS(Module):
-    def __init__(self, n_rbf: int, xdim: int, udim: int):
+    def __init__(self, n_rbf: int, xdim: int, udim: int, flow_learner: str = 'rls'):
         super().__init__()
-        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim))
+        # How the velocity (flow) weights are learned:
+        #   'rls' - online recursive least squares (original VJF; fast convergence
+        #           but the precision matrix grows/ill-conditions over very long
+        #           streams and the weights can explode).
+        #   'srrls' - square-root (Potter) RLS: same fast convergence as 'rls' but
+        #           propagates the covariance Cholesky factor directly (PD by
+        #           construction, no precision accumulation/inversion), so it is
+        #           numerically stable over very long streams. Preferred.
+        #   'sgd' - weights are an nn.Parameter trained by SGD via the dynamics
+        #           ELBO term (gradient-clipped in VJF.filter). Stable over long
+        #           streams: unexcited RBF weights get ~zero gradient and stay at
+        #           their lstsq-warm-started init instead of drifting.
+        if flow_learner not in ('rls', 'srrls', 'sgd'):
+            raise ValueError(f"flow_learner must be 'rls', 'srrls' or 'sgd', got {flow_learner!r}")
+        self.flow_learner = flow_learner
+        self.add_module('velocity', LinearRegression(RBF(xdim + udim, n_rbf), xdim,
+                                                     bayes=(flow_learner != 'sgd')))
         self.register_parameter('logvar', Parameter(torch.tensor(0.), requires_grad=False))  # state noise
         self.n_sample = 0  # sample counter
+        # RLS forgetting + ridge ('rls' flow only). Defaults reproduce the original
+        # (shrink=1, ridge=0). Set shrink<1 with ridge>0 to bound the precision.
+        self.rls_shrink = 1.0
+        self.rls_ridge = 0.0
+
+    def _velocity_mean(self, xu: Tensor) -> Tensor:
+        out = self.velocity(xu, sampling=False)
+        return out.mean if isinstance(out, Gaussian) else out
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
@@ -368,9 +406,12 @@ class RBFDS(Module):
         xt = torch.atleast_2d(xt)  # TODO: use qt, add qt.logvar to state noise
         dx = xt - xs
         if not warm_up:
-            self.velocity.rls(xu, dx, self.logvar.exp(), shrink=1.)  # model dx
-            # self.velocity.kalman(xs, dx, self.logvar.exp(), diffusion=.01)  # model dx
-        residual = dx - self.velocity(xu, sampling=False).mean
+            if self.flow_learner == 'rls':
+                self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
+            elif self.flow_learner == 'srrls':
+                self.velocity.srls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink)
+            # 'sgd' flow is trained by the main optimizer via the dynamics ELBO instead.
+        residual = dx - self._velocity_mean(xu)
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
         self.logvar.data = var.log()
@@ -382,8 +423,11 @@ class RBFDS(Module):
         xt = torch.atleast_2d(xt)
         xu = nonecat(xs, ut)
         mse = (xt - xs).pow(2).mean()
-        self.velocity.initialize(xu, xt - xs, mse)
-        d, V = self.velocity(xu, sampling=False)
+        if self.flow_learner == 'srrls':
+            self.velocity.init_srls(xu, xt - xs)
+        else:
+            self.velocity.initialize(xu, xt - xs, mse)
+        d = self._velocity_mean(xu)
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()
 
