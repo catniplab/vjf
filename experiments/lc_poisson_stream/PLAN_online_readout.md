@@ -276,3 +276,39 @@ that), and the recognition currently takes raw y -> a structural change.
 Status: online incremental-PCA refinement is **directionally validated** (climbs
 0.36 -> 0.55, beats frozen) but **does not reach oracle**; the encoder re-learning
 its input subspace is the bottleneck, and the latent-frame absorb does not address it.
+
+---
+
+## SOLUTION FOUND: encoder-input projection (2026-06-04)
+
+Feed the recognition the **subspace projection** of the (causally smoothed) spikes,
+`x_in = pinv(C) (g(y) - b)` (2-D), instead of raw spikes; the decoder/likelihood
+keep raw counts. The encoder's job becomes a trivial 2->2 map, and when the online
+PCA improves `C` the projected input improves automatically -> the encoder barely
+re-learns. Online PCA refines `C` (CCIPCA on causal log-spikes), decoder refreshed
+periodically (Procrustes-anchored).
+
+**Result (50n ~3 dB, the hard low-SNR case, seed 20260602, T=120k):**
+
+| mode | early | mid | late |
+|---|---|---|---|
+| frozen_proj (bad 10N C) | 0.314 | 0.350 | 0.314 |
+| **proj_online** (refined C) | 0.535 | 0.869 | **0.871** |
+| proj_oracle (true C) | 0.575 | 0.865 | 0.874 |
+
+- **Online refinement reaches the ceiling**: proj_online (0.871) ~= proj_oracle
+  (0.874), climbing 0.54 -> 0.87. The "cheap start + slowly improve to asymptote,
+  fully online" goal is achieved end-to-end.
+- **The projection front-end is a strictly better encoder**: its oracle (0.87) far
+  exceeds the raw-spike-recognition oracle (0.71) -- inverting N sparse spike
+  channels is hard; a denoised 2-D projected input is easy, so the posterior is
+  much better. Implication: use the projection front-end even when C is known.
+
+Why this works where the latent-frame absorb failed: the bottleneck was the
+encoder re-learning its N->2 readout under a changing subspace. The projection
+makes that readout = pinv(C) (closed-form, slides with the online estimate), so
+the deep encoder net only ever does a fixed 2->2 refinement. No SGD chase.
+
+Next: confirm across SNR; then promote to a real `readout='pca_proj_online'` mode
+in experiment.py (recognition takes the projected input; decoder/likelihood keep
+counts; online CCIPCA + Procrustes-anchored decoder refresh).
