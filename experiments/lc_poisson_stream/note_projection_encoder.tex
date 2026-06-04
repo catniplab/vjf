@@ -10,6 +10,8 @@
 \newcommand{\vphi}{\bm{\phi}}\newcommand{\vl}{\bm{\ell}}\newcommand{\vnu}{\bm{\nu}}
 \newcommand{\vpi}{\bm{\pi}}\newcommand{\E}{\mathbb{E}}\newcommand{\R}{\mathbb{R}}
 \newcommand{\vc}{\bm{c}}
+\newcommand{\vv}{\bm{v}}\newcommand{\ve}{\bm{e}}\newcommand{\vU}{\bm{U}}
+\newcommand{\vV}{\bm{V}}\newcommand{\vI}{\bm{I}}\newcommand{\vSig}{\bm{\Sigma}}
 \newcommand{\half}{\tfrac12}
 \begin{document}
 \begin{center}\large\textbf{Projection-input recognition and decoupled readout estimation}\end{center}
@@ -77,14 +79,69 @@ Procrustes to align $\hat\vC_t$ to the previous estimate, fixing the latent coor
 so the dynamics $f=\vW\vphi$ stay valid. For a pure rotation $\vR$ the RBF flow is
 re-expressed exactly by rotating the centers $\vc_i\mapsto\vR\vc_i$ (and $\vW$ accordingly).
 
+\paragraph{Estimator details (CCIPCA and Procrustes).}
+\emph{Incremental PCA (CCIPCA; Weng et al.\ 2003).} For the centered feature
+$\vu_t=\vl_t-\bar\vb_t$ we maintain $m$ vectors $\vv_1,\dots,\vv_m$, each converging to
+$\lambda_i\ve_i$ (eigenvalue $\times$ eigenvector of the feature covariance
+$\E[\vu\vu^\top]$) without ever forming that $n\times n$ matrix. With $\vu_t^{(1)}=\vu_t$ and
+rate $\eta_t=1/t$, for $i=1,\dots,m$:
+\begin{align}
+  \vv_i &\leftarrow (1-\eta_t)\,\vv_i + \eta_t\,\big(\vu_t^{(i)\top}\hat\vv_i\big)\,\vu_t^{(i)},
+     \qquad \hat\vv_i=\vv_i/\lVert\vv_i\rVert, &&\text{(Hebb / Oja)}\\
+  \vu_t^{(i+1)} &= \vu_t^{(i)} - \big(\vu_t^{(i)\top}\hat\vv_i\big)\,\hat\vv_i.
+     &&\text{(deflate)}
+\end{align}
+Each component takes a Hebbian step toward the projection of the current residual onto its own
+direction --- an online power iteration on the covariance, since
+$\E[(\vu^\top\hat\vv_i)\vu]=\E[\vu\vu^\top]\hat\vv_i$ --- after which Gram--Schmidt deflation
+removes that direction so component $i{+}1$ sees only the orthogonal complement. At convergence
+$\lVert\vv_i\rVert=\lambda_i$ and $\hat\vv_i=\ve_i$, so the loading column
+$\vc_i=\hat\vv_i\sqrt{\lVert\vv_i\rVert}=\ve_i\sqrt{\lambda_i}$ gives a unit-variance latent.
+
+\emph{Orthogonal Procrustes anchoring.} A refreshed loading $\hat\vC$ is determined only up to
+$\vR\in O(m)$. To pin the latent frame to the previous estimate $\vC_{\mathrm{prev}}$ we solve
+\begin{equation}
+  \vR^\star=\arg\min_{\vR^\top\vR=\vI}\lVert\hat\vC\vR-\vC_{\mathrm{prev}}\rVert_F=\vU\vV^\top,
+  \qquad \hat\vC^\top\vC_{\mathrm{prev}}=\vU\vSig\vV^\top\ (\text{SVD}),
+\end{equation}
+and adopt $\hat\vC\vR^\star$. This fixes the $\vC\vx=(\vC\vR)(\vR^{-1}\vx)$ gauge at each refresh
+so the dynamics $f=\vW\vphi$ stay in a consistent coordinate system.
+
 \paragraph{Special cases.}
 $\hat\vC_t\equiv\vC$ (known/oracle readout) recovers a fixed projection; $\vpi_t:=\vy_t$ with
 $\vC$ learned by $\partial\hat{\mathcal L}/\partial\vC$ recovers the original VJF. Per-step
 cost stays $O(nm)$ (same order as the decoder), preserving real-time complexity.
 
-\paragraph{Behavior.}
-From a cheap small-window initial $\hat\vC$, the decoupled estimator recovers the asymptotic
-readout subspace online, and the projection-input recognition attains the known-readout
-(oracle) filtering accuracy --- and can \emph{exceed} raw-$\vy_t$ recognition, since $h$ no
-longer has to invert $n$ (possibly sparse) channels.
+\paragraph{Empirical results (limit-cycle Poisson benchmark).}
+On a $1000$\,s log-linear Poisson limit cycle ($5$\,ms bins, mean ${\sim}20$\,Hz,
+$T{=}200{,}000$; $n{=}50/150/250$ neurons $\to{\sim}3/6/8$\,dB), filtered-latent $R^2$ is:
+\begin{center}\small
+\begin{tabular}{lccc}
+\hline
+recognition input / readout & $3$\,dB & $6$\,dB & $8$\,dB\\
+\hline
+spike enc., oracle $\vC$ (raw-VJF bound)        & 0.69 & 0.84 & 0.91\\
+proj.\ enc., oracle $\vC$ (ceiling)             & \textbf{0.86} & \textbf{0.94} & \textbf{0.96}\\
+proj.\ enc., online $\hat\vC_t$ ($\tau{=}8$)    & 0.84 & 0.86 & 0.85\\
+proj.\ enc., online $\hat\vC_t$ ($\tau{=}1$)    & 0.73 & 0.84 & 0.88\\
+spike enc., frozen PCA $\vC$                     & 0.72 & 0.87 & 0.92\\
+\hline
+\end{tabular}
+\end{center}
+\textbf{(1)} The projection input is a clear, robust win at \emph{fixed} $\vC$: projection-oracle
+dominates spike-oracle everywhere, most strongly on one-step prediction
+($0.84/0.95/0.97$ vs.\ $0.60/0.85/0.92$) --- confirming that $\vpi_t=\vC^+(\tilde g(\vy_t)-\vb)$
+spares $h$ the $n\!\to\!m$ inversion. \textbf{(2)} The \emph{online} readout reaches the
+projection ceiling only at low SNR ($3$\,dB: $0.84$ vs.\ frozen-PCA $0.72$, spike-oracle $0.69$);
+at high SNR it underperforms even a well-initialized frozen PCA ($0.85$ vs.\ $0.92$ at $8$\,dB)
+and lags its own oracle ceiling. The periodic Procrustes refresh keeps moving the latent frame,
+so $f$ fits a moving target: online one-step $R^2$ ($0.58/0.71/0.71$) and forecast horizon
+($k{=}11/82/100$) trail the fixed-$\vC$ modes. \textbf{(3)} Smoothing helps the noisy regime and
+rate fidelity (rate corr.\ $0.84/0.88/0.87$ at $\tau{=}8$ vs.\ $0.54/0.71/0.76$ at $\tau{=}1$) but
+adds lag that mildly hurts high-SNR latent $R^2$. Per-bin online cost is flat ${\sim}3$\,ms
+($50\!\to\!250$ neurons), real-time at $5$\,ms bins.
+
+\emph{Open problem.} Make $\hat\vC_t$ converge to the oracle subspace at high SNR with less frame
+churn --- e.g.\ slower / annealed refresh, freezing once the subspace stabilizes, or rotating the
+flow with $\vR^\star$ at each refresh so the dynamics track the frame exactly.
 \end{document}
