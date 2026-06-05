@@ -27,7 +27,12 @@ Branch `feat/realtime-framework` off `master`. Plan:
   trailing-R^2 + phase-portrait plots). Executes top-to-bottom via nbconvert (R^2~0.92, no
   errors). codex-reviewed (gated the real-time claim on measured p95, softened the oracle-accuracy
   claim, added the script's init_w guard, labeled ground-truth diagnostics).
-- [ ] **5. Tech report** - `paper/` (VJF-paper form; technical, difference-focused).
+- [x] **5. Tech report** - `paper/main.tex` (+ Makefile, references.bib, .envrc, figs/). VJF-paper
+  form (Intro / Background / Method [the 3 differences] / Experiments / Results / Discussion),
+  technical and difference-focused, with the 5 validation figures. Builds clean via TEXINPUTS +
+  latexmk (7 pp, 0 warnings). codex-reviewed (12 findings fixed: overclaim vs numbers scoped,
+  Moore-Penrose C+, centered-feature renamed r_t vs control u_t, RBF centers xi_i vs loading c_i,
+  covariance square-root factor wording, Procrustes prose softened, caption claims corrected).
 
 ## Key design notes
 
