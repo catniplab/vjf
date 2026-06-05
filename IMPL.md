@@ -10,8 +10,12 @@ Branch `feat/realtime-framework` off `master`. Plan:
   `VJF.filter`, `OnlineReadout`, `RBFDS.initialize`. codex-review done (8 findings; 1,3-8
   fixed, #2 partial - refresh moved after the accept guard; full state-rollback declined as
   it deviates from the validated `run_condition`).
-- [ ] **2. Tests** - `test/test_realtime.py` (equivalence, projection, warm-up boundary,
-  divergence, determinism, synthetic smoke).
+- [x] **2. Tests** - `test/test_realtime.py` (10 tests: raw-spike equivalence + fields,
+  projection supplies valid y_enc, projection-without-readout raises, fixed readout no drift,
+  refresh after t0, warm-up boundary init-once + arg alignment, divergence exception + magnitude
+  guard paths + q reset, determinism across boundary, synthetic calibration/reproducibility).
+  codex-reviewed (coverage gaps closed; finite-warmup equivalence declined - covered by the
+  boundary arg-alignment test). 24 tests pass.
 - [ ] **3. Tutorial script** - `script/realtime_tutorial.py` + smoke test.
 - [ ] **4. Notebook** - `notebook/realtime_tutorial.ipynb` (from the script).
 - [ ] **5. Tech report** - `paper/` (VJF-paper form; technical, difference-focused).
