@@ -12,7 +12,7 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 | exp | condition | VM | commit | seed(s) | status | wall | results path | key numbers |
 |-----|-----------|----|--------|---------|--------|------|--------------|-------------|
 | E0  | instrumentation (drift logging) | - | 491d77c | - | **code done** (maybe_refresh returns drift metrics) | - | - | equivariance unit-tested |
-| E1  | C3 causal: baseline / track / oracle+rot / freeze / refit | - | 491d77c | - | **mechanism coded+tested**; driver+launch next | - | - | impose_rotation + apply_latent_rotation verified |
+| E1  | C3 causal: 7 arms (oracle/online±track/imposed±track/frozen/freeze) | exp-20260605-171155-vjf-e1 | 7c8b585 | 20260605..12 (8) | **running** (launched 16:17 UTC, ~10h) | - | results_e1/ | 8 seeds x 7 arms; early arm-set ~1.3h |
 | E5  | C5 timing (dedicated VM) | - | - | - | not started | - | - | - |
 | E2  | K sweep (low/high SNR) | - | - | - | not started | - | - | - |
 | E3  | tau sweep x 5 SNR | - | - | - | not started | - | - | - |
