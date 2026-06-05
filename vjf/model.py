@@ -62,6 +62,7 @@ class VJF(Module):
         self.add_module('transition', transition)
         self.add_module('recognition', recognition)
         self.add_module('decoder', LinearDecoder(xdim, ydim))
+        self.encoder = 'spikes'  # 'projection' (set by make_model) requires a y_enc feature
 
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
@@ -115,7 +116,17 @@ class VJF(Module):
         pt = self.transition(xs, u, sampling=False)
 
         y = torch.atleast_2d(y)
-        y_enc = y if y_enc is None else torch.atleast_2d(y_enc)
+        if y_enc is None:
+            if getattr(self, 'encoder', 'spikes') == 'projection':
+                raise ValueError(
+                    "encoder='projection' needs a recognition feature: call "
+                    "filter(..., y_enc=...) with a subspace projection (e.g. from "
+                    "vjf.readout.OnlineReadout). The raw-y path (VJF.fit / y_enc=None) "
+                    "is unsupported for this encoder."
+                )
+            y_enc = y
+        else:
+            y_enc = torch.atleast_2d(y_enc)
         qt = self.recognition(y_enc, qs, u)
 
         # decode
@@ -330,6 +341,7 @@ class VJF(Module):
 
         model = VJF(ydim, xdim, likelihood, RBFDS(n_rbf, xdim, udim, flow_learner=transition_flow),
                     Recognition(rec_in, xdim, udim, hidden_sizes), *args, **kwargs)
+        model.encoder = encoder  # gates the y_enc requirement in forward()
         return model
 
     def forecast(self, x0: Tensor, u: Tensor = None, n_step: int = 1, *, noise: bool = False) -> Tuple[Tensor, Tensor]:
