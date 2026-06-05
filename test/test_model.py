@@ -54,6 +54,19 @@ def test_spikes_encoder_backward_compat():
     assert q.mean.shape[-1] == xdim and torch.isfinite(loss.detach())
 
 
+def test_projection_encoder_requires_y_enc():
+    # encoder='projection' must fail early (clear error), not crash with a shape mismatch,
+    # when the recognition feature is not supplied (e.g. via VJF.fit / raw-y path).
+    import pytest
+    ydim, xdim, n_rbf = 12, 2, 8
+    m = VJF.make_model(ydim, xdim, 0, n_rbf, hidden_sizes=[8, 8], encoder='projection')
+    y = torch.randint(0, 2, (5, ydim)).float()
+    with pytest.raises(ValueError, match="projection"):
+        m.fit(y, max_iter=1)
+    with pytest.raises(ValueError, match="projection"):
+        m.filter(y[0], None, None)  # no y_enc
+
+
 def test_projection_encoder():
     # recognition reads an xdim-dim feature via y_enc; decoder/likelihood read y.
     ydim, xdim, n_rbf = 12, 2, 8
