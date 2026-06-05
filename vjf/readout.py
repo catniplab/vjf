@@ -28,6 +28,41 @@ def _procrustes(c_new: np.ndarray, c_ref: np.ndarray) -> np.ndarray:
     return c_new @ (u @ vt)
 
 
+def _principal_angle(a, b):
+    """Largest principal angle (radians) between the column spaces of a and b."""
+    qa = np.linalg.qr(np.asarray(a))[0]
+    qb = np.linalg.qr(np.asarray(b))[0]
+    s = np.linalg.svd(qa.T @ qb, compute_uv=False)
+    return float(np.arccos(np.clip(s.min(), -1.0, 1.0)))
+
+
+def _rot_angle_deg(R):
+    """Rotation angle (deg) of an orthogonal R; exact for 2x2, else via the trace."""
+    R = np.asarray(R)
+    if R.shape == (2, 2):
+        return float(abs(np.degrees(np.arctan2(R[1, 0], R[0, 0]))))
+    c = (np.trace(R) - (R.shape[0] - 2)) / 2.0
+    return float(np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
+
+
+@torch.no_grad()
+def apply_latent_rotation(transition, M):
+    """Re-express the RBF flow under a latent coordinate change ``x_new = M x_old`` (orthogonal
+    ``M``, m x m), so the dynamics are unchanged up to that rotation: ``centroid[:, :m] @= M^T``
+    and ``w_mean @= M^T`` (the srrls feature-space covariance is invariant to an output rotation,
+    so ``w_chol`` is untouched). udim>0: only the first m (state) centroid columns rotate."""
+    feat = transition.velocity.feature
+    m = np.asarray(M).shape[0]
+    Mt = torch.as_tensor(np.asarray(M).T, dtype=feat.centroid.dtype, device=feat.centroid.device)
+    feat.centroid.data[:, :m] = feat.centroid.data[:, :m] @ Mt
+    wm = transition.velocity.w_mean
+    new_wm = wm @ Mt
+    if isinstance(wm, torch.nn.Parameter):
+        wm.data.copy_(new_wm)
+    else:
+        transition.velocity.w_mean = new_wm
+
+
 class OnlineReadout:
     """Streaming estimator of ``(C, b)`` + the input projection ``pinv(C)(g~(y)-b)``.
 
@@ -122,17 +157,57 @@ class OnlineReadout:
             u = u - (u @ vh2) * vh2
 
     @torch.no_grad()
-    def maybe_refresh(self, decoder, step: int) -> bool:
-        """Every ``K`` steps, Procrustes-anchor the refreshed ``C`` to the current decoder
-        and write ``(C, b)`` into it (and refresh the cached ``pinv(C)``). The projection
-        encoder makes explicit flow re-rotation unnecessary (the anchored update keeps the
-        latent frame ~fixed; the dynamics learner absorbs the small residual)."""
+    def maybe_refresh(self, decoder, step: int, *, transition=None,
+                      track_subspace: bool = False, oracle_C=None):
+        """Every ``K`` steps, Procrustes-anchor the refreshed ``C`` to the current decoder and
+        write ``(C, b)`` into it (refreshing cached ``pinv(C)``). Returns a dict of
+        subspace-drift metrics (or ``None`` if no refresh fired).
+
+        If ``track_subspace`` and a ``transition`` is given, also rotate the RBF flow by the
+        orthogonal part of the old->new latent-frame map, so the dynamics travel with the factor
+        subspace instead of chasing a moving alignment (E1 subspace-tracking fix). ``oracle_C``
+        (if given) is used only to log the principal angle to the true loading."""
         if self.K <= 0 or step % self.K != 0:
-            return False
+            return None
         w = decoder.decode.weight
-        c_aligned = _procrustes(self._scaled_C(), w.detach().cpu().numpy())
-        self.C = c_aligned.astype(np.float32)
-        self.C_pinv = np.linalg.pinv(self.C).astype(np.float32)
+        C_prev = w.detach().cpu().numpy()
+        C_raw = self._scaled_C()
+        u, _, vt = np.linalg.svd(C_raw.T @ C_prev)
+        rstar = u @ vt                                   # Procrustes alignment (new -> prev)
+        c_aligned = (C_raw @ rstar).astype(np.float32)
+        cpinv = np.linalg.pinv(c_aligned).astype(np.float32)
+        t_map = cpinv @ C_prev                           # old-latent -> new-latent (m x m)
+        uq, _, vtq = np.linalg.svd(t_map)
+        q = uq @ vtq                                     # orthonormal part of the frame map
+
+        metrics = {
+            "step": int(step),
+            "refresh_rot_deg": _rot_angle_deg(rstar),
+            "angle_prev_deg": float(np.degrees(_principal_angle(c_aligned, C_prev))),
+            "angle_oracle_deg": (float(np.degrees(_principal_angle(c_aligned, np.asarray(oracle_C))))
+                                 if oracle_C is not None else None),
+            "frame_rot_deg": _rot_angle_deg(q),
+            "cond": float(np.linalg.cond(c_aligned)),
+        }
+        self.C = c_aligned
+        self.C_pinv = cpinv
         w.copy_(torch.as_tensor(self.C, device=w.device))
         decoder.decode.bias.copy_(torch.as_tensor(self.mean_b.astype(np.float32), device=w.device))
-        return True
+        if track_subspace and transition is not None:
+            apply_latent_rotation(transition, q)
+        return metrics
+
+    @torch.no_grad()
+    def impose_rotation(self, decoder, Q, *, transition=None, track_subspace=False):
+        """E1(c) positive control: rotate the (fixed/oracle) readout by an orthogonal ``Q``
+        (``C <- C Q``) -- imposing a known factor rotation with no estimation error -- and, if
+        ``track_subspace``, rotate the flow to follow it (which should make the dynamics
+        invariant). Mirrors ``maybe_refresh`` but with an externally supplied rotation."""
+        Q = np.asarray(Q, dtype=np.float32)
+        w = decoder.decode.weight
+        C_new = (w.detach().cpu().numpy() @ Q).astype(np.float32)
+        self.C = C_new
+        self.C_pinv = np.linalg.pinv(C_new).astype(np.float32)
+        w.copy_(torch.as_tensor(C_new, device=w.device))
+        if track_subspace and transition is not None:
+            apply_latent_rotation(transition, Q.T)       # latent change x_new = Q^T x_old

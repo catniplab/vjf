@@ -62,12 +62,13 @@ def test_maybe_refresh_writes_decoder_only_on_K():
     decoder = model.decoder
 
     w0 = decoder.decode.weight.detach().clone()
-    assert ro.maybe_refresh(decoder, step=3) is False
+    assert ro.maybe_refresh(decoder, step=3) is None        # no refresh off a K-multiple
     assert torch.equal(decoder.decode.weight, w0)
     # advance the estimator a bit so the refreshed C differs, then refresh on a multiple of K
     for _ in range(20):
         ro.update(ro.feature(rng.poisson(0.3, size=n)))
-    assert ro.maybe_refresh(decoder, step=10) is True
+    metrics = ro.maybe_refresh(decoder, step=10)            # refresh -> drift-metrics dict
+    assert isinstance(metrics, dict) and metrics["step"] == 10
     assert decoder.decode.weight.shape == (n, m)
     assert torch.allclose(decoder.decode.bias.detach(),
                           torch.as_tensor(ro.mean_b.astype(np.float32)))
