@@ -394,6 +394,17 @@ by $\vR^\star$ at each refresh (exact for a rotation: the RBF centers
 $\vxi_i\mapsto\vR^\star\vxi_i$, with $\vW$ transformed accordingly) so the dynamics track the
 frame.
 
+\paragraph{Relation to XFADS.} The projection encoder shares with XFADS
+\autocite{Dowling2024b} the strategy of summarizing each high-dimensional observation into a
+low-dimensional latent-space quantity before inference, rather than feeding the recognition
+machinery the raw spikes. The constructions are opposite, however: XFADS \emph{learns} an
+amortized network that emits the natural parameters of a per-timestep Gaussian pseudo-likelihood
+(an information vector and a low-rank precision), trained end-to-end through the ELBO and
+independent of the readout; we instead use a \emph{fixed} least-squares projection
+$\vpi_t=\vC^{+}(\tilde g(\vy_t)-\vb)$ built explicitly from a separately, online-estimated loading
+$\vC$. We thus replace XFADS's learned amortization of the observation-to-latent map with an
+analytic, link-matched projection that exploits the known generative structure.
+
 These results are, to our knowledge, the first demonstration of real-time VJF with an unknown
 readout; the scope is, however, a single synthetic benchmark (one limit-cycle trajectory class,
 log-linear Poisson observations, no real data). Validating on recorded population activity and on
