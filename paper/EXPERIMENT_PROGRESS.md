@@ -28,6 +28,16 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 ## Log
 - (chronological notes: launches, pulls, teardowns, failures, decisions)
 
+## Final delivery (when all experiments done) -- standing instruction
+
+1. Regenerate all figures as publication-quality vector PDF from the run artifacts.
+2. Update the paper (`paper/main.tex`) with the new results/figures (C3 causal evidence, C4 trend, C5 timing).
+3. `/codex-review` the updated paper; address findings.
+4. Proofread/edit pass (academic_editor + writing-style CCC/detailed); revise.
+5. Rebuild; verify clean.
+6. Push branch(es) to GitHub.
+7. Post the compiled PDF tech report to Slack #joint-filtering.
+
 ## Pending decisions / blockers
 - Awaiting approval to implement E0 instrumentation + E1 code (subspace-tracking, imposed-rotation
   injector, decoder-freeze) and to start GCP runs.

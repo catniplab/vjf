@@ -229,6 +229,7 @@ def run_condition(z, cal, n_neurons, cfg, device):
     n_diverge = 0
     filter_time = 0.0  # cumulative time inside model.filter() over post-warmup bins
     n_filter = 0       # number of post-warmup filter steps timed
+    bin_ms, refresh_ms, ord_ms = [], [], []  # E5: per-bin latency (all / refresh-bin / ordinary-bin)
 
     q = None
     t0 = time.time()
@@ -262,11 +263,15 @@ def run_condition(z, cal, n_neurons, cfg, device):
                 n_diverge += 1
                 model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)
                 q = None; mu_all[t] = mu_all[t - 1]; t += 1; continue
+            refreshed = False
             if front is not None and front_online:
-                front.maybe_refresh(model.decoder, t)  # Procrustes-anchored (C,b) refresh
+                refreshed = front.maybe_refresh(model.decoder, t) is not None  # Procrustes refresh
             if not warm:  # time the steady online-filtering cost (post warm-up)
-                filter_time += time.perf_counter() - _tf
+                dt_bin = time.perf_counter() - _tf
+                filter_time += dt_bin
                 n_filter += 1
+                bin_ms.append(dt_bin * 1e3)
+                (refresh_ms if refreshed else ord_ms).append(dt_bin * 1e3)
             model.transition.logvar.data.clamp_(min=LOGVAR_FLOOR)  # keep long run stable
             mu = qt.mean.detach()
             if not torch.isfinite(mu).all() or mu.abs().max() > 1e3:
@@ -360,7 +365,12 @@ def run_condition(z, cal, n_neurons, cfg, device):
         "n_diverge": n_diverge,
         "still_rising": bool(len(r2_arr) >= 5 and r2_arr[-1] > r2_arr[-5] + 0.02),
         "wall_total": time.time() - t0,
-        "per_bin_filter_ms": float(filter_time / max(n_filter, 1) * 1e3),  # pure model.filter() per bin
+        "per_bin_filter_ms": float(filter_time / max(n_filter, 1) * 1e3),  # mean per bin
+        "per_bin_p50_ms": float(np.percentile(bin_ms, 50)) if bin_ms else None,   # E5
+        "per_bin_p95_ms": float(np.percentile(bin_ms, 95)) if bin_ms else None,
+        "per_bin_max_ms": float(np.max(bin_ms)) if bin_ms else None,
+        "per_bin_refresh_p95_ms": float(np.percentile(refresh_ms, 95)) if refresh_ms else None,
+        "per_bin_ordinary_p95_ms": float(np.percentile(ord_ms, 95)) if ord_ms else None,
         "n_filter_steps": int(n_filter),
         "log": {k: np.asarray(v).tolist() for k, v in log.items()},
         "_mu": mu_all, "_z": z, "_A": A, "_c": c, "_model": model,
@@ -624,6 +634,10 @@ def main():
                     help="write results to results/<tag>/ (for multi-mode sweeps)")
     ap.add_argument("--proj-tau", type=float, default=None,
                     help="override cfg['proj_tau']; tau=1 disables the causal EMA smoothing")
+    ap.add_argument("--refresh-K", type=int, default=None,
+                    help="override cfg['proj_refresh_K'] (readout refresh interval; E2 K sweep)")
+    ap.add_argument("--snr", type=float, default=None,
+                    help="run a single SNR condition (dB); picks the matching population size")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
     global RESULTS
@@ -635,7 +649,9 @@ def main():
         # peak <=~100 Hz at 5 ms bins). (n_neurons, target_snr_db) per condition;
         # realized SNR ~ 3 / 6 / 9 dB. Capped at 300 neurons: under oracle readout
         # VJF's online filter is numerically stable up to ~300, diverges at ~800.
-        "conditions": [(50, 3.0), (150, 6.0), (250, 8.0)],
+        # (n_neurons, target_snr_db); extended down to the neural regime (-3, 0 dB) via
+        # smaller populations. Realized SNR ~ target.
+        "conditions": [(15, -3.0), (30, 0.0), (50, 3.0), (150, 6.0), (250, 8.0)],
         "t_eff": 2000 if args.quick else args.t_eff,
         "stride": 1,
         "dt": 5e-3,                       # 5 ms bins
@@ -678,6 +694,12 @@ def main():
         cfg["encoder"] = args.encoder
     if args.proj_tau is not None:
         cfg["proj_tau"] = args.proj_tau
+    if args.refresh_K is not None:
+        cfg["proj_refresh_K"] = args.refresh_K
+    if args.snr is not None:                       # single SNR condition (for sharding sweeps)
+        cfg["conditions"] = [c for c in cfg["conditions"] if abs(c[1] - args.snr) < 1e-6]
+        if not cfg["conditions"]:
+            raise SystemExit(f"--snr {args.snr} not in conditions")
     if args.quick:
         cfg["conditions"] = [(50, 3.0), (150, 6.0)]
         cfg["warmup_cap"] = 300
