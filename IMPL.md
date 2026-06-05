@@ -33,6 +33,12 @@ Branch `feat/realtime-framework` off `master`. Plan:
   latexmk (7 pp, 0 warnings). codex-reviewed (12 findings fixed: overclaim vs numbers scoped,
   Moore-Penrose C+, centered-feature renamed r_t vs control u_t, RBF centers xi_i vs loading c_i,
   covariance square-root factor wording, Procrustes prose softened, caption claims corrected).
+  Editorial pass (academic_editor + writing-style CCC/detailed; audit in `paper/EDIT_AUDIT.md`):
+  de-mathematized abstract+intro (prose + dark-room analogy + crystallizing italic verdict),
+  locked terminology, added a dynamics-metrics companion table, scoped claims to the numbers,
+  added limitations. Added pseudo-code: Algorithm 1 (vanilla VJF, reproduced) + Algorithm 2
+  (real-time VJF with the new hyperparameters W,K,tau,rho,sigma2_min,B) + a "what changed"
+  comparison. Builds clean (9 pp).
 
 ## Key design notes
 
