@@ -16,7 +16,12 @@ Branch `feat/realtime-framework` off `master`. Plan:
   guard paths + q reset, determinism across boundary, synthetic calibration/reproducibility).
   codex-reviewed (coverage gaps closed; finite-warmup equivalence declined - covered by the
   boundary arg-alignment test). 24 tests pass.
-- [ ] **3. Tutorial script** - `script/realtime_tutorial.py` + smoke test.
+- [x] **3. Tutorial script** - `examples/realtime_tutorial.py` (synthetic stream -> projection
+  encoder + online readout -> `online_filter` -> trailing affine R^2 + per-bin timing + plots)
+  and `test/test_tutorial.py` smoke test. (Lives in `examples/`, not `script/`/`notebook/`,
+  which the repo gitignores.) Streams only the unseen remainder after the warm-up window (no
+  look-ahead). codex-reviewed (faithfulness/test-rigor findings fixed). Full run: R^2~0.94,
+  ~0.54 ms/bin.
 - [ ] **4. Notebook** - `notebook/realtime_tutorial.ipynb` (from the script).
 - [ ] **5. Tech report** - `paper/` (VJF-paper form; technical, difference-focused).
 

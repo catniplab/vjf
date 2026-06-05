@@ -836,3 +836,6 @@ uv.lock
 *.npz
 notebook
 script
+
+# tutorial-generated plots
+examples/tutorial_out/
