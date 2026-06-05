@@ -56,7 +56,9 @@ high-SNR shortfall to that frame motion and outline two concrete remedies.
 Reading the moment-to-moment state of a neural population as the spikes arrive is the enabling
 step for closed-loop experiments and adaptive neural interfaces: the controller must estimate,
 predict, and act within a single time bin. Offline latent-variable models of population activity
-are now mature, but few operate in this streaming, act-now regime. Variational joint filtering
+are now mature --- recent nonlinear state-space methods such as XFADS \autocite{Dowling2024b}
+learn highly predictive generative models by approximate variational smoothing over a whole
+recording --- but few operate in this streaming, act-now regime. Variational joint filtering
 (VJF) is an exception \autocite{zhao2020variational}: it pairs an amortized recognition network
 \autocite{kingma2014auto} with a recursive estimate of a nonlinear state-space model, updating
 both the posterior and the model once per time bin.
@@ -250,7 +252,8 @@ remaining parameters, and the posterior threading --- is the vanilla update.
 We use a self-contained synthetic benchmark: a 2-D limit cycle (radius-relaxing, constant angular
 velocity) observed through a sparse log-linear Poisson population, calibrated to biological rates
 (mean $\sim20$\,Hz, peak $\le100$\,Hz at 5\,ms bins). One single-trial stream of $T=200{,}000$
-bins (1000\,s) is generated; signal-to-noise is set by population size, giving three conditions:
+bins (1000\,s) is generated; signal-to-noise --- the Fisher-information SNR of the latent
+trajectory \autocite{Jeon2024b} --- is set by population size, giving three conditions:
 $n=50/150/250$ neurons, corresponding to $\sim3/6/8$\,dB (\cref{fig:raster}). We compare five
 configurations, crossing the recognition input (spike vs.\ projection encoder) with how the
 readout is obtained: oracle (true $\vC$); the decoupled online readout of \cref{ssec:readout}; or
