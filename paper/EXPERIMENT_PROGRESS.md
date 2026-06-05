@@ -11,8 +11,8 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 
 | exp | condition | VM | commit | seed(s) | status | wall | results path | key numbers |
 |-----|-----------|----|--------|---------|--------|------|--------------|-------------|
-| E0  | instrumentation (drift logging) | - | - | - | not started | - | - | - |
-| E1  | C3 causal: baseline / track / oracle+rot / freeze / refit | - | - | - | not started | - | - | - |
+| E0  | instrumentation (drift logging) | - | 491d77c | - | **code done** (maybe_refresh returns drift metrics) | - | - | equivariance unit-tested |
+| E1  | C3 causal: baseline / track / oracle+rot / freeze / refit | - | 491d77c | - | **mechanism coded+tested**; driver+launch next | - | - | impose_rotation + apply_latent_rotation verified |
 | E5  | C5 timing (dedicated VM) | - | - | - | not started | - | - | - |
 | E2  | K sweep (low/high SNR) | - | - | - | not started | - | - | - |
 | E3  | tau sweep x 5 SNR | - | - | - | not started | - | - | - |
