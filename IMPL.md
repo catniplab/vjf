@@ -22,7 +22,11 @@ Branch `feat/realtime-framework` off `master`. Plan:
   which the repo gitignores.) Streams only the unseen remainder after the warm-up window (no
   look-ahead). codex-reviewed (faithfulness/test-rigor findings fixed). Full run: R^2~0.94,
   ~0.54 ms/bin.
-- [ ] **4. Notebook** - `notebook/realtime_tutorial.ipynb` (from the script).
+- [x] **4. Notebook** - `examples/realtime_tutorial.ipynb` (self-contained narrative mirroring
+  the script: synthetic stream + raster, projection model + warm-start, live online_filter loop,
+  trailing-R^2 + phase-portrait plots). Executes top-to-bottom via nbconvert (R^2~0.92, no
+  errors). codex-reviewed (gated the real-time claim on measured p95, softened the oracle-accuracy
+  claim, added the script's init_w guard, labeled ground-truth diagnostics).
 - [ ] **5. Tech report** - `paper/` (VJF-paper form; technical, difference-focused).
 
 ## Key design notes
