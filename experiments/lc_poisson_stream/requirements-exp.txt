@@ -1,0 +1,5 @@
+# Extra deps for the limit-cycle Poisson stream experiment.
+# vjf itself (torch>=2.8, scipy, numpy, tqdm) is installed via `uv pip install -e .`
+# from the repo root. neurofisherSNR is pinned to an exact commit for reproducibility.
+neurofisherSNR @ git+https://github.com/catniplab/neurofisherSNR.git@96e83f68025db204a5dc6fde1a74403a045e61fb
+matplotlib>=3.8
