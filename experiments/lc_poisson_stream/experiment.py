@@ -638,6 +638,7 @@ def main():
                     help="override cfg['proj_refresh_K'] (readout refresh interval; E2 K sweep)")
     ap.add_argument("--snr", type=float, default=None,
                     help="run a single SNR condition (dB); picks the matching population size")
+    ap.add_argument("--seed", type=int, default=None, help="override cfg['seed']")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
     global RESULTS
@@ -696,6 +697,8 @@ def main():
         cfg["proj_tau"] = args.proj_tau
     if args.refresh_K is not None:
         cfg["proj_refresh_K"] = args.refresh_K
+    if args.seed is not None:
+        cfg["seed"] = args.seed
     if args.snr is not None:                       # single SNR condition (for sharding sweeps)
         cfg["conditions"] = [c for c in cfg["conditions"] if abs(c[1] - args.snr) < 1e-6]
         if not cfg["conditions"]:
