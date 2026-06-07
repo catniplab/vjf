@@ -222,8 +222,61 @@ def fig_curves():
     fig.savefig(os.path.join(FIGS, "curves.pdf")); plt.close(fig)
 
 
+# ---------- Figure: conceptual timescales (W, K, tau) ----------
+def fig_timescales():
+    from matplotlib.patches import ConnectionPatch, FancyArrowPatch
+    fig, axes = plt.subplots(3, 1, figsize=(6.6, 4.8))
+    for ax in axes:
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_yticks([]); ax.set_xticks([])
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+
+    # --- (1) macro: the full stream, warm-up W then online learning ---
+    a = axes[0]
+    a.add_patch(plt.Rectangle((0, 0.35), 1, 0.3, fc="#eef1f4", ec=INK, lw=0.8))
+    Wf = 0.12
+    a.add_patch(plt.Rectangle((0, 0.35), Wf, 0.3, fc=PALETTE["amber"], alpha=0.5, ec="none"))
+    a.axvline(Wf, 0.30, 0.70, color=INK, lw=1, ls="--")
+    a.text(Wf/2, 0.5, "warm-up $W$\n(dynamics frozen,\nreadout settling)", ha="center", va="center", fontsize=7.5)
+    a.text((Wf+1)/2, 0.5, "online learning (state + dynamics every bin; readout every $K$)", ha="center", va="center", fontsize=8)
+    a.annotate("", xy=(1, 0.78), xytext=(0, 0.78), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
+    a.text(0.5, 0.84, "full stream  $T$  (e.g. $2\\times10^5$ bins = 1000 s at 5 ms)", ha="center", fontsize=8)
+    a.set_title("Three timescales of sVJF", fontsize=11, loc="left")
+
+    # --- (2) meso: readout refresh every K (slow outer loop) ---
+    b = axes[1]
+    b.add_patch(plt.Rectangle((0, 0.4), 1, 0.22, fc="#eef1f4", ec=INK, lw=0.8))
+    for xk in np.linspace(0.1, 0.9, 5):
+        b.add_patch(FancyArrowPatch((xk, 0.62), (xk, 0.78), arrowstyle="-|>", mutation_scale=8, color=PALETTE["teal"], lw=1.4))
+    b.annotate("", xy=(0.3, 0.5), xytext=(0.1, 0.5), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
+    b.text(0.2, 0.33, "$K$", ha="center", fontsize=9)
+    b.text(0.5, 0.9, "readout refresh: slow outer loop, every $K$ bins (CCIPCA $\\to$ Procrustes $\\to$ write $C$)",
+           ha="center", fontsize=8, color=PALETTE["teal"])
+
+    # --- (3) micro: per-bin loop + EMA memory tau ---
+    c = axes[2]
+    c.add_patch(plt.Rectangle((0, 0.45), 1, 0.18, fc="#eef1f4", ec=INK, lw=0.8))
+    for xb in np.linspace(0.05, 0.95, 19):
+        c.add_patch(FancyArrowPatch((xb, 0.63), (xb, 0.71), arrowstyle="-|>", mutation_scale=5, color=PALETTE["blue"], lw=0.9))
+    xs = np.linspace(0.05, 0.45, 100)
+    c.plot(xs, 0.50 + 0.12 * np.exp(-(xs.max() - xs) / 0.10), color=PALETTE["mauve"], lw=1.6)
+    c.annotate("", xy=(0.25, 0.30), xytext=(0.05, 0.30), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
+    c.text(0.15, 0.16, r"$\tau$ (EMA memory)", ha="center", fontsize=8, color=PALETTE["mauve"])
+    c.text(0.5, 0.9, "fast inner loop: filter + dynamics every bin; feature EMA memory $\\sim\\tau$ bins",
+           ha="center", fontsize=8, color=PALETTE["blue"])
+
+    # zoom connectors macro->meso (around mid) and meso->micro (around a refresh)
+    for (ax_top, x0, x1), ax_bot in [((axes[0], 0.45, 0.6), axes[1]), ((axes[1], 0.5, 0.62), axes[2])]:
+        for xt in (x0, x1):
+            con = ConnectionPatch(xyA=(xt, 0.35 if ax_top is axes[0] else 0.4), coordsA=ax_top.transData,
+                                  xyB=(0 if xt == x0 else 1, 0.62 if ax_bot is axes[1] else 0.63),
+                                  coordsB=ax_bot.transData, color="0.7", lw=0.6, ls=":")
+            fig.add_artist(con)
+    fig.savefig(os.path.join(FIGS, "timescales.pdf")); plt.close(fig)
+
+
 if __name__ == "__main__":
-    for fn in (fig_readout_stability, fig_tau, fig_timing, fig_summary, fig_curves):
+    for fn in (fig_timescales, fig_readout_stability, fig_tau, fig_timing, fig_summary, fig_curves):
         try:
             fn()
         except Exception as e:
