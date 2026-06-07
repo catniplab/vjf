@@ -67,27 +67,49 @@ def auc(kr):
     return float(np.clip(np.asarray(kr), 0, None).mean())
 
 
-# ---------- Figure: E1 readout stability (C3-revised), high SNR ----------
-def fig_readout_stability():
+# ---------- Figure: E1 readout stability (C3-revised), high + low SNR ----------
+def _readout_arms(data_dir, n):
     by = defaultdict(list)
-    for f in glob.glob(os.path.join(DATA, "e1", "*.json")):
-        d = json.load(open(f)); by[d["arm"]].append(d)
+    for f in glob.glob(os.path.join(data_dir, "*.json")):
+        if f"_n{n}_" in os.path.basename(f):
+            d = json.load(open(f)); by[d["arm"]].append(d)
+    return by
+
+
+def _plot_readout(ax, by, title):
     arms = [("proj_oracle", "oracle\n(ceiling)"), ("frozen_pca", "frozen PCA\n(good init)"),
-            ("freeze_after", "freeze-after\n(our recipe)"), ("online_base", "online\n(keep refreshing)")]
-    one = [(np.mean([r["onestep_r2"] for r in by[a]]), np.std([r["onestep_r2"] for r in by[a]]) / np.sqrt(len(by[a]))) for a, _ in arms]
-    kau = [(np.mean([auc(r["kpred_r2"]) for r in by[a]]), np.std([auc(r["kpred_r2"]) for r in by[a]]) / np.sqrt(len(by[a]))) for a, _ in arms]
-    x = np.arange(len(arms)); w = 0.38
-    fig, ax = plt.subplots(figsize=(5.6, 3.6))
-    _faint_ygrid(ax)
+            ("freeze_after", "slow/locked\nreadout"), ("online_base", "fast online\nreadout")]
+    arms = [a for a in arms if by.get(a[0])]
+    def agg(a, fn):
+        v = [fn(r) for r in by[a]]; return np.mean(v), np.std(v) / np.sqrt(len(v))
+    one = [agg(a, lambda r: r["onestep_r2"]) for a, _ in arms]
+    kau = [agg(a, lambda r: auc(r["kpred_r2"])) for a, _ in arms]
+    x = np.arange(len(arms)); w = 0.38; _faint_ygrid(ax)
     b1 = ax.bar(x - w/2, [m for m, _ in one], w, yerr=[e for _, e in one], capsize=2.5,
                 color=PALETTE["blue"], edgecolor="none", label="one-step $R^2$")
     b2 = ax.bar(x + w/2, [m for m, _ in kau], w, yerr=[e for _, e in kau], capsize=2.5,
                 color=PALETTE["amber"], edgecolor="none", label="$k$-step forecast $R^2$ (AUC)")
     _bar_labels(ax, b1, [e for _, e in one]); _bar_labels(ax, b2, [e for _, e in kau])
-    ax.set_xticks(x); ax.set_xticklabels([l for _, l in arms])
-    ax.set_ylim(0, 1.05); ax.set_ylabel("$R^2$")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)
-    ax.set_title("Readout stability at high SNR (8 dB, 8 seeds)")
+    ax.set_xticks(x); ax.set_xticklabels([l for _, l in arms]); ax.set_ylim(0, 1.1)
+    ax.set_ylabel("$R^2$"); ax.set_title(title)
+    return b1, b2
+
+
+def fig_readout_stability():
+    hi = _readout_arms(os.path.join(DATA, "e1"), 250)
+    lo = _readout_arms(os.path.join(DATA, "e1_low"), 30)
+    if not hi:
+        print("skip readout_stability (no e1 data)"); return
+    if lo:
+        fig, axes = plt.subplots(1, 2, figsize=(9.4, 3.9), sharey=True)
+        _plot_readout(axes[0], hi, "high SNR (8 dB)")
+        _plot_readout(axes[1], lo, "low SNR (0 dB)")
+        axes[0].legend(loc="upper center", bbox_to_anchor=(1.05, -0.16), ncol=2)
+        fig.suptitle("Readout stability: lock once converged at high SNR, keep adapting at low SNR", y=1.0)
+    else:
+        fig, ax = plt.subplots(figsize=(5.6, 3.7))
+        _plot_readout(ax, hi, "Readout stability at high SNR (8 dB, 8 seeds)")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)
     fig.savefig(os.path.join(FIGS, "readout_stability.pdf")); plt.close(fig)
 
 
@@ -114,27 +136,96 @@ def fig_tau():
     fig.savefig(os.path.join(FIGS, "tau_sweep.pdf")); plt.close(fig)
 
 
-# ---------- Figure: E5 per-bin timing (C5) ----------
+# ---------- Figure: E5 per-bin timing (C5) -- violin of the latency distribution ----------
 def fig_timing():
-    d = json.load(open(os.path.join(DATA, "e2", "e2_K1000.json")))["conditions"]
-    d = sorted(d, key=lambda c: c["snr_target"])
+    f = os.path.join(DATA, "extra", "x_timing.json")
+    if not os.path.exists(f):
+        print("skip timing (no raw sample yet)"); return
+    d = sorted(json.load(open(f))["conditions"], key=lambda c: c["snr_target"])
+    samples = [np.asarray(c.get("timing_sample_ms") or []) for c in d]
     labels = [f"{round(c['snr_target'])} dB\n(n={c['n_neurons']})" for c in d]
-    p50 = [c.get("per_bin_p50_ms") for c in d]; p95 = [c.get("per_bin_p95_ms") for c in d]
-    pmax = [c.get("per_bin_max_ms") for c in d]
-    x = np.arange(len(d)); w = 0.27
-    fig, ax = plt.subplots(figsize=(5.8, 3.3))
-    _faint_ygrid(ax)
-    ax.bar(x - w, p50, w, label="p50", color=PALETTE["slate"], edgecolor="none")
-    ax.bar(x, p95, w, label="p95", color=PALETTE["blue"], edgecolor="none")
-    ax.bar(x + w, pmax, w, label="max", color=PALETTE["amber"], edgecolor="none")
+    fig, ax = plt.subplots(figsize=(6.0, 3.4)); _faint_ygrid(ax)
+    pos = np.arange(1, len(d) + 1)
+    parts = ax.violinplot(samples, positions=pos, showextrema=False, widths=0.85)
+    for pc in parts["bodies"]:
+        pc.set_facecolor(PALETTE["blue"]); pc.set_alpha(0.55)
+        pc.set_edgecolor(INK); pc.set_linewidth(0.5)
+    for i, s in zip(pos, samples):       # median dot + 5-95% line (honest weight on the bulk)
+        if len(s):
+            ax.plot([i, i], [np.percentile(s, 5), np.percentile(s, 95)], color=INK, lw=1)
+            ax.plot(i, np.percentile(s, 50), "o", color=INK, ms=3)
     ax.axhline(5.0, ls="--", c=INK, lw=1)
-    ax.text(len(d) - 0.5, 5.15, "5 ms bin budget", ha="right", va="bottom", fontsize=8, color=INK)
-    ax.set_xticks(x); ax.set_xticklabels(labels); ax.set_ylabel("per-bin wall time (ms)")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), title="percentile")
-    ax.set_title("Real-time per-bin cost (online readout, e2-standard-4)")
+    ax.text(pos[-1] + 0.45, 5.15, "5 ms bin budget", ha="right", va="bottom", fontsize=8, color=INK)
+    ymax = max(6.0, max((np.percentile(s, 99.5) for s in samples if len(s)), default=6) * 1.15)
+    ax.set_ylim(0, ymax)
+    ax.set_xticks(pos); ax.set_xticklabels(labels); ax.set_ylabel("per-bin wall time (ms)")
+    ax.set_title("Real-time per-bin latency (online readout, e2-standard-4)\n"
+                 "violin = distribution; dot = median, bar = 5-95%")
     fig.savefig(os.path.join(FIGS, "timing.pdf")); plt.close(fig)
 
 
+# ---------- Figure A: 5-SNR method comparison (C1, C2) ----------
+def _main_runs():
+    by = defaultdict(list)
+    for f in glob.glob(os.path.join(DATA, "main", "mo_*.json")):
+        mode = os.path.basename(f).split("_")[1]   # mo_<mode>_s<seed>.json
+        by[mode].append(json.load(open(f)))
+    return by
+
+
+def fig_summary():
+    by = _main_runs()
+    if not by:
+        print("skip summary (no main data yet)"); return
+    modes = [("projoracle", "proj+oracle (ceiling)", METHOD_COLORS["proj_oracle"]),
+             ("online", "projection + online readout", METHOD_COLORS["online"]),
+             ("frozenpca", "spike + frozen PCA", METHOD_COLORS["frozen_pca"]),
+             ("spikeoracle", "spike + oracle", METHOD_COLORS["spike_oracle"])]
+    modes = [m for m in modes if by.get(m[0])]
+    fig, ax = plt.subplots(figsize=(7.2, 3.6)); _faint_ygrid(ax)
+    x = np.arange(len(SNRS)); w = 0.8 / len(modes)
+    for j, (mk, lab, col) in enumerate(modes):
+        means, ses = [], []
+        for s in SNRS:
+            vals = [c["r2_final"] for r in by[mk] for c in r["conditions"] if round(c["snr_target"]) == s]
+            means.append(np.mean(vals) if vals else np.nan)
+            ses.append((np.std(vals) / np.sqrt(len(vals))) if len(vals) > 1 else 0.0)
+        ax.bar(x + (j - (len(modes)-1)/2) * w, means, w, yerr=ses, capsize=2,
+               color=col, edgecolor="none", label=lab)
+    ax.set_xticks(x); ax.set_xticklabels([f"{s} dB" for s in SNRS]); ax.set_ylim(0, 1.05)
+    ax.set_ylabel("filtered latent $R^2$"); ax.set_xlabel("SNR")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+    ax.set_title("Latent recovery across SNR (the gain is largest at low SNR)")
+    fig.savefig(os.path.join(FIGS, "summary.pdf")); plt.close(fig)
+
+
+# ---------- Figure B: online convergence over the stream, per SNR (C2) ----------
+def fig_curves():
+    by = _main_runs()
+    if not by.get("online"):
+        print("skip curves (no main online data yet)"); return
+    fig, ax = plt.subplots(figsize=(6.0, 3.6)); _faint_ygrid(ax)
+    for s in SNRS:
+        curves = []
+        for r in by["online"]:
+            for c in r["conditions"]:
+                if round(c["snr_target"]) == s and c.get("log"):
+                    curves.append((np.array(c["log"]["step"]), np.array(c["log"]["r2"])))
+        if not curves:
+            continue
+        steps = curves[0][0]
+        m = np.nanmean([c[1] for c in curves], axis=0)
+        ax.plot(steps, m, color=SNR_COL[s], label=f"{s} dB")
+    ax.set_xlabel("stream position (bins)"); ax.set_ylabel("aligned latent $R^2$")
+    ax.set_ylim(-0.05, 1.0); ax.legend(title="SNR", loc="lower right")
+    ax.set_title("Online readout converges over the stream (slower / lower at low SNR)")
+    fig.savefig(os.path.join(FIGS, "curves.pdf")); plt.close(fig)
+
+
 if __name__ == "__main__":
-    fig_readout_stability(); fig_tau(); fig_timing()
-    print("wrote:", ", ".join(sorted(os.listdir(FIGS))))
+    for fn in (fig_readout_stability, fig_tau, fig_timing, fig_summary, fig_curves):
+        try:
+            fn()
+        except Exception as e:
+            print(f"{fn.__name__}: {e}")
+    print("wrote:", ", ".join(sorted(p for p in os.listdir(FIGS) if p.endswith(".pdf"))))
