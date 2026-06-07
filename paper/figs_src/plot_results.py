@@ -55,10 +55,11 @@ def _faint_ygrid(ax):
     ax.yaxis.grid(True, color="0.85", lw=0.6, zorder=0); ax.set_axisbelow(True)
 
 
-def _bar_labels(ax, bars, fmt="%.2f"):
-    for b in bars:
+def _bar_labels(ax, bars, errs=None, fmt="%.2f"):
+    for i, b in enumerate(bars):
         h = b.get_height()
-        ax.text(b.get_x() + b.get_width() / 2, h + 0.012, fmt % h, ha="center", va="bottom",
+        off = (errs[i] if errs is not None else 0.0) + 0.025   # clear the error bar
+        ax.text(b.get_x() + b.get_width() / 2, h + off, fmt % h, ha="center", va="bottom",
                 fontsize=7.5, color=INK)
 
 
@@ -82,7 +83,7 @@ def fig_readout_stability():
                 color=PALETTE["blue"], edgecolor="none", label="one-step $R^2$")
     b2 = ax.bar(x + w/2, [m for m, _ in kau], w, yerr=[e for _, e in kau], capsize=2.5,
                 color=PALETTE["amber"], edgecolor="none", label="$k$-step forecast $R^2$ (AUC)")
-    _bar_labels(ax, b1); _bar_labels(ax, b2)
+    _bar_labels(ax, b1, [e for _, e in one]); _bar_labels(ax, b2, [e for _, e in kau])
     ax.set_xticks(x); ax.set_xticklabels([l for _, l in arms])
     ax.set_ylim(0, 1.05); ax.set_ylabel("$R^2$")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2)

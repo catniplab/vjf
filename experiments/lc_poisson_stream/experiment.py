@@ -371,6 +371,9 @@ def run_condition(z, cal, n_neurons, cfg, device):
         "per_bin_max_ms": float(np.max(bin_ms)) if bin_ms else None,
         "per_bin_refresh_p95_ms": float(np.percentile(refresh_ms, 95)) if refresh_ms else None,
         "per_bin_ordinary_p95_ms": float(np.percentile(ord_ms, 95)) if ord_ms else None,
+        "timing_sample_ms": (np.random.default_rng(0).choice(
+            np.asarray(bin_ms), size=min(len(bin_ms), 8000), replace=False).tolist()
+            if cfg.get("dump_timing") and bin_ms else None),  # for a violin/box (E5)
         "n_filter_steps": int(n_filter),
         "log": {k: np.asarray(v).tolist() for k, v in log.items()},
         "_mu": mu_all, "_z": z, "_A": A, "_c": c, "_model": model,
@@ -639,6 +642,8 @@ def main():
     ap.add_argument("--snr", type=float, default=None,
                     help="run a single SNR condition (dB); picks the matching population size")
     ap.add_argument("--seed", type=int, default=None, help="override cfg['seed']")
+    ap.add_argument("--dump-timing", action="store_true",
+                    help="save a downsampled per-bin latency sample (for a violin/box plot)")
     ap.add_argument("--quick", action="store_true", help="tiny smoke test")
     args = ap.parse_args()
     global RESULTS
@@ -699,6 +704,7 @@ def main():
         cfg["proj_refresh_K"] = args.refresh_K
     if args.seed is not None:
         cfg["seed"] = args.seed
+    cfg["dump_timing"] = bool(args.dump_timing)
     if args.snr is not None:                       # single SNR condition (for sharding sweeps)
         cfg["conditions"] = [c for c in cfg["conditions"] if abs(c[1] - args.snr) < 1e-6]
         if not cfg["conditions"]:
