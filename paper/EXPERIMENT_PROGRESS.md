@@ -12,7 +12,7 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 | exp | condition | VM | commit | seed(s) | status | wall | results path | key numbers |
 |-----|-----------|----|--------|---------|--------|------|--------------|-------------|
 | E0  | instrumentation (drift logging) | - | 491d77c | - | **code done** (maybe_refresh returns drift metrics) | - | - | equivariance unit-tested |
-| E1  | C3 causal: 7 arms (oracle/online±track/imposed±track/frozen/freeze) | exp-20260605-171155-vjf-e1 | 7c8b585 | 20260605..12 (8) | **running** (launched 16:17 UTC, ~10h) | - | results_e1/ | 8 seeds x 7 arms; early arm-set ~1.3h |
+| E1  | readout stability (kept arms: oracle/online/frozen-pca/freeze-after) | exp-...-vjf-e1 (deleted) | 7c8b585 | 20260605..12 (8) | **DONE** (56/56 pulled) | ~6.7h | gcp_runs/exp-20260605-171155-vjf-e1/results | high-SNR onestep/kAUC: oracle .97/.95, frozenPCA .97/.82, freeze-after .72/.63, online .69/.30. **flow-rotation refuted (online_track==online_base; real drift 0.6deg cumulative); imposed control collapsed. Arms online_track/oracle_imposed* DROPPED.** |
 | E5  | C5 timing | (from E2/E3 uncontended serial runs) | 1fc65e6 | - | covered (p50/p95/max + refresh-vs-ordinary in summary.json) | - | - | no separate VM needed |
 | E2  | K sweep {250,1000,4000,1e5} x 5 SNR | exp-20260605-192841-vjf-e2 | 1fc65e6 | 20260602 | **running** (launched 19:29 UTC, ~2-3h) | - | results/e2_K*/ | per-bin percentiles included (E5) |
 | E3  | tau {1,2,4,8,16,32} x 5 SNR, online + oracle ctrl | exp-20260605-192819-vjf-e3 | 1fc65e6 | 20260602 | **running** (launched 19:28 UTC, ~6h) | - | results/e3_*/ | rate corr + filtered R^2 vs tau |
