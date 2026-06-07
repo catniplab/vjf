@@ -259,13 +259,19 @@ def fig_timescales():
     # --- (3) micro: per-bin loop + EMA memory tau ---
     c = axes[2]
     c.add_patch(plt.Rectangle((0, 0.45), 1, 0.18, fc="#eef1f4", ec=INK, lw=0.8))
-    for xb in np.linspace(0.05, 0.95, 19):
-        c.add_patch(FancyArrowPatch((xb, 0.63), (xb, 0.71), arrowstyle="-|>", mutation_scale=5, color=PALETTE["blue"], lw=0.9))
-    xs = np.linspace(0.05, 0.45, 100)
-    c.plot(xs, 0.50 + 0.12 * np.exp(-(xs.max() - xs) / 0.10), color=PALETTE["mauve"], lw=1.6)
-    c.annotate("", xy=(0.25, 0.30), xytext=(0.05, 0.30), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
-    c.text(0.15, 0.16, r"$\tau$ (EMA memory)", ha="center", fontsize=8, color=PALETTE["mauve"])
-    c.text(0.5, 0.9, "fast inner loop: filter + dynamics every bin; feature EMA memory $\\sim\\tau$ bins",
+    bins = np.linspace(0.05, 0.95, 19)
+    x_now = bins[12]
+    for xb in bins:                                   # per-bin steps; the current bin highlighted
+        cur = abs(xb - x_now) < 1e-6
+        c.add_patch(FancyArrowPatch((xb, 0.63), (xb, 0.71), arrowstyle="-|>",
+                    mutation_scale=7 if cur else 5, color=INK if cur else PALETTE["blue"], lw=1.6 if cur else 0.9))
+    c.text(x_now, 0.80, "now (bin $t$)", ha="center", fontsize=7.5, color=INK)
+    tau_w = 0.09                                       # EMA weight decays into the PAST, peaks at now
+    xs = np.linspace(x_now - 0.30, x_now, 120)
+    c.plot(xs, 0.50 + 0.10 * np.exp(-(x_now - xs) / tau_w), color=PALETTE["mauve"], lw=1.6)
+    c.annotate("", xy=(x_now, 0.30), xytext=(x_now - 0.12, 0.30), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
+    c.text(x_now - 0.06, 0.15, r"$\tau$ (EMA memory:" "\n" r"past $\sim\tau$ bins)", ha="center", fontsize=7.5, color=PALETTE["mauve"])
+    c.text(0.5, 0.93, "fast inner loop: filter + dynamics every bin; feature EMA memory $\\sim\\tau$ bins",
            ha="center", fontsize=8, color=PALETTE["blue"])
 
     # zoom connectors macro->meso (around mid) and meso->micro (around a refresh)
