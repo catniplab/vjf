@@ -1,5 +1,7 @@
 # Experiment plan (v5): low-SNR is where the contributions matter
 
+Method name (locked): **sVJF** (stable VJF). LaTeX macro `\svjf`.
+
 Major revision after the E1 results. The originally hypothesized mechanism (high-SNR shortfall
 caused by a rotating latent frame, fixable by rotating the RBF flow) is **refuted by the data and
 dropped**, along with that experiment (the flow-tracking and imposed-rotation arms). The honest,

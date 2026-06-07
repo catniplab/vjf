@@ -1,4 +1,8 @@
-# IMPL: real-time online VJF framework + tutorial + tech report
+# IMPL: sVJF (stable VJF) - real-time online framework + tutorial + tech report
+
+Method name (locked): **sVJF** = *stable variational joint filtering* -- VJF made stable for long
+real-time low-SNR streams with an unknown readout via (i) square-root RLS dynamics, (ii) a
+warm-started two-timescale online readout, and (iii) a projection encoder. LaTeX: `\svjf`.
 
 Branch `feat/realtime-framework` off `master`. Plan:
 `~/.claude/plans/jolly-twirling-sifakis.md`. Each unit is `/codex-review`'d before commit.
