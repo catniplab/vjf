@@ -231,16 +231,19 @@ def fig_timescales():
         for sp in ax.spines.values():
             sp.set_visible(False)
 
-    # --- (1) macro: the full stream, warm-up W then online learning ---
+    # --- (1) macro: never-ending real-time stream, warm-up W then ongoing online learning ---
     a = axes[0]
-    a.add_patch(plt.Rectangle((0, 0.35), 1, 0.3, fc="#eef1f4", ec=INK, lw=0.8))
-    Wf = 0.12
+    xend, Wf = 0.90, 0.12
+    a.add_patch(plt.Rectangle((0, 0.35), xend, 0.3, fc="#eef1f4", ec="none"))
     a.add_patch(plt.Rectangle((0, 0.35), Wf, 0.3, fc=PALETTE["amber"], alpha=0.5, ec="none"))
-    a.axvline(Wf, 0.30, 0.70, color=INK, lw=1, ls="--")
-    a.text(Wf/2, 0.5, "warm-up $W$\n(dynamics frozen,\nreadout settling)", ha="center", va="center", fontsize=7.5)
-    a.text((Wf+1)/2, 0.5, "online learning (state + dynamics every bin; readout every $K$)", ha="center", va="center", fontsize=8)
-    a.annotate("", xy=(1, 0.78), xytext=(0, 0.78), arrowprops=dict(arrowstyle="<->", color=INK, lw=0.8))
-    a.text(0.5, 0.84, "full stream  $T$  (e.g. $2\\times10^5$ bins = 1000 s at 5 ms)", ha="center", fontsize=8)
+    a.plot([0, 0, xend], [0.35, 0.65, 0.65], color=INK, lw=0.8)   # left + top edges
+    a.plot([0, xend], [0.35, 0.35], color=INK, lw=0.8)            # bottom edge (right stays open)
+    a.axvline(Wf, ymin=0.35, ymax=0.65, color=INK, lw=1, ls="--")
+    a.text(Wf/2, 0.5, "warm-up\n$W$", ha="center", va="center", fontsize=8)
+    a.text((Wf+xend)/2, 0.5, "online learning  (per-bin filter + dynamics; readout every $K$)",
+           ha="center", va="center", fontsize=8)
+    a.annotate("", xy=(1.0, 0.5), xytext=(xend, 0.5), arrowprops=dict(arrowstyle="-|>", color=INK, lw=1.2))
+    a.text((xend + 1) / 2, 0.7, r"$\cdots$ ongoing (real time)", ha="center", va="center", fontsize=8)
     a.set_title("Three timescales of sVJF", fontsize=11, loc="left")
 
     # --- (2) meso: readout refresh every K (slow outer loop) ---
