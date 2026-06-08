@@ -403,7 +403,7 @@ mean $\pm$ s.e. We sweep the smoothing $\tau\in\{1,2,4,8,16,32\}$ across all fiv
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.78\textwidth]{figs/raster.pdf}
+\includegraphics[width=0.8\textwidth]{figs/raster.pdf}
 \caption{Example input across the five SNR conditions. \textbf{Top:} the single latent trajectory
 $\vx_t$ (both coordinates) that every population observes --- the dynamics are identical, only the
 number of neurons (hence the state SNR) differs. \textbf{Below:} $3$\,s spike rasters, one panel
@@ -515,7 +515,7 @@ overhead that inflates the tail without lowering the median.)
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.78\textwidth]{figs/summary.pdf}
+\includegraphics[width=\textwidth]{figs/summary.pdf}
 \caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.;
 $3$ seeds, frozen PCA $2$), grouped by SNR. Projection$+$oracle (the ceiling) dominates;
 projection$+$online stays closest to that ceiling at low SNR and clears the no-oracle references,
@@ -563,7 +563,7 @@ through lag.}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.7\textwidth]{figs/timing.pdf}
+\includegraphics[width=0.72\textwidth]{figs/timing.pdf}
 \caption{Per-bin wall time of the online method (box $=$ interquartile range, line $=$ median,
 whiskers $=$ 5--95\% over $800$ sampled bins), per SNR, on one core of an e2-standard-4. The
 median sits near $\sim2.8$\,ms --- inside the $5$\,ms bin budget --- at every SNR; the lone
@@ -643,7 +643,7 @@ viable alternative.
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=0.72\textwidth]{figs/flow.pdf}
+\includegraphics[width=\textwidth]{figs/flow.pdf}
 \caption{Flow-learner convergence with the readout fixed at the oracle (filtered and one-step
 prediction $R^2$ vs.\ stream position, early stream; mean $\pm$ s.e., 5 seeds). Square-root RLS
 (sVJF) converges fastest early and stays stable; SGD starts slower but catches up to a marginally

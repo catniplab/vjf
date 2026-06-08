@@ -38,14 +38,26 @@ METHOD_COLORS = {
     "online": PALETTE["blue"], "online_base": PALETTE["blue"],
     "spike_oracle": PALETTE["mauve"], "spikeoracle": PALETTE["mauve"],
 }
+# Render each figure at its TRUE on-page size so the body font (below) renders identically
+# across all figures: figsize width = frac * TEXTWIDTH and the .tex includes it at frac\textwidth
+# (scale 1.0). We therefore do NOT use savefig.bbox='tight' (which would re-trim and break the
+# scale); constrained_layout fits content/legends inside the fixed outer size instead.
+TEXTWIDTH_IN = 426.79 / 72.27        # \the\textwidth of the catniplab[preprint] class = 5.906 in
+
+
+def FW(frac):                         # figure width in inches for an include at frac*\textwidth
+    return frac * TEXTWIDTH_IN
+
+
 plt.rcParams.update({
     "pdf.fonttype": 42, "ps.fonttype": 42,
-    "font.size": 10, "axes.titlesize": 11, "axes.labelsize": 11,
-    "xtick.labelsize": 9, "ytick.labelsize": 9, "legend.fontsize": 8.5,
+    "font.size": 9, "axes.titlesize": 9.5, "axes.labelsize": 9.5,
+    "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8,
     "axes.spines.top": False, "axes.spines.right": False,
     "axes.edgecolor": INK, "axes.labelcolor": INK, "text.color": INK,
     "xtick.color": INK, "ytick.color": INK, "axes.titlecolor": INK,
-    "lines.linewidth": 1.8, "savefig.bbox": "tight", "legend.frameon": False,
+    "lines.linewidth": 1.6, "legend.frameon": False,
+    "figure.constrained_layout.use": True,
 })
 SNRS = [-3, 0, 3, 6, 8]
 # muted sequential for ordered SNR (cividis: colorblind-safe, blue->gold, no green/red)
@@ -128,7 +140,7 @@ def fig_readout_stability():
     if not hi:
         print("skip readout_stability (no e1 data)"); return
     cols = [("high SNR (8 dB)", hi)] + ([("low SNR (0 dB)", lo)] if lo else [])
-    fig, axes = plt.subplots(2, len(cols), figsize=(4.9 * len(cols), 5.7), squeeze=False)
+    fig, axes = plt.subplots(2, len(cols), figsize=(FW(1.0), 5.0), squeeze=False)
     for j, (ttl, by) in enumerate(cols):
         arms = [a for a in ARMS if by.get(a[0])]
         _bars(axes[0][j], by, arms, lambda r: r["onestep_r2"],
@@ -141,8 +153,7 @@ def fig_readout_stability():
     sec = axes[1][-1].secondary_yaxis("right", functions=(lambda s: s / CYC_S, lambda c: c * CYC_S))
     sec.set_ylabel("periods (this example)")
     fig.suptitle("Lock the readout once converged at high SNR (forecast horizon "
-                 r"$\to$ oracle); keep adapting at low SNR", y=0.995, fontsize=10.5)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+                 r"$\to$ oracle); keep adapting at low SNR")
     fig.savefig(os.path.join(FIGS, "readout_stability.pdf")); plt.close(fig)
 
 
@@ -153,7 +164,7 @@ def fig_kstep_curves():
     if not hi:
         print("skip kstep_curves (no e1 data)"); return
     cols = [("high SNR (8 dB)", hi)] + ([("low SNR (0 dB)", lo)] if lo else [])
-    fig, axes = plt.subplots(1, len(cols), figsize=(4.9 * len(cols), 3.6),
+    fig, axes = plt.subplots(1, len(cols), figsize=(FW(1.0), 2.9),
                              sharey=True, squeeze=False)
     x = np.arange(1, KCAP + 1) * DT
     for j, (ttl, by) in enumerate(cols):
@@ -175,10 +186,10 @@ def fig_kstep_curves():
             sec.set_xlabel("periods (this example)")
         if j == 0:
             ax.set_ylabel("free-run forecast $R^2$")
-    axes[0][-1].legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), title="readout")
+    _h, _l = axes[0][0].get_legend_handles_labels()
+    fig.legend(_h, _l, loc="outside right upper", title="readout")
     fig.suptitle(r"$k$-step free-run forecast skill ($\bullet$ = horizon, where $R^2$ drops "
-                 r"below half the filtering accuracy)", y=1.04, fontsize=10)
-    fig.tight_layout()
+                 r"below half the filtering accuracy)")
     fig.savefig(os.path.join(FIGS, "kstep_curves.pdf")); plt.close(fig)
 
 
@@ -194,7 +205,7 @@ def fig_motivation():
                ("orig_oracleC_sgd", "orig.\\ VJF: oracle $C$, SGD", PALETTE["olive"]),
                ("svjf", "sVJF (ours)", PALETTE["blue"])]
     methods = [m for m in methods if m[0] in d]
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 3.7), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(FW(1.0), 2.7), sharex=True, sharey=True)
     for key, lab, col in methods:
         e = d[key]; x = np.asarray(e["step"])
         for ax, fld in ((axes[0], "r2_filt"), (axes[1], "r2_onestep")):
@@ -207,10 +218,9 @@ def fig_motivation():
         ax.set_xlabel("stream position (time steps, 5\\,ms bins)")
         ax.set_ylim(-0.18, 1.0); ax.set_title(ttl)
     axes[0].set_ylabel("$R^2$ (best affine)")
-    axes[1].legend(loc="lower right", fontsize=8, ncol=1)
+    axes[1].legend(loc="lower right", ncol=1)
     fig.suptitle("Original VJF needs the right readout to converge online; sVJF reaches it from spikes "
-                 "(mean $\\pm$ s.e., 5 seeds)", y=1.02, fontsize=10.5)
-    fig.tight_layout()
+                 "(mean $\\pm$ s.e., 5 seeds)")
     fig.savefig(os.path.join(FIGS, "motivation.pdf")); plt.close(fig)
 
 
@@ -225,7 +235,7 @@ def fig_flow():
             ("adam", "Adam flow", PALETTE["amber"]),
             ("rls", "plain RLS", PALETTE["mauve"])]
     arms = [a for a in arms if a[0] in d]
-    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.6), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(FW(1.0), 2.6), sharex=True, sharey=True)
     x = np.asarray(d["srrls"]["step"])
     for key, lab, col in arms:
         for ax, fld in ((axes[0], "r2_filt"), (axes[1], "r2_onestep")):
@@ -243,10 +253,9 @@ def fig_flow():
         ax.set_xlim(x[0], min(9000, x[-1])); ax.set_title(ttl)   # zoom on the convergence/crossover
     axes[0].set_ylabel("$R^2$ (best affine)")
     axes[0].text(x[0], -0.26, "plain RLS diverges (off scale)", fontsize=7, color=PALETTE["mauve"])
-    axes[1].legend(loc="lower right", fontsize=8)
+    axes[1].legend(loc="lower right")
     fig.suptitle("Flow learner, readout fixed at oracle (early stream; stable arms stay flat to 60k): "
-                 "square-root RLS leads early, plain RLS diverges", y=1.02, fontsize=9.5)
-    fig.tight_layout()
+                 "square-root RLS leads early, plain RLS diverges")
     fig.savefig(os.path.join(FIGS, "flow.pdf")); plt.close(fig)
 
 
@@ -271,7 +280,7 @@ def fig_readout_snr():
     snrs = sorted(by)
     if len(snrs) < 4:
         print(f"skip readout_snr (only {len(snrs)} SNR present)"); return
-    fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.2))   # match fig_tau aesthetics/size
+    fig, axes = plt.subplots(1, 2, figsize=(FW(1.0), 2.7))
     for a, lab in ARMS:
         lab = lab.replace("\n", " ")
         m1, e1, mh, eh, cens = [], [], [], [], []
@@ -294,8 +303,8 @@ def fig_readout_snr():
         _faint_ygrid(ax); ax.set_xlabel("SNR (dB)"); ax.set_xticks(snrs)
         ax.set_ylabel(yl); ax.set_ylim(*ylim); ax.set_title(ttl)
     axes[1].axhline(CAP_S, ls="--", lw=0.8, color="0.55")
-    axes[1].legend(title="readout", loc="upper left", fontsize=8, title_fontsize=8)
-    fig.suptitle("Readout schedule across SNR: adapt at low SNR, lock once converged at high SNR", y=1.02)
+    axes[1].legend(title="readout", loc="upper left", title_fontsize=8)
+    fig.suptitle("Readout schedule across SNR: adapt at low SNR, lock once converged at high SNR")
     fig.savefig(os.path.join(FIGS, "readout_snr.pdf")); plt.close(fig)
 
 
@@ -309,7 +318,7 @@ def fig_raster():
     z = syn.limit_cycle(T, dt=dt, angular_velocity=30.0, seed=seed)  # SAME latent for all panels
     t = np.arange(T) * dt
     conds = [(15, -3), (30, 0), (50, 3), (150, 6), (250, 8)]
-    fig = plt.figure(figsize=(7.0, 9.0))
+    fig = plt.figure(figsize=(FW(0.8), 7.6))
     gs = fig.add_gridspec(len(conds) + 1, 1, height_ratios=[55] + [n for n, _ in conds], hspace=0.15)
     # top: the single shared latent trajectory every population observes
     az = fig.add_subplot(gs[0])
@@ -350,7 +359,7 @@ def fig_tau():
         for s in SNRS:
             rate[s].append(by[s]["rate_corr"] if s in by else np.nan)
             r2[s].append(by[s]["r2_final"] if s in by else np.nan)
-    fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.2))
+    fig, axes = plt.subplots(1, 2, figsize=(FW(1.0), 2.7))
     for s in SNRS:
         axes[0].plot(taus, rate[s], "o-", color=SNR_COL[s], ms=4)
         axes[1].plot(taus, r2[s], "o-", color=SNR_COL[s], ms=4, label=f"{s} dB")
@@ -358,8 +367,9 @@ def fig_tau():
         _faint_ygrid(ax)
         ax.set_xscale("log", base=2); ax.set_xticks(taus); ax.set_xticklabels(taus)
         ax.set_xlabel(r"smoothing $\tau$ (bins)"); ax.set_ylabel(yl); ax.set_ylim(0, 1.0); ax.set_title(ttl)
-    axes[1].legend(title="SNR", loc="upper left", bbox_to_anchor=(1.02, 1.0))
-    fig.suptitle(r"Smoothing helps most at low SNR; over-smoothing ($\tau\gtrsim16$) hurts (lag)", y=1.02)
+    _h, _l = axes[1].get_legend_handles_labels()
+    fig.legend(_h, _l, loc="outside right upper", title="SNR")
+    fig.suptitle(r"Smoothing helps most at low SNR; the optimal $\tau$ grows with SNR")
     fig.savefig(os.path.join(FIGS, "tau_sweep.pdf")); plt.close(fig)
 
 
@@ -371,7 +381,7 @@ def fig_timing():
     d = sorted(json.load(open(f))["conditions"], key=lambda c: c["snr_target"])
     samples = [np.asarray(c.get("timing_sample_ms") or []) for c in d]
     labels = [f"{round(c['snr_target'])} dB\n(n={c['n_neurons']})" for c in d]
-    fig, ax = plt.subplots(figsize=(6.2, 3.4)); _faint_ygrid(ax)
+    fig, ax = plt.subplots(figsize=(FW(0.72), 3.0)); _faint_ygrid(ax)
     pos = np.arange(1, len(d) + 1)
     # box = IQR, line = median, whiskers = 5-95% -- the bulk dominates; rare host-jitter
     # excursions are not given equal visual weight (they live in the upper whisker only).
@@ -410,7 +420,7 @@ def fig_summary():
              ("frozenpca", "spike + frozen PCA", METHOD_COLORS["frozen_pca"]),
              ("spikeoracle", "spike + oracle", METHOD_COLORS["spike_oracle"])]
     modes = [m for m in modes if by.get(m[0])]
-    fig, ax = plt.subplots(figsize=(7.2, 3.6)); _faint_ygrid(ax)
+    fig, ax = plt.subplots(figsize=(FW(1.0), 3.0)); _faint_ygrid(ax)
     x = np.arange(len(SNRS)); w = 0.8 / len(modes)
     for j, (mk, lab, col) in enumerate(modes):
         means, ses = [], []
@@ -422,7 +432,8 @@ def fig_summary():
                color=col, edgecolor="none", label=lab)
     ax.set_xticks(x); ax.set_xticklabels([f"{s} dB" for s in SNRS]); ax.set_ylim(0, 1.05)
     ax.set_ylabel("filtered latent $R^2$"); ax.set_xlabel("SNR")
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+    _h, _l = ax.get_legend_handles_labels()
+    fig.legend(_h, _l, loc="outside right upper")
     ax.set_title("Latent recovery across SNR (the gain is largest at low SNR)")
     fig.savefig(os.path.join(FIGS, "summary.pdf")); plt.close(fig)
 
@@ -432,7 +443,7 @@ def fig_curves():
     by = _main_runs()
     if not by.get("online"):
         print("skip curves (no main online data yet)"); return
-    fig, ax = plt.subplots(figsize=(6.0, 3.6)); _faint_ygrid(ax)
+    fig, ax = plt.subplots(figsize=(FW(0.66), 3.0)); _faint_ygrid(ax)
     for s in SNRS:
         curves = []
         for r in by["online"]:
@@ -453,7 +464,7 @@ def fig_curves():
 # ---------- Figure: conceptual timescales (W, K, tau) ----------
 def fig_timescales():
     from matplotlib.patches import ConnectionPatch, FancyArrowPatch
-    fig, axes = plt.subplots(3, 1, figsize=(6.6, 4.8))
+    fig, axes = plt.subplots(3, 1, figsize=(FW(0.9), 4.4), layout="none")  # manual schematic; keep connectors fixed
     for ax in axes:
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_yticks([]); ax.set_xticks([])
         for sp in ax.spines.values():
