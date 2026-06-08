@@ -24,6 +24,8 @@
 \newcommand{\svjflong}{stable variational joint filtering}
 % placeholder for numbers to be filled from the staged result JSONs (visible if shipped by mistake)
 \newcommand{\TD}[1]{\textbf{[?\,#1]}}
+% gray-out for table rows that use the oracle readout (not achievable online)
+\newcommand{\cgray}[1]{\textcolor{black!50}{#1}}
 
 \addbibresource{references.bib}
 
@@ -413,8 +415,9 @@ the smoothing, and \cref{fig:timing} the real-time cost.
 \centering
 \caption{Filtered-latent $R^2$ (best affine image of the posterior mean vs.\ truth) across the
 five SNR conditions; table values are means over paired seeds ($3$ seeds; frozen PCA $2$). The
-ceiling is projection$+$oracle; \textbf{bold} marks the best \emph{achievable} (no oracle readout)
-method per SNR. Projection$+$online comes closest to its own-encoder ceiling at low SNR (within
+oracle-readout rows (\cgray{gray}) use the true loading $\vC$ and are not achievable online;
+\textbf{bold} marks the best \emph{achievable} (no-oracle) method per SNR. Projection$+$online comes
+closest to its own-encoder ceiling at low SNR (within
 $0.02$ of projection$+$oracle at $0$\,dB) and clears both no-oracle references there; at high SNR
 the gap to the ceiling widens and a frozen-PCA readout is already near-oracle.}
 \label{tab:r2}
@@ -422,10 +425,10 @@ the gap to the ceiling widens and a frozen-PCA readout is already near-oracle.}
 \toprule
 recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
-projection enc., oracle $\vC$ (ceiling)      & 0.51 & 0.74 & 0.86 & 0.94 & 0.96\\
+\cgray{projection enc., oracle $\vC$ (ceiling)}      & \cgray{0.51} & \cgray{0.74} & \cgray{0.86} & \cgray{0.94} & \cgray{0.96}\\
 projection enc., online readout ($\tau{=}8$) & \textbf{0.39} & \textbf{0.72} & \textbf{0.84} & \textbf{0.86} & 0.85\\
-spike enc., oracle $\vC$ (raw-spike bound) & 0.34 & 0.52 & 0.69 & 0.83 & 0.90\\
-spike enc., frozen PCA                        & 0.32 & 0.55 & 0.71 & \textbf{0.86} & \textbf{0.92}\\
+\cgray{raw-spike enc., oracle $\vC$}          & \cgray{0.34} & \cgray{0.52} & \cgray{0.69} & \cgray{0.83} & \cgray{0.90}\\
+raw-spike enc., frozen PCA                    & 0.32 & 0.55 & 0.71 & \textbf{0.86} & \textbf{0.92}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -436,16 +439,18 @@ spike enc., frozen PCA                        & 0.32 & 0.55 & 0.71 & \textbf{0.8
 mean over paired seeds ($3$ seeds, frozen PCA $2$). With the \emph{oracle} readout the projection
 encoder lifts one-step prediction sharply at mid SNR ($0.84$ vs.\ $0.59$ at $3$\,dB); at $-3$\,dB
 one-step prediction is near the floor for all methods. The smoothed online readout ($\tau{=}8$)
-trades a little one-step accuracy for rate fidelity (\cref{fig:tau}).}
+trades a little one-step accuracy for rate fidelity (\cref{fig:tau}). Conventions as in
+\cref{tab:r2}: oracle-readout rows (\cgray{gray}) are not achievable online, and \textbf{bold} marks
+the best achievable method per SNR --- here the frozen-PCA readout, except at $3$\,dB.}
 \label{tab:onestep}
 \begin{tabular}{lccccc}
 \toprule
 recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
-projection enc., oracle $\vC$ (ceiling)      & 0.10 & 0.49 & 0.84 & 0.95 & 0.97\\
-projection enc., online readout ($\tau{=}8$) & 0.02 & 0.30 & 0.61 & 0.70 & 0.71\\
-spike enc., oracle $\vC$ (raw-spike bound) & 0.10 & 0.31 & 0.59 & 0.83 & 0.92\\
-spike enc., frozen PCA                        & 0.08 & 0.31 & 0.60 & 0.87 & 0.93\\
+\cgray{projection enc., oracle $\vC$ (ceiling)}      & \cgray{0.10} & \cgray{0.49} & \cgray{0.84} & \cgray{0.95} & \cgray{0.97}\\
+projection enc., online readout ($\tau{=}8$) & 0.02 & 0.30 & \textbf{0.61} & 0.70 & 0.71\\
+\cgray{raw-spike enc., oracle $\vC$}          & \cgray{0.10} & \cgray{0.31} & \cgray{0.59} & \cgray{0.83} & \cgray{0.92}\\
+raw-spike enc., frozen PCA                    & \textbf{0.08} & \textbf{0.31} & 0.60 & \textbf{0.87} & \textbf{0.93}\\
 \bottomrule
 \end{tabular}
 \end{table}
