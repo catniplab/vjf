@@ -187,7 +187,7 @@ def fig_kstep_curves():
         if j == 0:
             ax.set_ylabel("free-run forecast $R^2$")
     _h, _l = axes[0][0].get_legend_handles_labels()
-    fig.legend(_h, _l, loc="outside right upper", title="readout")
+    fig.legend(_h, _l, loc="outside right center", title="readout")
     fig.suptitle(r"$k$-step free-run forecast skill ($\bullet$ = horizon, where $R^2$ drops "
                  r"below half the filtering accuracy)")
     fig.savefig(os.path.join(FIGS, "kstep_curves.pdf")); plt.close(fig)
@@ -199,10 +199,10 @@ def fig_motivation():
     if not os.path.exists(f):
         print("skip motivation (no motivation_compare data)"); return
     d = json.load(open(f))
-    methods = [("orig_randC_adam", "orig.\\ VJF: random $C$, Adam", PALETTE["mauve"]),
-               ("orig_randC_sgd", "orig.\\ VJF: random $C$, SGD", PALETTE["slate"]),
-               ("orig_oracleC_adam", "orig.\\ VJF: oracle $C$, Adam", PALETTE["amber"]),
-               ("orig_oracleC_sgd", "orig.\\ VJF: oracle $C$, SGD", PALETTE["olive"]),
+    methods = [("orig_randC_adam", "orig. VJF: random $C$, Adam", PALETTE["mauve"]),
+               ("orig_randC_sgd", "orig. VJF: random $C$, SGD", PALETTE["slate"]),
+               ("orig_oracleC_adam", "orig. VJF: oracle $C$, Adam", PALETTE["amber"]),
+               ("orig_oracleC_sgd", "orig. VJF: oracle $C$, SGD", PALETTE["olive"]),
                ("svjf", "sVJF (ours)", PALETTE["blue"])]
     methods = [m for m in methods if m[0] in d]
     fig, axes = plt.subplots(1, 2, figsize=(FW(1.0), 2.7), sharex=True, sharey=True)
@@ -215,10 +215,11 @@ def fig_motivation():
             ax.fill_between(x, m - se, m + se, color=col, alpha=0.15, lw=0)
     for ax, ttl in ((axes[0], "filtered-latent $R^2$"), (axes[1], "one-step prediction $R^2$")):
         _faint_ygrid(ax); ax.axhline(0, lw=0.6, color="0.6")
-        ax.set_xlabel("stream position (time steps, 5\\,ms bins)")
+        ax.set_xlabel("stream position (time steps, 5 ms bins)")
         ax.set_ylim(-0.18, 1.0); ax.set_title(ttl)
     axes[0].set_ylabel("$R^2$ (best affine)")
-    axes[1].legend(loc="lower right", ncol=1)
+    _h, _l = axes[0].get_legend_handles_labels()
+    fig.legend(_h, _l, loc="outside lower center", ncol=2)
     fig.suptitle("Original VJF needs the right readout to converge online; sVJF reaches it from spikes "
                  "(mean $\\pm$ s.e., 5 seeds)")
     fig.savefig(os.path.join(FIGS, "motivation.pdf")); plt.close(fig)
@@ -249,10 +250,9 @@ def fig_flow():
                 ax.fill_between(x, np.clip(m - se, -0.3, None), m + se, color=col, alpha=0.15, lw=0)
     for ax, ttl in ((axes[0], "filtered-latent $R^2$"), (axes[1], "one-step prediction $R^2$")):
         _faint_ygrid(ax); ax.axhline(0, lw=0.6, color="0.6")
-        ax.set_xlabel("stream position (time steps, 5\\,ms bins)"); ax.set_ylim(-0.3, 1.0)
+        ax.set_xlabel("stream position (time steps, 5 ms bins)"); ax.set_ylim(-0.3, 1.0)
         ax.set_xlim(x[0], min(9000, x[-1])); ax.set_title(ttl)   # zoom on the convergence/crossover
     axes[0].set_ylabel("$R^2$ (best affine)")
-    axes[0].text(x[0], -0.26, "plain RLS diverges (off scale)", fontsize=7, color=PALETTE["mauve"])
     axes[1].legend(loc="lower right")
     fig.suptitle("Flow learner, readout fixed at oracle (early stream; stable arms stay flat to 60k): "
                  "square-root RLS leads early, plain RLS diverges")
@@ -303,7 +303,8 @@ def fig_readout_snr():
         _faint_ygrid(ax); ax.set_xlabel("SNR (dB)"); ax.set_xticks(snrs)
         ax.set_ylabel(yl); ax.set_ylim(*ylim); ax.set_title(ttl)
     axes[1].axhline(CAP_S, ls="--", lw=0.8, color="0.55")
-    axes[1].legend(title="readout", loc="upper left", title_fontsize=8)
+    _h, _l = axes[0].get_legend_handles_labels()
+    fig.legend(_h, _l, loc="outside right center", title="readout", title_fontsize=8)
     fig.suptitle("Readout schedule across SNR: adapt at low SNR, lock once converged at high SNR")
     fig.savefig(os.path.join(FIGS, "readout_snr.pdf")); plt.close(fig)
 
@@ -368,7 +369,7 @@ def fig_tau():
         ax.set_xscale("log", base=2); ax.set_xticks(taus); ax.set_xticklabels(taus)
         ax.set_xlabel(r"smoothing $\tau$ (bins)"); ax.set_ylabel(yl); ax.set_ylim(0, 1.0); ax.set_title(ttl)
     _h, _l = axes[1].get_legend_handles_labels()
-    fig.legend(_h, _l, loc="outside right upper", title="SNR")
+    fig.legend(_h, _l, loc="outside right center", title="SNR")
     fig.suptitle(r"Smoothing helps most at low SNR; the optimal $\tau$ grows with SNR")
     fig.savefig(os.path.join(FIGS, "tau_sweep.pdf")); plt.close(fig)
 
@@ -397,7 +398,7 @@ def fig_timing():
     ax.text(pos[-1] + 0.5, 5.08, "5 ms bin budget", ha="right", va="bottom", fontsize=8, color=INK)
     ax.set_ylim(0, 6.0); ax.set_xlim(0.5, len(d) + 0.5)
     ax.set_xticks(pos); ax.set_xticklabels(labels); ax.set_ylabel("per-bin wall time (ms)")
-    ax.set_title("Real-time per-bin latency (single core, e2-standard-4)\n"
+    ax.set_title("Real-time per-bin latency (single core, Intel Xeon @ 2.20 GHz)\n"
                  "box = IQR, line = median, whiskers = 5-95%")
     fig.savefig(os.path.join(FIGS, "timing.pdf")); plt.close(fig)
 
@@ -433,7 +434,7 @@ def fig_summary():
     ax.set_xticks(x); ax.set_xticklabels([f"{s} dB" for s in SNRS]); ax.set_ylim(0, 1.05)
     ax.set_ylabel("filtered latent $R^2$"); ax.set_xlabel("SNR")
     _h, _l = ax.get_legend_handles_labels()
-    fig.legend(_h, _l, loc="outside right upper")
+    fig.legend(_h, _l, loc="outside right center")
     ax.set_title("Latent recovery across SNR (the gain is largest at low SNR)")
     fig.savefig(os.path.join(FIGS, "summary.pdf")); plt.close(fig)
 
@@ -443,7 +444,7 @@ def fig_curves():
     by = _main_runs()
     if not by.get("online"):
         print("skip curves (no main online data yet)"); return
-    fig, ax = plt.subplots(figsize=(FW(0.66), 3.0)); _faint_ygrid(ax)
+    fig, ax = plt.subplots(figsize=(FW(1.0), 3.0)); _faint_ygrid(ax)
     for s in SNRS:
         curves = []
         for r in by["online"]:
@@ -524,7 +525,7 @@ def fig_timescales():
 
 
 if __name__ == "__main__":
-    for fn in (fig_motivation, fig_flow, fig_timescales, fig_raster, fig_readout_stability,
+    for fn in (fig_motivation, fig_flow, fig_raster, fig_readout_stability,
                fig_readout_snr, fig_kstep_curves, fig_tau, fig_timing, fig_summary, fig_curves):
         try:
             fn()

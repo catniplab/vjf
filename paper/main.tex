@@ -290,12 +290,11 @@ over the long stream: a floor $\sigma^2_{\min}$ on the posterior state variance 
 to zero) and a magnitude bound $B$ on the state (on a non-finite or out-of-bounds mean the
 posterior is reset and the last good mean repeated). The new hyperparameters of the always-online
 loop are exactly $(W,K,\tau,\rho,\sigma^2_{\min},B,c)$ --- with $c$ the feature pseudocount; the
-optional freeze recipe (\cref{ssec:readout}) adds one more, the settling horizon $S$
-(\cref{fig:timescales} sketches the three timescales $W$, $K$, $\tau$). The projection
+optional freeze recipe (\cref{ssec:readout}) adds one more, the settling horizon $S$. The projection
 and readout add $O(nm)$ per step (the same order as the decoder); the total per-step cost also
 includes the recognition network and the square-root-RLS update.
 
-\begin{algorithm}[!ht]
+\begin{algorithm}[!t]
 \caption{\svjf: real-time VJF with projection encoder and decoupled online readout (one pass).}
 \label{alg:rtvjf}
 \begin{algorithmic}[1]
@@ -328,19 +327,6 @@ includes the recognition network and the square-root-RLS update.
 \end{algorithmic}
 \end{algorithm}
 
-\begin{figure}[!ht]
-\centering
-\includegraphics[width=0.9\textwidth]{figs/timescales.pdf}
-\caption{The three timescales of \svjf. \textbf{Top:} the stream is never-ending; after a warm-up
-of $W$ bins the dynamics turn on and online learning continues in real time. \textbf{Middle:} the
-readout is refreshed on a slow outer loop every $K$ bins (CCIPCA $\to$ Procrustes $\to$ write
-$\vC$). \textbf{Bottom:} the fast inner loop runs every bin (filter $+$ dynamics update), and the
-feature EMA \cref{eq:ema} carries a memory of about the past $\tau$ bins. The well-separated
-timescales ($1\!\ll\!\tau\!\ll\!K\!\ll$ stream) are what let the readout adapt without
-destabilizing the dynamics.}
-\label{fig:timescales}
-\end{figure}
-
 \paragraph{Differences from vanilla VJF.} Vanilla VJF (\cref{alg:vjf}) trains \emph{every} parameter by one
 reparameterized ELBO-gradient step. \Cref{alg:rtvjf} changes three of them: the recognition reads
 the projection $\vpi_t$ instead of the raw $\vy_t$; the readout $(\vC,\vb)$ is taken out of the
@@ -353,6 +339,18 @@ state-magnitude guard then make the single step safe to iterate for $10^5$ bins.
 update.
 
 \section{Experiments}\label{sec:exp}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\textwidth]{figs/raster.pdf}
+\caption{Example input across the five SNR conditions. \textbf{Top:} the single latent trajectory
+$\vx_t$ (both coordinates) that every population observes --- the dynamics are identical, only the
+number of neurons (hence the state SNR) differs. \textbf{Below:} $3$\,s spike rasters, one panel
+per condition with height proportional to the population size $n$ ($=15/30/50/150/250$, $\sim
+-3/0/3/6/8$\,dB), neurons sorted by preferred phase. The rotational structure is essentially
+invisible at $n{=}15$ and sharp at $n{=}250$.}
+\label{fig:raster}
+\end{figure}
+
 We use a self-contained synthetic benchmark: a 2-D limit cycle (radius-relaxing, constant angular
 velocity) observed through a sparse log-linear Poisson population, calibrated to biological rates
 (mean $\sim20$\,Hz, peak $\le100$\,Hz at 5\,ms bins). One single-trial stream of $T=200{,}000$
@@ -400,18 +398,6 @@ meaningful when that accuracy is itself low, and, unlike a $k$-averaged skill sc
 shrink as the evaluation length grows. We also report the steady per-bin compute time. Results use
 paired seeds (3 per condition; frozen PCA 2): tables report the seed means, and figures show
 mean $\pm$ s.e. We sweep the smoothing $\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.8\textwidth]{figs/raster.pdf}
-\caption{Example input across the five SNR conditions. \textbf{Top:} the single latent trajectory
-$\vx_t$ (both coordinates) that every population observes --- the dynamics are identical, only the
-number of neurons (hence the state SNR) differs. \textbf{Below:} $3$\,s spike rasters, one panel
-per condition with height proportional to the population size $n$ ($=15/30/50/150/250$, $\sim
--3/0/3/6/8$\,dB), neurons sorted by preferred phase. The rotational structure is essentially
-invisible at $n{=}15$ and sharp at $n{=}250$.}
-\label{fig:raster}
-\end{figure}
 
 \section{Results}\label{sec:results}
 \emph{The projection encoder is a robust, readout-agnostic win; the decoupled online readout
@@ -525,7 +511,7 @@ while at high SNR a frozen PCA is already near-oracle.}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.66\textwidth]{figs/curves.pdf}
+\includegraphics[width=\textwidth]{figs/curves.pdf}
 \caption{Filtered-latent $R^2$ of the projection online readout over the $1000$\,s stream, one
 curve per SNR. Filtering improves over the stream; at high SNR the filtered $R^2$ is still inching
 up at $1000$\,s, but the readout \emph{subspace} has already stabilized, so locking it
@@ -565,7 +551,8 @@ through lag.}
 \centering
 \includegraphics[width=0.72\textwidth]{figs/timing.pdf}
 \caption{Per-bin wall time of the online method (box $=$ interquartile range, line $=$ median,
-whiskers $=$ 5--95\% over $800$ sampled bins), per SNR, on one core of an e2-standard-4. The
+whiskers $=$ 5--95\% over $800$ sampled bins), per SNR, on one core of a Google Cloud e2-standard-4
+(Intel Xeon @ $2.20$\,GHz; $2$ cores / $4$ vCPUs, $16$\,GB). The
 median sits near $\sim2.8$\,ms --- inside the $5$\,ms bin budget --- at every SNR; the lone
 upper-whisker excursion above budget is intermittent host scheduling jitter, not algorithmic
 (\cref{sec:results}).}
@@ -647,7 +634,8 @@ viable alternative.
 \caption{Flow-learner convergence with the readout fixed at the oracle (filtered and one-step
 prediction $R^2$ vs.\ stream position, early stream; mean $\pm$ s.e., 5 seeds). Square-root RLS
 (sVJF) converges fastest early and stays stable; SGD starts slower but catches up to a marginally
-higher steady state; Adam plateaus a little lower; plain RLS diverges off scale. The stable arms
+higher steady state; Adam plateaus a little lower; plain RLS diverges and is clipped at the lower axis bound (off scale in
+both panels). The stable arms
 all remain flat through the full $60{,}000$-bin pass (not shown). With a clean readout the flow
 learner barely affects accuracy; the decisive difference is plain RLS's instability. $n{=}50$,
 $3$\,dB.}
