@@ -140,6 +140,29 @@ our reference point: it feeds the raw $\vy_t$ to $h$ and updates \emph{all} para
 \end{algorithmic}
 \end{algorithm}
 
+\paragraph{The problem, demonstrated.} Run as is on a streaming, low-SNR recording with the
+readout unknown, vanilla VJF never gets off the ground. \Cref{fig:motivation} drives the original
+procedure (\cref{alg:vjf}: raw-spike recognition; readout $\vC$ and flow $\vW$ learned by the ELBO
+gradient; no warm-start) once through a $3$\,dB Poisson limit-cycle stream of $60{,}000$ bins: the
+filtered-latent and one-step $R^2$ both stall near $0.14$ for the entire pass. The culprit is the
+readout. Its gradient is scaled by the per-bin firing rate $g(\vC\vx_t+\vb)\!\approx\!10^{-1}$
+(\cref{ssec:readout}), so under sparse spikes $\vC$ barely moves and slides toward a basin that
+explains only the mean rate; the recognition network, handed the raw, mostly-silent spike vector,
+never recovers the latent. The same stream, with the three changes of \cref{sec:method}, instead
+converges to $R^2\!\approx\!0.96$ (dashed). This is the gap we close.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.66\textwidth]{figs/motivation.pdf}
+\caption{The unknown-readout problem. Original VJF (\cref{alg:vjf}; raw-spike recognition, readout
+and flow learned by the ELBO gradient, no warm-start) streamed once through a $3$\,dB Poisson
+limit-cycle: the filtered-latent and one-step $R^2$ (best affine vs.\ the true latent) stall near
+$0.14$ --- the readout collapses to the mean rate under sparse spikes. The same stream with the
+\svjf\ changes of \cref{sec:method} (projection encoder, decoupled warm-started readout, square-root
+RLS flow) converges (dashed). Single stream, $n{=}50$.}
+\label{fig:motivation}
+\end{figure}
+
 \section{Method}\label{sec:method}
 We make three coupled changes (\cref{ssec:proj,ssec:readout,ssec:srrls,ssec:loop}); the generative
 model \cref{eq:lik,eq:gen} and the objective \cref{eq:elbo} are untouched. Vanilla VJF is
@@ -250,12 +273,12 @@ consumer calls once per arriving sample. It runs in two phases. During a \emph{w
 the dynamics are held off while the recognition settles and the latent means are buffered; at the
 boundary the flow $f$ is initialized once from those means and the RBF widths are narrowed by
 $\rho$. In the \emph{online} phase the loop threads the posterior across bins, updates the flow by
-square-root RLS, and refreshes the readout every $K$ steps (optionally frozen after a settling
-horizon $S$, \cref{ssec:readout}). Two numerical safeguards keep the per-bin update from blowing up
+square-root RLS, and refreshes the readout every $K$ steps (which can optionally be frozen once
+converged, \cref{ssec:readout}). Two numerical safeguards keep the per-bin update from blowing up
 over the long stream: a floor $\sigma^2_{\min}$ on the posterior state variance (it cannot collapse
 to zero) and a magnitude bound $B$ on the state (on a non-finite or out-of-bounds mean the
 posterior is reset and the last good mean repeated). The new hyperparameters are exactly
-$(W,K,\tau,\rho,\sigma^2_{\min},B,c)$ --- plus the optional $S$ --- with $c$ the feature
+$(W,K,\tau,\rho,\sigma^2_{\min},B,c)$ --- with $c$ the feature
 pseudocount (\cref{fig:timescales} sketches the three timescales $W$, $K$, $\tau$). The projection
 and readout add $O(nm)$ per step (the same order as the decoder); the total per-step cost also
 includes the recognition network and the square-root-RLS update.
@@ -264,22 +287,31 @@ includes the recognition network and the square-root-RLS update.
 \caption{\svjf: real-time VJF with projection encoder and decoupled online readout (one pass).}
 \label{alg:rtvjf}
 \begin{algorithmic}[1]
-\Require stream $\{\vy_t\}$; warm-up $W$; refresh $K$; smoothing $\tau$ ($\alpha{=}1/\tau$); width
-  scale $\rho$; variance floor $\sigma^2_{\min}$; state bound $B$; pseudocount $c$; opt.\ settling $S$
-\State init VJF: recognition $h$, flow $f$, decoder $(\vC,\vb)$ (short PCA warm-start); readout state $\vnu,\bar\vb,\{\vv_i\}$; $q\gets\varnothing$; buffer $\mathcal B\gets[\,]$
+\Require stream $\{\vy_t\}$; warm-up $W$; refresh interval $K$; smoothing $\tau$ ($\alpha{=}1/\tau$);
+  width scale $\rho$; variance floor $\sigma^2_{\min}$; state bound $B$; pseudocount $c$
+\State init VJF: recognition $h$, flow $f$, decoder $(\vC,\vb)$ from a short PCA warm-start
+\State init readout state $\vnu,\bar\vb,\{\vv_i\}$;\ \ posterior $q\gets\varnothing$;\ \ buffer $\mathcal B\gets[\,]$
 \Statex \textit{Phase 1 --- warm-up ($t=0,\dots,W{-}1$): dynamics off, collect latent means}
 \For{$t=0$ \textbf{to} $W-1$}
-  \State $\vnu \gets (1-\alpha)\,\vnu + \alpha\,\vy_t$;\ \ $\vl \gets \log(\vnu+c)$;\ \ update $\bar\vb$ \Comment{link-matched feature, \cref{eq:ema}}
-  \State CCIPCA step on $\vl-\bar\vb$;\ \ $\vpi \gets \vC^{+}(\vl-\bar\vb)$ \Comment{decoupled readout + projection, \cref{eq:hebb,eq:proj}}
-  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics off})$; \ \ append $\vmu_t$ to $\mathcal B$ \Comment{recognition only}
+  \State $\vnu \gets (1-\alpha)\,\vnu + \alpha\,\vy_t$ \Comment{EMA of the counts, \cref{eq:ema}}
+  \State $\vl \gets \log(\vnu+c)$;\ \ update running mean $\bar\vb$ \Comment{link-matched feature}
+  \State CCIPCA step on $\vl-\bar\vb$ \Comment{track the readout subspace, \cref{eq:hebb}}
+  \State $\vpi \gets \vC^{+}(\vl-\bar\vb)$ \Comment{projection encoder, \cref{eq:proj}}
+  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics off})$ \Comment{recognition only; decode on $\vy_t$}
+  \State append $\vmu_t$ to buffer $\mathcal B$
 \EndFor
-\State initialize flow $f$ from $\mathcal B$; scale RBF widths by $\rho$ \Comment{turn the dynamics on, once}
+\State initialize flow $f$ from $\mathcal B$;\ \ scale RBF widths by $\rho$ \Comment{turn the dynamics on, once}
 \Statex \textit{Phase 2 --- online ($t=W,W{+}1,\dots$): full joint filtering, in real time}
 \For{$t=W,W+1,\dots$}
-  \State $\vnu \gets (1-\alpha)\,\vnu + \alpha\,\vy_t$;\ \ $\vl \gets \log(\vnu+c)$;\ \ update $\bar\vb$;\ \ CCIPCA step;\ \ $\vpi \gets \vC^{+}(\vl-\bar\vb)$
-  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics on})$ \Comment{recognition + square-root-RLS flow update; $\vC,\vb$ fixed}
-  \State \textbf{safeguards:} clamp posterior $\log\sigma^2_t \ge \log\sigma^2_{\min}$;\ \ \textbf{if} $\vmu_t$ non-finite \textbf{or} $\norm{\vmu_t}_\infty > B$ \textbf{then} $q\gets\varnothing$, $\vmu_t\gets$ last good mean
-  \If{$t \bmod K = 0$ \textbf{and} ($S$ unset \textbf{or} $t-W<S$)} \State $\hat\vC_t\gets$ Procrustes-align to $\vC$ (\cref{eq:procrustes}); write $(\hat\vC_t,\bar\vb)$; recompute $\vC^{+}$ \EndIf
+  \State compute feature $\vl$ and projection $\vpi$ from $\vy_t$ \Comment{EMA $+$ CCIPCA $+$ $\vC^{+}$, as in Phase 1}
+  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics on})$ \Comment{recognition + square-root-RLS flow update}
+  \State clamp posterior $\log\sigma^2_t \ge \log\sigma^2_{\min}$ \Comment{variance floor}
+  \If{$\vmu_t$ non-finite \textbf{or} $\norm{\vmu_t}_\infty > B$}
+    \State $q\gets\varnothing$;\ \ $\vmu_t\gets$ last good mean \Comment{numerical divergence guard}
+  \EndIf
+  \If{$t \bmod K = 0$}
+    \State refresh readout: Procrustes-align to $\vC$ (\cref{eq:procrustes}); write to decoder; recompute $\vC^{+}$
+  \EndIf
 \EndFor
 \end{algorithmic}
 \end{algorithm}

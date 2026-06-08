@@ -182,6 +182,25 @@ def fig_kstep_curves():
     fig.savefig(os.path.join(FIGS, "kstep_curves.pdf")); plt.close(fig)
 
 
+# ---------- Figure: the problem -- original VJF does not converge online (E6, motivator) ----------
+def fig_motivation():
+    f = os.path.join(DATA, "extra", "vanilla_demo.json")
+    if not os.path.exists(f):
+        print("skip motivation (no vanilla_demo data)"); return
+    d = json.load(open(f)); v, s = d["vanilla"], d["svjf"]
+    fig, ax = plt.subplots(figsize=(6.2, 3.4)); _faint_ygrid(ax)
+    ax.axhline(0, lw=0.6, color="0.6")
+    ax.plot(v["step"], v["r2_filt"], color=PALETTE["mauve"], lw=1.9, label="original VJF: filtered $R^2$")
+    ax.plot(v["step"], v["r2_onestep"], color=PALETTE["amber"], lw=1.9, label="original VJF: one-step $R^2$")
+    ax.plot(s["step"], s["r2_filt"], color=PALETTE["blue"], lw=1.6, ls="--",
+            label="sVJF: filtered $R^2$ (the fixes)")
+    ax.set_xlim(0, max(v["step"][-1], s["step"][-1])); ax.set_ylim(-0.12, 1.0)
+    ax.set_xlabel("stream position (time steps, 5 ms bins)"); ax.set_ylabel("$R^2$ (best affine)")
+    ax.legend(loc="center right", fontsize=8.5)
+    ax.set_title("Original VJF stalls online (readout collapse); sVJF converges")
+    fig.savefig(os.path.join(FIGS, "motivation.pdf")); plt.close(fig)
+
+
 # ---------- Figure (dormant until the SNR sweep lands): readout schedule vs SNR ----------
 N_SNR_BY_N = {15: -3, 30: 0, 50: 3, 150: 6, 250: 8}
 
@@ -445,8 +464,8 @@ def fig_timescales():
 
 
 if __name__ == "__main__":
-    for fn in (fig_timescales, fig_raster, fig_readout_stability, fig_readout_snr, fig_kstep_curves,
-               fig_tau, fig_timing, fig_summary, fig_curves):
+    for fn in (fig_motivation, fig_timescales, fig_raster, fig_readout_stability, fig_readout_snr,
+               fig_kstep_curves, fig_tau, fig_timing, fig_summary, fig_curves):
         try:
             fn()
         except Exception as e:
