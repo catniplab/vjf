@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# /gcp_run: expanded E6 motivator on a fresh e2-standard-4. Four original-VJF variants
-# (C init {random,oracle} x optimizer {Adam,SGD}) + sVJF, 5 seeds, filtered + one-step R^2
+# /gcp_run: E7 flow-learner comparison (Adam/SGD vs sqrt-RLS/RLS), oracle readout, 5 seeds.
+# 
 # over the stream. Self-contained (vjf + numpy + torch; no neurofisherSNR).
 set -uo pipefail
 PROJECT=cr-memmingpark; ZONE=europe-west1-b
 SA=claude-experiments@cr-memmingpark.iam.gserviceaccount.com
 IMP=--impersonate-service-account=$SA
 REPO=/Users/memming/Dropbox/_projects/vjf
-VM=exp-$(date +%Y%m%d-%H%M%S)-vjf-motiv
+VM=exp-$(date +%Y%m%d-%H%M%S)-vjf-flow
 LOG=$REPO/gcp_runs/$VM.log
 DEST=$REPO/gcp_runs/$VM
 mkdir -p "$DEST"
@@ -17,7 +17,7 @@ gcloud compute instances create "$VM" --project=$PROJECT --zone=$ZONE $IMP \
   --machine-type=e2-standard-4 --image-family=debian-12 --image-project=debian-cloud \
   --boot-disk-size=20GB --boot-disk-type=pd-balanced --service-account=$SA \
   --scopes=https://www.googleapis.com/auth/cloud-platform --metadata=enable-oslogin=TRUE \
-  --labels=purpose=experiment,created-by=claude,mode=git,exp=motiv >>"$LOG" 2>&1 || { echo "create failed" | tee -a "$LOG"; exit 1; }
+  --labels=purpose=experiment,created-by=claude,mode=git,exp=flow >>"$LOG" 2>&1 || { echo "create failed" | tee -a "$LOG"; exit 1; }
 
 SSH() { gcloud compute ssh "$VM" --project=$PROJECT --zone=$ZONE $IMP --command="$1" 2>>"$LOG"; }
 
@@ -35,18 +35,18 @@ SSH 'sudo apt-get -qq update >/dev/null 2>&1; sudo apt-get -qq install -y git >/
 # scp the experiment script AND the local model.py (which has the optimizer='adam' option not
 # yet on the remote branch) onto the cloned repo
 gcloud compute scp --project=$PROJECT --zone=$ZONE $IMP \
-  "$REPO/experiments/lc_poisson_stream/motivation_compare.py" \
-  "$VM:~/vjf/experiments/lc_poisson_stream/motivation_compare.py" >>"$LOG" 2>&1
+  "$REPO/experiments/lc_poisson_stream/flow_compare.py" \
+  "$VM:~/vjf/experiments/lc_poisson_stream/flow_compare.py" >>"$LOG" 2>&1
 gcloud compute scp --project=$PROJECT --zone=$ZONE $IMP \
   "$REPO/vjf/model.py" "$VM:~/vjf/vjf/model.py" >>"$LOG" 2>&1
 
-echo "=== RUN motivation_compare (5 variants x 5 seeds) ===" | tee -a "$LOG"
-SSH 'cd ~/vjf && source .venv/bin/activate && python experiments/lc_poisson_stream/motivation_compare.py' 2>&1 | tee -a "$LOG"
+echo "=== RUN flow_compare (5 variants x 5 seeds) ===" | tee -a "$LOG"
+SSH 'cd ~/vjf && source .venv/bin/activate && python experiments/lc_poisson_stream/flow_compare.py' 2>&1 | tee -a "$LOG"
 
-echo "pulling motivation_compare.json..." | tee -a "$LOG"
+echo "pulling flow_compare.json..." | tee -a "$LOG"
 gcloud compute scp --project=$PROJECT --zone=$ZONE $IMP \
-  "$VM:~/vjf/motivation_compare.json" "$DEST/motivation_compare.json" >>"$LOG" 2>&1
+  "$VM:~/vjf/flow_compare.json" "$DEST/flow_compare.json" >>"$LOG" 2>&1
 
 echo "=== tearing down $VM ===" | tee -a "$LOG"
 gcloud compute instances delete "$VM" --project=$PROJECT --zone=$ZONE $IMP --quiet >>"$LOG" 2>&1
-echo "done; VM deleted; data at $DEST/motivation_compare.json" | tee -a "$LOG"
+echo "done; VM deleted; data at $DEST/flow_compare.json" | tee -a "$LOG"
