@@ -71,6 +71,11 @@ def slim():
         d = json.load(open(f))
         conds = [keep(c, ["snr_target", "n_neurons", "rate_corr", "r2_final"]) for c in d.get("conditions", [])]
         write(f, {"conditions": conds})
+    # E6/E7 comparison curves (step + per-seed R^2 arrays): just round the floats
+    for name in ("motivation_compare.json", "flow_compare.json"):
+        p = os.path.join(DATA, "extra", name)
+        if os.path.exists(p):
+            write(p, json.load(open(p)))
 
 
 if __name__ == "__main__":

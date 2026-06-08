@@ -140,26 +140,30 @@ our reference point: it feeds the raw $\vy_t$ to $h$ and updates \emph{all} para
 \end{algorithmic}
 \end{algorithm}
 
-\paragraph{The problem, demonstrated.} Run as is on a streaming, low-SNR recording with the
-readout unknown, vanilla VJF never gets off the ground. \Cref{fig:motivation} drives the original
-procedure (\cref{alg:vjf}: raw-spike recognition; readout $\vC$ and flow $\vW$ learned by the ELBO
-gradient; no warm-start) once through a $3$\,dB Poisson limit-cycle stream of $60{,}000$ bins: the
-filtered-latent and one-step $R^2$ both stall near $0.14$ for the entire pass. The culprit is the
-readout. Its gradient is scaled by the per-bin firing rate $g(\vC\vx_t+\vb)\!\approx\!10^{-1}$
-(\cref{ssec:readout}), so under sparse spikes $\vC$ barely moves and slides toward a basin that
-explains only the mean rate; the recognition network, handed the raw, mostly-silent spike vector,
-never recovers the latent. The same stream, with the three changes of \cref{sec:method}, instead
-converges to $R^2\!\approx\!0.96$ (dashed). This is the gap we close.
+\paragraph{The readout bottleneck.} Run as is on a streaming, low-SNR recording with the
+readout unknown, vanilla VJF does not get off the ground, and the reason is specifically the
+readout. \Cref{fig:motivation} streams the original procedure (\cref{alg:vjf}: raw-spike
+recognition; readout $\vC$ and flow $\vW$ learned by the ELBO gradient) once through a $3$\,dB
+Poisson limit-cycle, crossing the two optimizers (Adam, SGD) with two readout initializations
+(random, oracle), against \svjf. With a \emph{random} readout initialization the latent is never
+recovered --- one-step $R^2$ stalls at $0.2$--$0.4$ --- because the readout gradient is scaled by
+the per-bin firing rate $g(\vC\vx_t+\vb)\!\approx\!10^{-1}$ (\cref{ssec:readout}), so $\vC$ slides
+to a mean-rate solution while the recognition network, handed the raw, mostly-silent spikes, cannot
+invert it. Hand the \emph{same} model the \emph{oracle} readout at initialization and it converges
+to $R^2\!\approx\!0.94$ --- pinpointing the unknown readout, not the dynamics, as the obstacle.
+\svjf\ reaches $R^2\!\approx\!0.93$ from spikes alone, recovering what an oracle readout would give
+without one.
 
 \begin{figure}[!ht]
 \centering
-\includegraphics[width=0.66\textwidth]{figs/motivation.pdf}
-\caption{The unknown-readout problem. Original VJF (\cref{alg:vjf}; raw-spike recognition, readout
-and flow learned by the ELBO gradient, no warm-start) streamed once through a $3$\,dB Poisson
-limit-cycle: the filtered-latent and one-step $R^2$ (best affine vs.\ the true latent) stall near
-$0.14$ --- the readout collapses to the mean rate under sparse spikes. The same stream with the
-\svjf\ changes of \cref{sec:method} (projection encoder, decoupled warm-started readout, square-root
-RLS flow) converges (dashed). Single stream, $n{=}50$.}
+\includegraphics[width=\textwidth]{figs/motivation.pdf}
+\caption{The unknown-readout problem. Filtered-latent and one-step prediction $R^2$ (best affine
+vs.\ the true latent; mean $\pm$ s.e., 5 seeds) over a $3$\,dB Poisson limit-cycle stream, for the
+original procedure (\cref{alg:vjf}; readout $\vC$ and flow $\vW$ learned by the ELBO gradient) under
+two optimizers (Adam, SGD) $\times$ two readout initializations (random, oracle), and for \svjf.
+A \emph{random} readout init never recovers the latent (one-step $R^2\!\approx\!0.2$--$0.4$,
+regardless of optimizer); an \emph{oracle} readout init converges ($\approx0.94$); \svjf\ reaches
+$\approx0.93$ from spikes alone. The bottleneck is the readout, not the dynamics. $n{=}50$.}
 \label{fig:motivation}
 \end{figure}
 
@@ -263,7 +267,13 @@ latent path, we instead fit it by recursive least squares (RLS), which converges
 RLS, however, accumulates error in the propagated precision matrix and eventually diverges over a
 long ($\sim2\times10^5$-step) pass, so we carry a covariance square-root factor $\vS$
 ($\vP=\vS\vS\trp$) directly (square-root RLS, \autocite{haykin2014adaptive,schoenberg1983implementation}):
-this keeps RLS's fast convergence while staying numerically stable.
+this keeps RLS's fast convergence while staying numerically stable. \Cref{fig:flow} isolates the
+flow learner (readout held fixed at the oracle, so only the flow varies): square-root
+RLS converges fastest in the early stream and stays stable, whereas plain RLS diverges; gradient
+learning (Adam, SGD) is competitive on accuracy but slower to converge --- SGD only catches up
+later, to a marginally higher steady state. With a clean readout the flow learner is thus not a
+large accuracy differentiator; we adopt square-root RLS for its early convergence and, decisively,
+its numerical stability over long streams.
 
 \subsection{The real-time loop}\label{ssec:loop}
 The three changes above plug into a single per-sample driver (\cref{alg:rtvjf}), which a real-time
@@ -327,7 +337,7 @@ destabilizing the dynamics.}
 \label{fig:timescales}
 \end{figure}
 
-\paragraph{What changed.} Vanilla VJF (\cref{alg:vjf}) trains \emph{every} parameter by one
+\paragraph{Differences from vanilla VJF.} Vanilla VJF (\cref{alg:vjf}) trains \emph{every} parameter by one
 reparameterized ELBO-gradient step. \Cref{alg:rtvjf} changes three of them: the recognition reads
 the projection $\vpi_t$ instead of the raw $\vy_t$; the readout $(\vC,\vb)$ is taken out of the
 gradient and estimated by CCIPCA with a Procrustes anchor; and the flow weights $\vW$ are taken out
@@ -497,7 +507,7 @@ overhead that inflates the tail without lowering the median.)
 \caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.\
 over three seeds), grouped by SNR. Projection$+$oracle (the ceiling) dominates; the projection
 online readout's advantage over the raw-spike bound is largest at low SNR, while at high SNR a
-frozen PCA is already near-oracle. The gain is largest where it matters.}
+frozen PCA is already near-oracle.}
 \label{fig:summary}
 \end{figure}
 
@@ -521,7 +531,7 @@ fixed init), slow/locked (online readout frozen after a settling horizon $S$), a
 forecast horizon as a predictability \emph{time} (largest $k$ with
 $R^2_{\mathrm{fc}}(k)\ge 0.5\,R^2_{\mathrm{filter}}$, times the bin width; up-ticks mark points
 censored at the $1$\,s evaluation window; $1$ limit-cycle period $\approx0.21$\,s here).
-The crossover is the message: at high SNR the fixed and locked readouts dominate the forecast
+The schedules cross over with SNR: at high SNR the fixed and locked readouts dominate the forecast
 horizon (locking lifts it from $0.41$ to $0.92$\,s, toward the oracle), while at low SNR free-run
 forecasting fails for all and the adaptive readouts instead lead on one-step prediction (at
 $-3$\,dB, $0.30$ online vs.\ $-0.02$ for a frozen PCA).}
@@ -602,6 +612,32 @@ continuously-rewriting readout decays within $\sim0.4$\,s; at low SNR every sche
 trajectory within a single bin --- free-run forecasting is infeasible at $0$\,dB regardless of the
 readout, which is why the low-SNR value is in filtering, not forecasting.}
 \label{fig:kstep}
+\end{figure}
+
+\section{Supplementary: flow-learner comparison}\label{app:flow}
+\Cref{fig:flow} isolates the flow learner of \cref{ssec:srrls}. We hold the readout fixed at the
+oracle (projection encoder, frozen $\vC,\vb$) so the only thing that varies is how the RBF velocity
+weights $\vW$ are learned, and train the recognition by the same optimizer across the recursive
+arms. With a clean readout the flow learner is not a large accuracy
+differentiator --- square-root RLS, Adam, and SGD all reach one-step $R^2$ in the $0.88$--$0.97$
+range (filtered $R^2$ is essentially tied). Square-root RLS converges fastest in the early stream;
+SGD starts slower but catches up to a marginally higher steady state; Adam plateaus a little lower.
+The one decisive effect is stability: plain RLS diverges within a few thousand steps (the precision
+wind-up of \cref{ssec:srrls}). In a streaming setting --- accurate dynamics \emph{quickly} and
+\emph{without} blowing up --- square-root RLS is the pragmatic choice; gradient flow learning is a
+viable alternative.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.72\textwidth]{figs/flow.pdf}
+\caption{Flow-learner convergence with the readout fixed at the oracle (filtered and one-step
+prediction $R^2$ vs.\ stream position, early stream; mean $\pm$ s.e., 5 seeds). Square-root RLS
+(sVJF) converges fastest early and stays stable; SGD starts slower but catches up to a marginally
+higher steady state; Adam plateaus a little lower; plain RLS diverges off scale. The stable arms
+all remain flat through the full $60{,}000$-bin pass (not shown). With a clean readout the flow
+learner barely affects accuracy; the decisive difference is plain RLS's instability. $n{=}50$,
+$3$\,dB.}
+\label{fig:flow}
 \end{figure}
 
 \printbibliography

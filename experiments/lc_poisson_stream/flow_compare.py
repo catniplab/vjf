@@ -24,7 +24,7 @@ from vjf.realtime import online_filter
 
 SEEDS = [20260605, 20260606, 20260607, 20260608, 20260609]
 N, SNR = 50, 3
-T_EFF, EVERY, WIN = 60000, 1000, 4000
+T_EFF, EVERY, WIN, WARMUP = 60000, 250, 1000, 1500   # fine, post-warmup logging to resolve early convergence
 #        arm        flow_learner  optimizer
 ARMS = {"srrls":   ("srrls", "adam"),
         "rls":     ("rls",   "adam"),
@@ -65,13 +65,13 @@ def run(arm, seed):
     ro = OnlineReadout(N, 2, smooth_tau=8.0, refresh_K=10**9, link="log")
     ro.set_fixed(C.astype(np.float32), b.reshape(-1))        # oracle projection, no adaptation
     gen = online_filter(model, counts, readout=ro, adapt_readout=False,
-                        warmup_steps=1500, rbf_width_scale=0.5)
+                        warmup_steps=WARMUP, rbf_width_scale=0.5)
     mu = np.zeros((len(counts), 2), dtype=np.float32)
     steps, rf, ro_ = [], [], []
     for r in gen:
         mu[r.step] = r.mean
         s = r.step + 1
-        if s >= WIN and s % EVERY == 0:
+        if s >= WARMUP + WIN and s % EVERY == 0:        # window entirely post-warm-up
             w = slice(s - WIN, s)
             steps.append(int(s)); rf.append(affine_r2(mu[w], z[w]))
             ro_.append(onestep_r2(mu[w], z[w], model))

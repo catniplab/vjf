@@ -846,3 +846,4 @@ gcp_runs/exp-*/
 experiments/lc_poisson_stream/results/
 experiments/lc_poisson_stream/results_e1/
 experiments/lc_poisson_stream/*.pdf
+paper/data/extra/vanilla_demo.json

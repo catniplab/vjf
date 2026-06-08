@@ -184,21 +184,70 @@ def fig_kstep_curves():
 
 # ---------- Figure: the problem -- original VJF does not converge online (E6, motivator) ----------
 def fig_motivation():
-    f = os.path.join(DATA, "extra", "vanilla_demo.json")
+    f = os.path.join(DATA, "extra", "motivation_compare.json")
     if not os.path.exists(f):
-        print("skip motivation (no vanilla_demo data)"); return
-    d = json.load(open(f)); v, s = d["vanilla"], d["svjf"]
-    fig, ax = plt.subplots(figsize=(6.2, 3.4)); _faint_ygrid(ax)
-    ax.axhline(0, lw=0.6, color="0.6")
-    ax.plot(v["step"], v["r2_filt"], color=PALETTE["mauve"], lw=1.9, label="original VJF: filtered $R^2$")
-    ax.plot(v["step"], v["r2_onestep"], color=PALETTE["amber"], lw=1.9, label="original VJF: one-step $R^2$")
-    ax.plot(s["step"], s["r2_filt"], color=PALETTE["blue"], lw=1.6, ls="--",
-            label="sVJF: filtered $R^2$ (the fixes)")
-    ax.set_xlim(0, max(v["step"][-1], s["step"][-1])); ax.set_ylim(-0.12, 1.0)
-    ax.set_xlabel("stream position (time steps, 5 ms bins)"); ax.set_ylabel("$R^2$ (best affine)")
-    ax.legend(loc="center right", fontsize=8.5)
-    ax.set_title("Original VJF stalls online (readout collapse); sVJF converges")
+        print("skip motivation (no motivation_compare data)"); return
+    d = json.load(open(f))
+    methods = [("orig_randC_adam", "orig.\\ VJF: random $C$, Adam", PALETTE["mauve"]),
+               ("orig_randC_sgd", "orig.\\ VJF: random $C$, SGD", PALETTE["slate"]),
+               ("orig_oracleC_adam", "orig.\\ VJF: oracle $C$, Adam", PALETTE["amber"]),
+               ("orig_oracleC_sgd", "orig.\\ VJF: oracle $C$, SGD", PALETTE["olive"]),
+               ("svjf", "sVJF (ours)", PALETTE["blue"])]
+    methods = [m for m in methods if m[0] in d]
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 3.7), sharex=True, sharey=True)
+    for key, lab, col in methods:
+        e = d[key]; x = np.asarray(e["step"])
+        for ax, fld in ((axes[0], "r2_filt"), (axes[1], "r2_onestep")):
+            arr = np.asarray(e[fld]); m = arr.mean(0); se = arr.std(0) / np.sqrt(len(arr))
+            lw = 2.3 if key == "svjf" else 1.5
+            ax.plot(x, m, color=col, lw=lw, label=lab)
+            ax.fill_between(x, m - se, m + se, color=col, alpha=0.15, lw=0)
+    for ax, ttl in ((axes[0], "filtered-latent $R^2$"), (axes[1], "one-step prediction $R^2$")):
+        _faint_ygrid(ax); ax.axhline(0, lw=0.6, color="0.6")
+        ax.set_xlabel("stream position (time steps, 5\\,ms bins)")
+        ax.set_ylim(-0.18, 1.0); ax.set_title(ttl)
+    axes[0].set_ylabel("$R^2$ (best affine)")
+    axes[1].legend(loc="lower right", fontsize=8, ncol=1)
+    fig.suptitle("Original VJF needs the right readout to converge online; sVJF reaches it from spikes "
+                 "(mean $\\pm$ s.e., 5 seeds)", y=1.02, fontsize=10.5)
+    fig.tight_layout()
     fig.savefig(os.path.join(FIGS, "motivation.pdf")); plt.close(fig)
+
+
+# ---------- Figure (E7): flow-learner convergence (readout fixed at oracle) ----------
+def fig_flow():
+    f = os.path.join(DATA, "extra", "flow_compare.json")
+    if not os.path.exists(f):
+        print("skip flow (no flow_compare data)"); return
+    d = json.load(open(f))
+    arms = [("srrls", "square-root RLS (sVJF)", PALETTE["blue"]),
+            ("sgd", "SGD flow", PALETTE["teal"]),
+            ("adam", "Adam flow", PALETTE["amber"]),
+            ("rls", "plain RLS", PALETTE["mauve"])]
+    arms = [a for a in arms if a[0] in d]
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.6), sharex=True, sharey=True)
+    x = np.asarray(d["srrls"]["step"])
+    for key, lab, col in arms:
+        for ax, fld in ((axes[0], "r2_filt"), (axes[1], "r2_onestep")):
+            a = np.asarray(d[key][fld], dtype=float)
+            with np.errstate(invalid="ignore"):
+                m = np.nanmean(a, 0); se = np.nanstd(a, 0) / np.sqrt(max(len(a), 1))
+            mc = np.clip(m, -0.3, None)                   # clip diverging plain RLS for display
+            lw = 2.3 if key == "srrls" else 1.6
+            ax.plot(x, mc, color=col, lw=lw, label=(lab if ax is axes[1] else None))
+            if key != "rls":
+                ax.fill_between(x, np.clip(m - se, -0.3, None), m + se, color=col, alpha=0.15, lw=0)
+    for ax, ttl in ((axes[0], "filtered-latent $R^2$"), (axes[1], "one-step prediction $R^2$")):
+        _faint_ygrid(ax); ax.axhline(0, lw=0.6, color="0.6")
+        ax.set_xlabel("stream position (time steps, 5\\,ms bins)"); ax.set_ylim(-0.3, 1.0)
+        ax.set_xlim(x[0], min(9000, x[-1])); ax.set_title(ttl)   # zoom on the convergence/crossover
+    axes[0].set_ylabel("$R^2$ (best affine)")
+    axes[0].text(x[0], -0.26, "plain RLS diverges (off scale)", fontsize=7, color=PALETTE["mauve"])
+    axes[1].legend(loc="lower right", fontsize=8)
+    fig.suptitle("Flow learner, readout fixed at oracle (early stream; stable arms stay flat to 60k): "
+                 "square-root RLS leads early, plain RLS diverges", y=1.02, fontsize=9.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIGS, "flow.pdf")); plt.close(fig)
 
 
 # ---------- Figure (dormant until the SNR sweep lands): readout schedule vs SNR ----------
@@ -464,8 +513,8 @@ def fig_timescales():
 
 
 if __name__ == "__main__":
-    for fn in (fig_motivation, fig_timescales, fig_raster, fig_readout_stability, fig_readout_snr,
-               fig_kstep_curves, fig_tau, fig_timing, fig_summary, fig_curves):
+    for fn in (fig_motivation, fig_flow, fig_timescales, fig_raster, fig_readout_stability,
+               fig_readout_snr, fig_kstep_curves, fig_tau, fig_timing, fig_summary, fig_curves):
         try:
             fn()
         except Exception as e:
