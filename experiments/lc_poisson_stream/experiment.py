@@ -435,7 +435,11 @@ def make_plots(results, cfg):
             ax = axes[i][j]
             gz, az = snap["grid_z"], snap["arrow_z"]
             ax.plot(z[-2000:, 0], z[-2000:, 1], lw=0.5, alpha=0.4, color="k")
-            ax.quiver(gz[:, 0], gz[:, 1], az[:, 0], az[:, 1], color="C0", alpha=0.85, angles="xy")
+            # quiver autoscale divides by the field's max magnitude; an early snapshot
+            # whose learned flow is still ~identity (velocity ~ 0 everywhere) makes that
+            # scale 0 -> divide-by-zero / 0*inf NaN. Nothing to draw, so skip it.
+            if float(np.max(np.hypot(az[:, 0], az[:, 1]))) > 1e-8:
+                ax.quiver(gz[:, 0], gz[:, 1], az[:, 0], az[:, 1], color="C0", alpha=0.85, angles="xy")
             ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
             if i == 0:
                 ax.set_title(f"t={snap['step']}")

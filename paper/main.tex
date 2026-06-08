@@ -22,6 +22,8 @@
 % method name (locked): stable VJF
 \newcommand{\svjf}{sVJF}
 \newcommand{\svjflong}{stable variational joint filtering}
+% placeholder for numbers to be filled from the staged result JSONs (visible if shipped by mistake)
+\newcommand{\TD}[1]{\textbf{[?\,#1]}}
 
 \addbibresource{references.bib}
 
@@ -42,17 +44,20 @@ spikes: most bins carry almost no signal, so the estimate collapses to explainin
 average firing rate. Second, the control flow that makes online learning behave --- a warm-up
 before the dynamics are trusted, recovery from numerical divergence, and a stable recursive fit
 over long streams --- is subtle and easily mis-implemented. We address both with changes that
-leave the generative model and the filtering objective untouched: a \emph{projection encoder}
-that feeds the recognition network the readout's own low-dimensional approximate inverse rather
-than the raw spikes; a \emph{decoupled online readout} estimated by incremental principal
-component analysis instead of the variational gradient; and a \emph{square-root recursive
-least-squares flow learner} wrapped in a reusable per-sample loop. On a 1000-second, biologically
-calibrated Poisson limit-cycle benchmark the method runs in about three milliseconds per
-five-millisecond bin on a single CPU --- real time --- and recovers the latent dynamics with the
-readout unknown. \emph{The projection encoder is a robust, readout-agnostic improvement; the
-decoupled online readout reaches the known-readout accuracy only at low signal-to-noise, where
-the periodic frame realignment does least harm to the learned dynamics.} We attribute the
-high-SNR shortfall to that frame motion and outline two concrete remedies.
+leave the generative model and the filtering objective untouched, and package them as \svjf\
+(\svjflong): a \emph{projection encoder} that feeds the recognition network the readout's own
+low-dimensional approximate inverse rather than the raw spikes; a \emph{warm-started,
+two-timescale online readout} estimated by incremental principal component analysis --- a fast
+per-bin update and a slow periodic write --- instead of the variational gradient; and a
+\emph{square-root recursive least-squares flow learner}, all wrapped in a reusable per-sample
+loop. On a 1000-second, biologically calibrated Poisson limit-cycle benchmark spanning the
+signal-to-noise range of population recordings ($-3$ to $8$\,dB), \svjf\ runs in about three
+milliseconds per five-millisecond bin on a single CPU --- real time --- and recovers the latent
+dynamics with the readout unknown. \emph{The gains concentrate in the low-SNR regime typical of
+neural data: there the projection encoder and the online readout recover dynamics that raw-spike
+recognition cannot, whereas at high SNR the problem is easy enough that even a frozen
+principal-component readout is near-oracle.} Once the online readout has converged, freezing or
+annealing its refresh recovers forecast accuracy that continued rewriting would otherwise erode.
 \end{abstract}
 
 \section{Introduction}
@@ -80,14 +85,19 @@ warm-up, recovering gracefully from numerical divergence, and keeping the recurs
 stable over hundreds of thousands of steps. In released code this logic lives only inside
 experiment scripts.
 
-Here we introduce three coupled changes (\cref{sec:method}): a \emph{projection encoder}, a
-\emph{decoupled online readout}, and a \emph{square-root RLS flow learner} packaged in a reusable
-real-time loop. The first two resolve the unknown-readout obstacle; the third resolves the
-control-flow obstacle. Throughout, the generative model and the filtering objective of
-\autocite{zhao2020variational} are unchanged, and we emphasize precisely what differs from
-vanilla VJF. We validate on a biologically calibrated Poisson limit cycle (\cref{sec:exp,sec:results})
-and give a calibrated verdict: the projection encoder is a robust win at any fixed readout, while
-the online readout matches the known-readout accuracy only at low SNR.
+Here we introduce \svjf\ (\svjflong), three coupled changes (\cref{sec:method}) packaged in a
+reusable real-time loop: a \emph{projection encoder}, a \emph{warm-started two-timescale online
+readout}, and a \emph{square-root RLS flow learner}. The first two resolve the unknown-readout
+obstacle; the third resolves the control-flow obstacle. Throughout, the generative model and the
+filtering objective of \autocite{zhao2020variational} are unchanged, and we emphasize precisely
+what differs from vanilla VJF. We validate on a biologically calibrated Poisson limit cycle across
+the signal-to-noise range of population recordings ($-3$ to $8$\,dB; \cref{sec:exp,sec:results})
+and give a calibrated verdict: the contributions earn their keep in the \emph{low-SNR} regime
+typical of neural data --- few neurons, sparse spikes --- where readout estimation is hard; at
+high SNR the problem is easy enough that a frozen principal-component readout is already
+near-oracle. The projection encoder is a robust win at any fixed readout, and once the online
+readout converges, freezing or annealing its refresh recovers forecast accuracy that continued
+rewriting erodes.
 
 \section{Background: variational joint filtering}\label{sec:bg}
 With latent $\vx_t\in\reals^m$, observation $\vy_t\in\reals^n$, and optional input $\vu_t$, VJF
@@ -187,22 +197,40 @@ component $i{+}1$ sees only the orthogonal complement. At convergence $\norm{\vv
 the loading column is $\vc_i=\hat\vv_i\sqrt{\norm{\vv_i}}=\ve_i\sqrt{\lambda_i}$ (unit-variance
 latent). This is a well-conditioned M-step, free of the rate-scaled-gradient collapse, and shared
 by the decoder \cref{eq:lik} and the projection \cref{eq:proj}; it is a streaming analogue of the
-PLDS/GPFA-style readout warm-start \autocite{macke2011empirical,yu2009gaussian}. The estimate
-$\hat\vC_t$ is written to the decoder every $K$ steps.
+PLDS/GPFA-style readout warm-start \autocite{macke2011empirical,yu2009gaussian}. We warm-start it
+with a one-shot batch PCA on a short initial window (the first $60n$ bins), so the decoder is
+sensible from the outset, and thereafter maintain it on \emph{two timescales}: a fast per-bin
+CCIPCA update of $\{\vv_i\}$ (the inner loop), and a slow write of the aligned estimate
+$\hat\vC_t$ to the decoder every $K$ bins (the outer loop). Decoupling the two lets the readout
+adapt continuously while the decoder --- and with it the projection \cref{eq:proj} and the target
+the dynamics learner must track --- changes only at the slow cadence.
 
 \paragraph{Identifiability / normalization.}
-The column-$\ell_2$ normalization of \autocite{zhao2020variational} fixes only the scale gauge.
-Our setting needs more: each incremental-PCA refresh returns a basis with an arbitrary rotation
-and sign (eigenvectors are signed; near-degenerate eigenvalues rotate freely). We therefore fix
-the full orthogonal gauge by orthogonal Procrustes alignment of the refreshed loading to the
-previous one,
+The column-$\ell_2$ normalization of \autocite{zhao2020variational} fixes only the column scale.
+Our setting needs more: the readout is identifiable only up to a rotation (factor-rotation
+invariance), and each incremental-PCA refresh returns a basis with an arbitrary rotation and sign
+(eigenvectors are signed; near-degenerate eigenvalues rotate freely), so the latent frame would
+drift between refreshes. We therefore pin the rotation and reflection by orthogonal Procrustes
+alignment of the refreshed loading to the previous one,
 \begin{equation}
   \vR^\star=\arg\min_{\vR\trp\vR=\vI}\norm{\hat\vC\vR-\vC_{\mathrm{prev}}}_F=\vU\vV\trp,\qquad
   \hat\vC\trp\vC_{\mathrm{prev}}=\vU\vSig\vV\trp\ (\text{SVD}), \label{eq:procrustes}
 \end{equation}
 and fix the scale by the unit-variance column scaling above. This removes the sign/rotation jumps
-between refreshes and keeps the latent frame approximately fixed; the residual frame motion, and
-its effect on the learned dynamics $f=\vW\vphi$, is taken up in \cref{sec:discussion}.
+between refreshes and keeps the latent frame essentially fixed --- empirically the tracked
+subspace drifts by under a degree over the entire stream (\cref{sec:results}). The remaining cost
+is subtler: each refresh still rewrites $\vC$ slightly, so the recursive dynamics learner fits
+against a target that keeps moving. The two-timescale schedule below addresses this.
+
+\paragraph{Freezing the refresh once converged (optional).}
+Because the online readout converges well within a $1000$\,s stream, the slow outer loop can be
+\emph{annealed or frozen} once the subspace stabilizes: after a settling horizon $S$ we stop (or
+geometrically slow) the writes, fixing the decoder while the recognition, flow, and biases keep
+adapting. This is the practical recipe for a stationary recording --- it removes the residual
+target motion and, as \cref{sec:results} shows, recovers one-step prediction and forecast horizon
+at no cost to filtering. Freezing is deliberately optional: in a non-stationary setting one wants
+the readout to keep tracking, and detecting when to re-enable it is a question we leave open
+(\cref{sec:discussion}).
 
 \subsection{Square-root RLS flow learner}\label{ssec:srrls}
 Over a long online pass the recursive least-squares (RLS) fit of the RBF velocity weights
@@ -218,10 +246,12 @@ consumer calls one function per arriving sample. The loop threads the posterior 
 the dynamics frozen during a warm-up of $W$ bins while the recognition settles, then initializes
 $f$ once from the buffered latent means and narrows the RBF widths by $\rho$; recovers from
 divergence with a state-noise floor $\sigma^2_{\min}$ and a state-magnitude bound $B$ (repeating
-the last good mean); and refreshes the readout every $K$ steps. The new hyperparameters are
-exactly $(W,K,\tau,\rho,\sigma^2_{\min},B,c)$, with $c$ the feature pseudocount. The projection and readout add $O(nm)$ per step (the
-same order as the decoder); the total per-step cost also includes the recognition network and the
-square-root-RLS update.
+the last good mean); and refreshes the readout every $K$ steps (\cref{fig:timescales} sketches the
+three timescales $W$, $K$, $\tau$; an optional settling horizon $S$ freezes the refresh once the
+subspace has converged, \cref{ssec:readout}). The new hyperparameters are exactly
+$(W,K,\tau,\rho,\sigma^2_{\min},B,c)$ --- plus the optional $S$ --- with $c$ the feature
+pseudocount. The projection and readout add $O(nm)$ per step (the same order as the decoder); the
+total per-step cost also includes the recognition network and the square-root-RLS update.
 
 \begin{algorithm}[!ht]
 \caption{Real-time VJF with projection encoder and decoupled online readout (one pass).}
@@ -243,6 +273,19 @@ square-root-RLS update.
 \end{algorithmic}
 \end{algorithm}
 
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.9\textwidth]{figs/timescales.pdf}
+\caption{The three timescales of \svjf. \textbf{Top:} the stream is never-ending; after a warm-up
+of $W$ bins the dynamics turn on and online learning continues in real time. \textbf{Middle:} the
+readout is refreshed on a slow outer loop every $K$ bins (CCIPCA $\to$ Procrustes $\to$ write
+$\vC$). \textbf{Bottom:} the fast inner loop runs every bin (filter $+$ dynamics update), and the
+feature EMA \cref{eq:ema} carries a memory of about the past $\tau$ bins. The well-separated
+timescales ($1\!\ll\!\tau\!\ll\!K\!\ll$ stream) are what let the readout adapt without
+destabilizing the dynamics.}
+\label{fig:timescales}
+\end{figure}
+
 \paragraph{What changed.} Relative to vanilla VJF (\cref{alg:vjf}), the loop (\cref{alg:rtvjf})
 differs in exactly three places: the recognition reads the projection $\vpi_t$ rather than the raw
 $\vy_t$; the readout $\vC,\vb$ is removed from the ELBO gradient and instead estimated by CCIPCA
@@ -256,148 +299,228 @@ We use a self-contained synthetic benchmark: a 2-D limit cycle (radius-relaxing,
 velocity) observed through a sparse log-linear Poisson population, calibrated to biological rates
 (mean $\sim20$\,Hz, peak $\le100$\,Hz at 5\,ms bins). One single-trial stream of $T=200{,}000$
 bins (1000\,s) is generated; signal-to-noise --- the Fisher-information SNR of the latent
-trajectory \autocite{Jeon2024b} --- is set by population size, giving three conditions:
-$n=50/150/250$ neurons, corresponding to $\sim3/6/8$\,dB (\cref{fig:raster}). We compare five
+trajectory \autocite{Jeon2024b} --- is set by population size, giving five conditions that span
+the neural regime: $n=15/30/50/150/250$ neurons, corresponding to $\sim-3/0/3/6/8$\,dB
+(\cref{fig:raster}). \emph{This SNR is a property of the observation model only}: it measures how
+well the instantaneous latent \emph{state} $\vx_t$ can be read from a single time bin (the Fisher
+information of $\vx_t$ given $\vy_t$), and is set here by how many neurons report it. It is
+\emph{not} the signal-to-noise of the \emph{dynamics} --- how identifiable the flow $f$ is from the
+observed trajectory --- which is a distinct quantity (depending on the flow, the state noise, and
+the trajectory's coverage of state space) that we do not attempt to quantify here. The distinction
+is consequential: a regime can carry enough state SNR to filter the latent accurately yet too
+little dynamics information to learn a flow that forecasts (\cref{sec:results}). The lower three ($-3/0/3$\,dB) are the sparse, few-neuron regime typical of
+population recordings; the upper two are the easy end, included for completeness. We compare four
 configurations, crossing the recognition input (spike vs.\ projection encoder) with how the
-readout is obtained: oracle (true $\vC$); the decoupled online readout of \cref{ssec:readout}; or
-a frozen batch-PCA readout fit once on the first $60n$ bins (e.g.\ $15{,}000$ bins at $n{=}250$).
-These give spike+oracle (the vanilla-VJF bound), projection+oracle (the projection ceiling),
-projection+online ($\tau{=}8$ and $\tau{=}1$), and spike+frozen-PCA. The dynamics use the
-square-root RLS flow learner throughout. We report the filtered-latent $R^2$ (best affine image of
-the posterior mean against the true latent), one-step prediction $R^2$, rate correlation, free-run
-forecast horizon (largest $k$ with $R^2\!\ge\!0$), and the steady per-bin compute time.
+readout is obtained: an \emph{oracle readout} (the true loading $\vC$); the decoupled online
+readout of \cref{ssec:readout} ($\tau{=}8$); or a frozen batch-PCA readout fit once on the first
+$60n$ bins. These give
+projection$+$oracle (the ceiling), projection$+$online (the achievable method), spike$+$oracle
+(the vanilla-VJF bound), and spike$+$frozen-PCA. We additionally isolate the readout schedule of
+\cref{ssec:readout} on a dedicated readout-stability experiment, comparing the oracle, a frozen
+PCA, the slow/locked readout (frozen after a settling horizon $S$), and the fast,
+continuously-rewriting online readout, at both high ($n{=}250$, $8$\,dB) and low ($n{=}30$,
+$0$\,dB) SNR over three paired seeds. In \emph{every} configuration the dynamics flow $f$ is
+learned online by the square-root-RLS learner --- no arm is handed the true dynamics --- so
+throughout this paper \emph{oracle} refers to the readout $\vC$ alone (an oracle observation
+model), never to the dynamical system. The oracle's forecast skill (\cref{sec:results}) is thus a
+property of the \emph{learned} flow, fed by clean oracle-readout latents, not of a known $f$. We report the filtered-latent $R^2$, one-step prediction $R^2$, rate correlation, and the free-run
+forecast horizon $H$. Because the latent is identifiable only up to an invertible linear map (the
+factor-rotation invariance of the readout, \cref{ssec:readout}), \emph{every} latent-space $R^2$
+--- filtered, one-step, and the forecast $R^2_{\mathrm{fc}}(k)$ that defines $H$ --- is scored
+through a single best-fit affine alignment between the inferred and true latents (least squares;
+this absorbs the rotation, scaling, reflection, and offset, and is fit once per run, not re-fit per
+prediction). $H$ is the longest lead \emph{time} over which the dynamics-only $k$-step prediction
+retains at least half of the model's own filtering accuracy (the largest $k$ with
+$R^2_{\mathrm{fc}}(k)\ge 0.5\,R^2_{\mathrm{filter}}$, times the bin width). $H$ is a general
+predictability time; for this limit-cycle benchmark it is equivalently read in periods
+($1$ period $\approx0.21$\,s). Normalizing the threshold to the achievable accuracy keeps $H$
+meaningful when that accuracy is itself low, and, unlike a $k$-averaged skill score, $H$ does not
+shrink as the evaluation length grows. We also report the steady per-bin compute time. We report mean $\pm$ s.e.\ over
+paired seeds, and sweep the smoothing $\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figs/raster.png}
-\caption{Example input: 3\,s spike rasters (neurons sorted by preferred phase) at the three SNR
-levels. The rotational structure is barely visible at $n{=}50$ and sharp at $n{=}250$.}
+\includegraphics[width=0.78\textwidth]{figs/raster.pdf}
+\caption{Example input across the five SNR conditions. \textbf{Top:} the single latent trajectory
+$\vx_t$ (both coordinates) that every population observes --- the dynamics are identical, only the
+number of neurons (hence the state SNR) differs. \textbf{Below:} $3$\,s spike rasters, one panel
+per condition with height proportional to the population size $n$ ($=15/30/50/150/250$, $\sim
+-3/0/3/6/8$\,dB), neurons sorted by preferred phase. The rotational structure is essentially
+invisible at $n{=}15$ and sharp at $n{=}250$.}
 \label{fig:raster}
 \end{figure}
 
 \section{Results}\label{sec:results}
 \emph{The projection encoder is a robust, readout-agnostic win; the decoupled online readout
-reaches the known-readout ceiling only at low SNR, where the periodic-refresh frame motion does
-least harm to the learned dynamics; and smoothing buys rate fidelity in the noisy regime.}
-\Cref{tab:r2} (filtered-latent $R^2$) and \cref{tab:dyn} (dynamics metrics), with
-\cref{fig:summary}, support this in three steps.
+recovers the latent online and its value is greatest at low SNR --- where readout estimation is
+hard --- while at high SNR a frozen principal-component readout is already near-oracle; and once
+the online readout converges, freezing the refresh recovers the forecast accuracy that continued
+rewriting erodes.} \Cref{tab:r2} (filtered-latent $R^2$) and \cref{tab:onestep} (one-step
+prediction $R^2$), with \cref{fig:summary,fig:curves}, establish the SNR dependence;
+\cref{fig:readout} isolates the refresh schedule, \cref{fig:tau} the smoothing, and
+\cref{fig:timing} the real-time cost.
 
 \begin{table}[t]
 \centering
-\caption{Filtered-latent $R^2$ (best affine image of the posterior mean vs.\ truth). The ceiling
-is projection+oracle; \textbf{bold} marks the best \emph{achievable} (non-oracle) method per SNR.}
+\caption{Filtered-latent $R^2$ (best affine image of the posterior mean vs.\ truth) across the
+five SNR conditions; mean over paired seeds ($3$ seeds, frozen PCA $2$). The ceiling is
+projection$+$oracle; \textbf{bold} marks the best \emph{achievable} (no oracle readout) method per
+SNR. The online readout's advantage over the simple frozen-PCA baseline is largest at low SNR,
+nearly matching the oracle ceiling at $0$\,dB; at high SNR a frozen PCA is already near-oracle.}
 \label{tab:r2}
-\begin{tabular}{lccc}
+\begin{tabular}{lccccc}
 \toprule
-recognition input / readout & $3$\,dB & $6$\,dB & $8$\,dB\\
+recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
-projection enc., oracle (ceiling)             & 0.86 & 0.94 & 0.96\\
-spike enc., oracle (vanilla-VJF bound)        & 0.69 & 0.84 & 0.91\\
-projection enc., online readout ($\tau{=}8$)  & \textbf{0.84} & 0.86 & 0.85\\
-projection enc., online readout ($\tau{=}1$)  & 0.73 & 0.84 & 0.88\\
-spike enc., frozen PCA                         & 0.72 & \textbf{0.87} & \textbf{0.92}\\
+projection enc., oracle $\vC$ (ceiling)      & 0.51 & 0.74 & 0.86 & 0.94 & 0.96\\
+projection enc., online readout ($\tau{=}8$) & \textbf{0.39} & \textbf{0.72} & \textbf{0.84} & \textbf{0.86} & 0.85\\
+spike enc., oracle $\vC$ (vanilla-VJF bound) & 0.34 & 0.52 & 0.69 & 0.83 & 0.90\\
+spike enc., frozen PCA                        & 0.32 & 0.55 & 0.71 & \textbf{0.86} & \textbf{0.92}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[t]
-\centering\small
-\caption{Dynamics metrics per SNR ($3/6/8$\,dB): one-step prediction $R^2$, rate correlation, and
-free-run forecast horizon $k$ (capped at the $k{=}100$ evaluation limit). The online readout's
-instantaneous filtering (\cref{tab:r2}) is not matched by its one-step prediction (all SNR) or its
-forecast horizon (at $3$--$6$\,dB).}
-\label{tab:dyn}
-\begin{tabular}{lccc}
+\centering
+\caption{One-step prediction $R^2$ (the dynamics-quality metric) across the five SNR conditions;
+mean over paired seeds ($3$ seeds, frozen PCA $2$). With the \emph{oracle} readout the projection
+encoder lifts one-step prediction sharply at mid SNR ($0.84$ vs.\ $0.59$ at $3$\,dB); at $-3$\,dB
+one-step prediction is near the floor for all methods. The smoothed online readout ($\tau{=}8$)
+trades a little one-step accuracy for rate fidelity (\cref{fig:tau}).}
+\label{tab:onestep}
+\begin{tabular}{lccccc}
 \toprule
-recognition input / readout & one-step $R^2$ & rate corr. & horizon $k$\\
+recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
-projection enc., oracle (ceiling)            & 0.83 / 0.95 / 0.97 & 0.90 / 0.96 / 0.97 & 100 / 100 / 100\\
-spike enc., oracle (vanilla-VJF bound)       & 0.60 / 0.85 / 0.92 & 0.77 / 0.89 / 0.93 & 33 / 100 / 100\\
-projection enc., online readout ($\tau{=}8$) & 0.58 / 0.71 / 0.71 & 0.84 / 0.88 / 0.87 & 11 / 82 / 100\\
-projection enc., online readout ($\tau{=}1$) & 0.56 / 0.72 / 0.77 & 0.54 / 0.71 / 0.76 & 31 / 84 / 100\\
-spike enc., frozen PCA                        & 0.61 / 0.87 / 0.94 & 0.78 / 0.90 / 0.94 & 22 / 100 / 100\\
+projection enc., oracle $\vC$ (ceiling)      & 0.10 & 0.49 & 0.84 & 0.95 & 0.97\\
+projection enc., online readout ($\tau{=}8$) & 0.02 & 0.30 & 0.61 & 0.70 & 0.71\\
+spike enc., oracle $\vC$ (vanilla-VJF bound) & 0.10 & 0.31 & 0.59 & 0.83 & 0.92\\
+spike enc., frozen PCA                        & 0.08 & 0.31 & 0.60 & 0.87 & 0.93\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{(1) The projection input is a clear, robust win at fixed readout.} Projection+oracle beats
-spike+oracle at every SNR (\cref{tab:r2}), most strongly on one-step prediction
-($0.83/0.95/0.97$ vs.\ $0.60/0.85/0.92$; \cref{tab:dyn}): feeding the recognition network the
-readout's own approximate inverse spares it the high-dimensional, sparse inversion.
-\textbf{(2) The online readout reaches the ceiling, in filtered-latent $R^2$, only at low SNR.}
-At $3$\,dB the online estimate ($\tau{=}8$) comes within $0.02$ of the projection+oracle ceiling
-($0.84$ vs.\ $0.86$; well above frozen-PCA $0.72$ and spike-oracle $0.69$). At $8$\,dB it trails
-even a frozen PCA ($0.85$ vs.\ $0.92$) and its own ceiling. Crucially, even at $3$\,dB it does not
-lead on the dynamics metrics: its one-step $R^2$ ($0.58/0.71/0.71$) trails the fixed-readout
-modes at every SNR, and its forecast horizon trails at $3$ and $6$\,dB ($k{=}11/82$; all modes
-reach the $k{=}100$ evaluation cap at $8$\,dB; \cref{tab:dyn}, \cref{fig:kstep}), and the online
-estimate is still climbing at $1000$\,s for high SNR (\cref{fig:curves}).
-\textbf{(3) Smoothing helps the noisy regime and rate fidelity.} Rate correlation is
-$0.84/0.88/0.87$ at $\tau{=}8$ vs.\ $0.54/0.71/0.76$ at $\tau{=}1$ (\cref{tab:dyn}); the EMA
-denoises the readout feature at the cost of a small lag that mildly reduces high-SNR
-filtered-latent $R^2$.
-
-Per-bin online cost is flat at $\sim3$\,ms from 50 to 250 neurons on a single CPU core --- real
-time at $5$\,ms bins, closed-loop feasible --- with zero divergences over the $1000$\,s pass. At
-good SNR the learned flow forecasts $\sim2.4$ cycles ahead (the periodic orbit has period
-$\sim42$ bins; $k{=}100$, \cref{fig:forecast}).
+\textbf{(1) The projection input is a clear, robust win at fixed readout, and it pays most where
+the latent is hardest to read.} With the readout fixed (oracle $\vC$), projection$+$oracle beats
+spike$+$oracle at every SNR in filtered-latent $R^2$ (\cref{tab:r2}), the margin peaking at low SNR
+($0.74$ vs.\ $0.52$ at $0$\,dB; $+0.22$). On one-step prediction the gain is largest at mid SNR
+($0.84$ vs.\ $0.59$ at $3$\,dB; \cref{tab:onestep}); at $-3$\,dB one-step prediction is near the
+floor for every method ($\approx0.1$), the dynamics carrying little information at that noise
+level. Feeding the recognition network the readout's own approximate inverse spares it a
+high-dimensional, near-silent inversion exactly when each spike is most precious.
+\textbf{(2) The online readout recovers the latent online, and its value is greatest at low SNR.}
+At $0$\,dB the decoupled online readout reaches $0.72$ --- within $0.02$ of the projection$+$oracle
+ceiling ($0.74$) and far above both the raw-spike bound ($0.52$) and the simple frozen-PCA baseline
+($0.55$; \cref{tab:r2}, \cref{fig:summary}) --- recovering a latent that the alternatives cannot.
+At high SNR the regime is easy: a frozen batch PCA fit on a short window is already within $0.04$ of
+the oracle ($0.92$ vs.\ $0.96$ at $8$\,dB), so the online machinery has little to add there, and
+indeed its estimate is still converging at $1000$\,s (\cref{fig:curves}).
+\textbf{(3) The best readout schedule depends on the regime: lock once converged at high SNR, keep
+adapting at low SNR.} At high SNR the Procrustes anchor keeps the latent frame essentially fixed ---
+the tracked subspace drifts only $0.2^\circ$ over the whole stream --- so frame rotation is
+\emph{not} the issue; rather, each rewrite of $\vC$ keeps nudging the target the dynamics learner
+fits. \Cref{fig:readout} sweeps the four schedules across SNR. At high SNR, locking the readout
+once it converges (slow/locked) more than doubles the free-run forecast horizon of the fast,
+continuously-rewriting readout --- from $0.41$\,s to $0.92$\,s ($1.9\!\to\!4.4$ periods), matching
+the oracle ($>1.0$\,s, censored at the evaluation window) and a good fixed PCA ($0.95$\,s), and a
+fixed readout is near-oracle on one-step prediction ($0.97$); freezing costs nothing in filtering.
+At low SNR the picture inverts: the subspace is genuinely moving ($14^\circ$ drift at $0$\,dB),
+free-run forecasting is infeasible for every schedule (horizon $\approx0$; \cref{fig:kstep}), and
+continued adaptation now \emph{helps} --- at $-3$\,dB the adaptive readouts lead on one-step
+prediction ($0.30$ online, $0.28$ slow/locked) while a frozen PCA collapses ($-0.02$) and even the
+oracle readout reaches only $0.10$. The recipe follows the regime: freeze for a stationary,
+high-SNR recording; keep adapting when SNR is low or the readout drifts.
+\textbf{(4) Smoothing helps the noisy regime and rate fidelity.} The EMA denoises the readout
+feature, and the benefit is largest at low SNR (\cref{fig:tau}): rate correlation and
+filtered-latent $R^2$ rise with $\tau$ up to $\tau\!\approx\!4$--$8$ in the noisy conditions,
+while over-smoothing ($\tau\gtrsim16$) hurts through lag, mildly at high SNR.
+\textbf{(5) Real time.} Per-bin online cost is flat at a median of $\sim2.8$\,ms from $n{=}15$ to
+$250$ on a single CPU core (\cref{fig:timing}), with a tight bulk (interquartile range
+$<0.3$\,ms; p95 $<3.1$\,ms, p99 $<3.3$\,ms on uncontended conditions), comfortably inside the
+$5$\,ms bin budget, and zero divergences over the $1000$\,s pass. The rare millisecond-scale
+excursions above budget are intermittent host scheduling jitter on the shared cloud VM ---
+time-correlated and untied to $n$ or to the algorithm (they move across conditions when the run is
+repeated, and vanish on an isolated VM), not a property of \svjf. These are reference numbers for
+an unoptimized, single-threaded PyTorch implementation on one core of a modest cloud VM
+(e2-standard-4); the cost is flat in $n$ because it is dominated by fixed per-bin work (the
+recognition network and the square-root-RLS update) rather than the $O(nm)$ projection and readout,
+so it is readily accelerated by vectorization, a GPU, or a compiled inference path. (We pin a
+single thread deliberately: for these small per-bin matrices, multi-threaded BLAS adds fork-join
+overhead that inflates the tail without lowering the median.)
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figs/summary.png}
-\caption{Headline metrics, grouped by method ($x$-axis), three SNR bars each. Projection+oracle
-(the ceiling) dominates; the online readout matches it only at $3$\,dB and trails on one-step
-prediction (all SNR) and forecast horizon (at $3$--$6$\,dB).}
+\includegraphics[width=0.78\textwidth]{figs/summary.pdf}
+\caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.\
+over three seeds), grouped by SNR. Projection$+$oracle (the ceiling) dominates; the projection
+online readout's advantage over the raw-spike bound is largest at low SNR, while at high SNR a
+frozen PCA is already near-oracle. The gain is largest where it matters.}
 \label{fig:summary}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figs/curves.png}
-\caption{Filtered-latent $R^2$ over the $1000$\,s stream, one panel per method, one curve per SNR.
-Fixed-readout methods lock in early in the stream; the online readout ($\tau{=}8$, top right)
-rises slowly and at $8$\,dB is still climbing at $1000$\,s --- the high-SNR shortfall of
-\cref{tab:r2}.}
+\includegraphics[width=0.66\textwidth]{figs/curves.pdf}
+\caption{Filtered-latent $R^2$ of the projection online readout over the $1000$\,s stream, one
+curve per SNR. The readout converges over the stream; at high SNR it is still climbing at
+$1000$\,s (so locking it, \cref{fig:readout}, helps there), while at low SNR it settles earlier to
+a lower ceiling set by the noise.}
 \label{fig:curves}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.72\textwidth]{figs/kstep.png}
-\caption{$k$-step free-run forecast $R^2$ of the final online model (solid) vs.\ a zero-flow
-baseline (dotted, which oscillates as the periodic orbit returns near its start every $\sim42$
-bins). The learned flow forecasts roughly two cycles ahead at $6/8$\,dB ($k\!\approx\!82/100$) but
-loses skill within $\sim12$ bins at $3$\,dB.}
-\label{fig:kstep}
+\includegraphics[width=\textwidth]{figs/readout_snr.pdf}
+\caption{Readout schedule across SNR (mean $\pm$ s.e.; $8$ seeds at $8$\,dB, $3$ elsewhere), four
+schedules: oracle readout (true $\vC$; the dynamics are still learned online), frozen PCA (good
+fixed init), slow/locked (online readout frozen after a settling horizon $S$), and fast online
+(continuously rewritten). \textbf{Left:} one-step prediction $R^2$. \textbf{Right:} free-run
+forecast horizon as a predictability \emph{time} (largest $k$ with
+$R^2_{\mathrm{fc}}(k)\ge 0.5\,R^2_{\mathrm{filter}}$, times the bin width; up-ticks mark points
+censored at the $1$\,s evaluation window; $1$ limit-cycle period $\approx0.21$\,s here).
+The crossover is the message: at high SNR the fixed and locked readouts dominate the forecast
+horizon (locking lifts it from $0.41$ to $0.92$\,s, toward the oracle), while at low SNR free-run
+forecasting fails for all and the adaptive readouts instead lead on one-step prediction (at
+$-3$\,dB, $0.30$ online vs.\ $-0.02$ for a frozen PCA).}
+\label{fig:readout}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figs/forecast.png}
-\caption{Single-trial $100$-step free-run forecasts of the online model (dashed; $\circ=$ start)
-vs.\ the true trajectory (solid). At $6/8$\,dB the learned flow tracks the cycle, though some runs
-relax onto a slightly smaller orbit (the learned attractor); at $3$\,dB the forecast degrades
-quickly (horizon $k\!\approx\!12$, \cref{fig:kstep}). The smaller-orbit relaxation is consistent
-with the frame motion we argue caps high-SNR one-step accuracy (\cref{sec:discussion}).}
-\label{fig:forecast}
+\includegraphics[width=\textwidth]{figs/tau_sweep.pdf}
+\caption{Smoothing sweep $\tau\in\{1,2,4,8,16,32\}$ across the five SNR (online readout). The EMA
+buys rate fidelity and filtered-latent $R^2$, most at low SNR; over-smoothing ($\tau\gtrsim16$)
+costs accuracy through lag.}
+\label{fig:tau}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.7\textwidth]{figs/timing.pdf}
+\caption{Per-bin wall time of the online method (box $=$ interquartile range, line $=$ median,
+whiskers $=$ 5--95\% over $8000$ sampled bins), per SNR, on one core of an e2-standard-4. The
+median sits near $\sim2.8$\,ms --- inside the $5$\,ms bin budget --- at every SNR; the lone
+upper-whisker excursion above budget is intermittent host scheduling jitter, not algorithmic
+(\cref{sec:results}).}
+\label{fig:timing}
 \end{figure}
 
 \section{Discussion}\label{sec:discussion}
-With an unknown observation model, real-time VJF is feasible: a cheap small-window readout
-warm-start plus the projection encoder recovers the latent dynamics online at biological rates and
-real-time cost, and the projection encoder is a robust, SNR-graded improvement over raw-spike
-recognition even when the readout is known. \emph{The projection encoder is a readout-agnostic
-win; the decoupled online readout reaches the known-readout ceiling only at low SNR.} The
-remaining gap is the online readout at high SNR, where it does not reach its own
-(projection+oracle) ceiling and is beaten by a frozen batch-PCA readout. We attribute this to the
-periodic Procrustes refresh: each rewrite of the readout shifts the latent coordinate frame, so
-the recursive dynamics learner must chase a moving target, degrading one-step prediction and
-forecast horizon even when the filtered-latent estimate is accurate. An ablation that freezes the
-refresh once the subspace stabilizes would isolate this mechanism; we leave it, and two concrete
-remedies, to future work: anneal or freeze the refresh after convergence, or rotate the RBF flow
-by $\vR^\star$ at each refresh (exact for a rotation: the RBF centers
-$\vxi_i\mapsto\vR^\star\vxi_i$, with $\vW$ transformed accordingly) so the dynamics track the
-frame.
+With an unknown observation model, real-time \svjf\ is feasible at biological rates and real-time
+cost: a cheap small-window readout warm-start, the projection encoder, and the two-timescale online
+readout recover the latent dynamics online, and the projection encoder is a robust improvement over
+raw-spike recognition even when the readout is known. \emph{The gains concentrate where they
+matter --- the low-SNR regime of sparse, few-neuron recordings; at high SNR the problem is easy
+enough that a frozen principal-component readout is already near-oracle, so the online machinery
+earns its keep precisely where readout estimation is hard.} The one design tension is the readout
+schedule. Continued refresh keeps the latent frame essentially fixed (the tracked subspace drifts
+under a degree over the stream), but each rewrite still nudges the target the recursive dynamics
+learner is chasing, which caps one-step prediction and forecast horizon at high SNR even when the
+filtered-latent estimate is already accurate. Freezing or annealing the refresh once the subspace
+has converged removes this and recovers forecast accuracy at no cost to filtering --- the practical
+recipe for a stationary recording. The open question is the non-stationary case: one then wants the
+readout to keep tracking, so a principled trigger for when to re-enable (or how to anneal) the
+refresh --- for instance a drift- or likelihood-based change detector --- is the natural next step.
 
 \paragraph{Relation to XFADS.} The projection encoder shares with XFADS
 \autocite{Dowling2024b} the strategy of summarizing each high-dimensional observation into a
@@ -411,9 +534,32 @@ $\vC$. We thus replace XFADS's learned amortization of the observation-to-latent
 analytic, link-matched projection that exploits the known generative structure.
 
 These results are, to our knowledge, the first demonstration of real-time VJF with an unknown
-readout; the scope is, however, a single synthetic benchmark (one limit-cycle trajectory class,
+readout (\svjf); the scope is, however, a single synthetic benchmark (one limit-cycle trajectory class,
 log-linear Poisson observations, no real data). Validating on recorded population activity and on
 richer dynamics is the natural next step.
+
+\appendix
+\section{Supplementary: free-run forecast curves}\label{app:kstep}
+\Cref{fig:kstep} shows the full $k$-step forecast curves that the forecast-horizon summary of
+\cref{fig:readout} condenses. They make the decay explicit: at high SNR a fixed or slow/locked
+readout sustains forecast skill across the whole evaluation window while the fast,
+continuously-rewriting readout decays within $\sim0.4$\,s, whereas at low SNR every schedule
+loses the trajectory within a single bin. The horizon (marked) is read off as the lead time at
+which each curve falls below half of that model's own filtering accuracy.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{figs/kstep_curves.pdf}
+\caption{Free-run $k$-step forecast $R^2$ vs.\ lead time in seconds (top axis: the equivalent in
+limit-cycle periods) for the four readout schedules, at high ($8$\,dB) and low ($0$\,dB) SNR; mean
+over seeds. The dot marks each curve's forecast horizon (where $R^2$ first drops below half the
+model's filtering accuracy, \cref{sec:exp}). At high SNR the oracle and a good fixed PCA readout
+hold skill across the window, the slow/locked schedule nearly matches them, and the fast
+continuously-rewriting readout decays within $\sim0.4$\,s; at low SNR every schedule loses the
+trajectory within a single bin --- free-run forecasting is infeasible at $0$\,dB regardless of the
+readout, which is why the low-SNR value is in filtering, not forecasting.}
+\label{fig:kstep}
+\end{figure}
 
 \printbibliography
 

@@ -839,3 +839,10 @@ script
 
 # tutorial-generated plots
 examples/tutorial_out/
+
+# experiment scratch / VM run artifacts (large; raw data not tracked -- paper figures are
+# regenerated from the slimmed JSONs in paper/data/ via paper/figs_src/)
+gcp_runs/exp-*/
+experiments/lc_poisson_stream/results/
+experiments/lc_poisson_stream/results_e1/
+experiments/lc_poisson_stream/*.pdf
