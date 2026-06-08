@@ -95,7 +95,7 @@ the signal-to-noise range of population recordings ($-3$ to $8$\,dB; \cref{sec:e
 and give a calibrated verdict: the contributions earn their keep in the \emph{low-SNR} regime
 typical of neural data --- few neurons, sparse spikes --- where readout estimation is hard; at
 high SNR the problem is easy enough that a frozen principal-component readout is already
-near-oracle. The projection encoder is a robust win at any fixed readout, and once the online
+near-oracle. The projection encoder is a robust win with the readout fixed (oracle), and once the online
 readout converges, freezing or annealing its refresh recovers forecast accuracy that continued
 rewriting erodes.
 
@@ -150,9 +150,10 @@ recovered --- one-step $R^2$ stalls at $0.2$--$0.4$ --- because the readout grad
 the per-bin expected count $g(\vC\vx_t+\vb)\!\approx\!10^{-1}$ (\cref{ssec:readout}), so $\vC$ slides
 to a mean-rate solution while the recognition network, handed the raw, mostly-silent spikes, cannot
 invert it. Hand the \emph{same} model the \emph{oracle} readout at initialization and it converges
-to $R^2\!\approx\!0.94$ --- pinpointing the unknown readout, not the dynamics, as the obstacle.
-\svjf\ reaches $R^2\!\approx\!0.93$ from spikes alone, recovering what an oracle readout would give
-without one.
+to one-step $R^2\!\approx\!0.94$ --- pinpointing the unknown readout, not the dynamics, as the
+obstacle. \svjf\ reaches one-step $R^2\!\approx\!0.93$ from spikes alone, recovering what an oracle
+readout would give without one. (These are trailing-window estimates on a single $n{=}50$ stream,
+so they index convergence rather than the seed-averaged steady-state $R^2$ of \cref{tab:r2,tab:onestep}.)
 
 \begin{figure}[!ht]
 \centering
@@ -213,7 +214,7 @@ subspace of the smoothed log-rate, which we can track online without ever formin
 Concretely we use candid covariance-free incremental PCA (CCIPCA) \autocite{weng2003candid} on the
 centered feature $\vr_t=\vl_t-\bar\vb_t$ (distinct from the control $\vu_t$): maintaining vectors
 $\vv_1,\dots,\vv_m$ that converge to $\lambda_i\ve_i$ (eigenvalue $\times$ eigenvector of
-$\E[\vr\vr\trp]$). With $\vr_t^{(1)}=\vr_t$ and rate $\eta_t=1/t$, for $i=1,\dots,m$,
+$\E[\vr\vr\trp]$). With $\vr_t^{(1)}=\vr_t$ and rate $\eta_t=1/t$ ($t$ counting CCIPCA updates from $1$), for $i=1,\dots,m$,
 \begin{align}
   \vv_i &\leftarrow (1-\eta_t)\,\vv_i + \eta_t\,\big(\vr_t^{(i)\trp}\hat\vv_i\big)\,\vr_t^{(i)},
      \qquad \hat\vv_i=\vv_i/\norm{\vv_i}, \tag{Hebb}\label{eq:hebb}\\
@@ -254,7 +255,7 @@ against a target that keeps moving. The two-timescale schedule below addresses t
 \paragraph{Freezing the refresh once converged (optional).}
 Once the readout subspace has stabilized --- which at high SNR happens well within a $1000$\,s
 stream --- the slow outer loop can be \emph{annealed or frozen}: after a settling horizon $S$ we stop (or
-geometrically slow) the writes, fixing the decoder while the recognition, flow, and biases keep
+geometrically slow) the writes, fixing the readout $(\vC,\bar\vb)$ while the recognition network and flow keep
 adapting. This is the practical recipe for a stationary recording --- it removes the residual
 target motion and, as \cref{sec:results} shows, recovers one-step prediction and forecast horizon
 at no cost to filtering. Freezing is deliberately optional: in a non-stationary setting one wants
@@ -345,7 +346,8 @@ reparameterized ELBO-gradient step. \Cref{alg:rtvjf} changes three of them: the 
 the projection $\vpi_t$ instead of the raw $\vy_t$; the readout $(\vC,\vb)$ is taken out of the
 gradient and estimated by CCIPCA with a Procrustes anchor; and the flow weights $\vW$ are taken out
 of the gradient and fit by square-root RLS. The ELBO-gradient step therefore trains only the
-recognition network (and the remaining biases). A warm-up, a posterior-variance floor, and a
+recognition network and the latent prior $(\vmu_0,\vs_0)$; the readout and flow are estimated
+outside it. A warm-up, a posterior-variance floor, and a
 state-magnitude guard then make the single step safe to iterate for $10^5$ bins. Everything else
 --- the generative model, the reparameterized bound, and the posterior threading --- is the vanilla
 update.
@@ -366,12 +368,14 @@ the trajectory's coverage of state space) that we do not attempt to quantify her
 is consequential: a regime can carry enough state SNR to filter the latent accurately yet too
 little dynamics information to learn a flow that forecasts (\cref{sec:results}). The lower three ($-3/0/3$\,dB) are the sparse, few-neuron regime typical of
 population recordings; the upper two are the easy end, included for completeness. We compare four
-configurations, crossing the recognition input (spike vs.\ projection encoder) with how the
-readout is obtained: an \emph{oracle readout} (the true loading $\vC$); the decoupled online
-readout of \cref{ssec:readout} ($\tau{=}8$); or a frozen batch-PCA readout fit once on the first
-$60n$ bins. These give
-projection$+$oracle (the ceiling), projection$+$online (the achievable method), spike$+$oracle
-(the vanilla-VJF bound), and spike$+$frozen-PCA. We additionally isolate the readout schedule of
+configurations of recognition input (spike vs.\ projection encoder) and readout source (a selected
+set, not a full cross): projection$+$oracle (the ceiling, true loading $\vC$), projection$+$online
+(the achievable method, the decoupled online readout of \cref{ssec:readout}, $\tau{=}8$),
+spike$+$oracle (the raw-spike recognition bound given a perfect readout), and spike$+$frozen-PCA (a
+simple baseline: a batch-PCA readout fit once on the first $60n$ bins). Note that
+projection$+$online differs from spike$+$frozen-PCA in \emph{both} encoder and readout, so we read
+it against its own-encoder ceiling (projection$+$oracle) rather than as an isolated readout
+contrast. We additionally isolate the readout schedule of
 \cref{ssec:readout} in a \emph{separate} readout-stability experiment (its own driver and arms,
 distinct from the four-configuration comparison above), comparing the oracle, a frozen PCA, the
 slow/locked readout (frozen after a settling horizon $S$), and the fast, continuously-rewriting
@@ -393,9 +397,9 @@ $R^2_{\mathrm{fc}}(k)\ge 0.5\,R^2_{\mathrm{filter}}$, times the bin width). $H$ 
 predictability time; for this limit-cycle benchmark it is equivalently read in periods
 ($1$ period $\approx0.21$\,s). Normalizing the threshold to the achievable accuracy keeps $H$
 meaningful when that accuracy is itself low, and, unlike a $k$-averaged skill score, $H$ does not
-shrink as the evaluation length grows. We also report the steady per-bin compute time. All metrics
-are averaged as mean $\pm$ s.e.\ over paired seeds, and we sweep the smoothing
-$\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
+shrink as the evaluation length grows. We also report the steady per-bin compute time. Results use
+paired seeds (3 per condition; frozen PCA 2): tables report the seed means, and figures show
+mean $\pm$ s.e. We sweep the smoothing $\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
 
 \begin{figure}[t]
 \centering
@@ -422,10 +426,11 @@ prediction $R^2$), with \cref{fig:summary,fig:curves}, establish the SNR depende
 \begin{table}[t]
 \centering
 \caption{Filtered-latent $R^2$ (best affine image of the posterior mean vs.\ truth) across the
-five SNR conditions; mean over paired seeds ($3$ seeds, frozen PCA $2$). The ceiling is
-projection$+$oracle; \textbf{bold} marks the best \emph{achievable} (no oracle readout) method per
-SNR. The online readout's advantage over the simple frozen-PCA baseline is largest at low SNR,
-nearly matching the oracle ceiling at $0$\,dB; at high SNR a frozen PCA is already near-oracle.}
+five SNR conditions; table values are means over paired seeds ($3$ seeds; frozen PCA $2$). The
+ceiling is projection$+$oracle; \textbf{bold} marks the best \emph{achievable} (no oracle readout)
+method per SNR. Projection$+$online comes closest to its own-encoder ceiling at low SNR (within
+$0.02$ of projection$+$oracle at $0$\,dB) and clears both no-oracle references there; at high SNR
+the gap to the ceiling widens and a frozen-PCA readout is already near-oracle.}
 \label{tab:r2}
 \begin{tabular}{lccccc}
 \toprule
@@ -433,7 +438,7 @@ recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
 projection enc., oracle $\vC$ (ceiling)      & 0.51 & 0.74 & 0.86 & 0.94 & 0.96\\
 projection enc., online readout ($\tau{=}8$) & \textbf{0.39} & \textbf{0.72} & \textbf{0.84} & \textbf{0.86} & 0.85\\
-spike enc., oracle $\vC$ (vanilla-VJF bound) & 0.34 & 0.52 & 0.69 & 0.83 & 0.90\\
+spike enc., oracle $\vC$ (raw-spike bound) & 0.34 & 0.52 & 0.69 & 0.83 & 0.90\\
 spike enc., frozen PCA                        & 0.32 & 0.55 & 0.71 & \textbf{0.86} & \textbf{0.92}\\
 \bottomrule
 \end{tabular}
@@ -453,7 +458,7 @@ recognition input / readout & $-3$\,dB & $0$\,dB & $3$\,dB & $6$\,dB & $8$\,dB\\
 \midrule
 projection enc., oracle $\vC$ (ceiling)      & 0.10 & 0.49 & 0.84 & 0.95 & 0.97\\
 projection enc., online readout ($\tau{=}8$) & 0.02 & 0.30 & 0.61 & 0.70 & 0.71\\
-spike enc., oracle $\vC$ (vanilla-VJF bound) & 0.10 & 0.31 & 0.59 & 0.83 & 0.92\\
+spike enc., oracle $\vC$ (raw-spike bound) & 0.10 & 0.31 & 0.59 & 0.83 & 0.92\\
 spike enc., frozen PCA                        & 0.08 & 0.31 & 0.60 & 0.87 & 0.93\\
 \bottomrule
 \end{tabular}
@@ -511,10 +516,10 @@ overhead that inflates the tail without lowering the median.)
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.78\textwidth]{figs/summary.pdf}
-\caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.\
-over three seeds), grouped by SNR. Projection$+$oracle (the ceiling) dominates; the projection
-online readout's advantage over the raw-spike bound is largest at low SNR, while at high SNR a
-frozen PCA is already near-oracle.}
+\caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.;
+$3$ seeds, frozen PCA $2$), grouped by SNR. Projection$+$oracle (the ceiling) dominates;
+projection$+$online stays closest to that ceiling at low SNR and clears the no-oracle references,
+while at high SNR a frozen PCA is already near-oracle.}
 \label{fig:summary}
 \end{figure}
 
