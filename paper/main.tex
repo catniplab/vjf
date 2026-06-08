@@ -123,19 +123,19 @@ is identifiable only up to an invertible $\vR$, since $\vC\vx_t=(\vC\vR)(\vR^{-1
 \autocite{zhao2020variational} initializes $\vC$ by factor analysis and column-wise
 $\ell_2$-normalizes it every iteration, which fixes the column scale but leaves the
 rotation/reflection free. \Cref{alg:vjf} reproduces the original single-step VJF procedure,
-our reference point: it feeds the raw $\vy_t$ to $h$ and updates \emph{all} parameters $\bm\Theta$
+our reference point: it feeds the raw $\vy_t$ to $h$ and updates \emph{all} parameters $\theta$
 --- including the readout $\vC,\vb$ --- by one reparameterized ELBO gradient.
 
 \begin{algorithm}[!ht]
 \caption{Vanilla VJF, single step (reproduced from \autocite{zhao2020variational}).}
 \label{alg:vjf}
 \begin{algorithmic}[1]
-\Procedure{Vjf}{$\vy_t,\vu_{t-1},\vmu_{t-1},\vs_{t-1},\bm\Theta$}
+\Procedure{Vjf}{$\vy_t,\vu_{t-1},\vmu_{t-1},\vs_{t-1},\theta$}
   \State $\veps_t,\veps_{t-1}\sim\mathcal N(\bm0,\vI)$ \Comment{draw samples}
   \State $[\vmu_t,\vs_t]\coloneqq h(\vy_t,\vu_{t-1},\vmu_{t-1},\vs_{t-1})$ \Comment{recognition on raw $\vy_t$}
   \State $\tilde\vx_t\coloneqq\vmu_t+\vs_t^{1/2}\veps_t$;\quad $\tilde\vx_{t-1}\coloneqq\vmu_{t-1}+\vs_{t-1}^{1/2}\veps_{t-1}$
-  \State update \emph{all} $\bm\Theta$ (incl.\ $\vC,\vb$) by $\nabla_{\bm\Theta}\hat{\mathcal L}(\bm\Theta;\vy_t,\tilde\vx_t,\tilde\vx_{t-1},\vu_{t-1})$ \Comment{model update}
-  \State \Return $\vmu_t,\vs_t,\bm\Theta$
+  \State update \emph{all} $\theta$ (incl.\ $\vC,\vb$) by $\nabla_{\theta}\hat{\mathcal L}(\theta;\vy_t,\tilde\vx_t,\tilde\vx_{t-1},\vu_{t-1})$ \Comment{model update}
+  \State \Return $\vmu_t,\vs_t,\theta$
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
@@ -393,8 +393,9 @@ $R^2_{\mathrm{fc}}(k)\ge 0.5\,R^2_{\mathrm{filter}}$, times the bin width). $H$ 
 predictability time; for this limit-cycle benchmark it is equivalently read in periods
 ($1$ period $\approx0.21$\,s). Normalizing the threshold to the achievable accuracy keeps $H$
 meaningful when that accuracy is itself low, and, unlike a $k$-averaged skill score, $H$ does not
-shrink as the evaluation length grows. We also report the steady per-bin compute time. We report mean $\pm$ s.e.\ over
-paired seeds, and sweep the smoothing $\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
+shrink as the evaluation length grows. We also report the steady per-bin compute time. All metrics
+are averaged as mean $\pm$ s.e.\ over paired seeds, and we sweep the smoothing
+$\tau\in\{1,2,4,8,16,32\}$ across all five SNR.
 
 \begin{figure}[t]
 \centering
