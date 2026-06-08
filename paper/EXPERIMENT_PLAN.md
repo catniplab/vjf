@@ -84,8 +84,10 @@ flow differs), vary ONLY how $\vW$ is learned: SGD/Adam (the original VJF) vs sq
 Compare online convergence speed and stability over the long stream: filtered-latent $R^2$ and
 one-step $R^2$ vs stream position, plus wall-time to a target $R^2$. Expectation: square-root RLS
 converges far faster (W enters linearly) and stays stable, motivating the srrls contribution
-(\cref{ssec:srrls}). Note: code keeps `flow_learner='sgd'` (torch.optim.SGD; swap to Adam for the
-exact original) and `'srrls'`.
+(\cref{ssec:srrls}). Note: code keeps `flow_learner='sgd'` (currently torch.optim.SGD) and
+`'srrls'`. HISTORY: the original VJF used **Adam**; it was swapped to SGD on 2021-07-27 (commits
+cda9668 then d2e687e) during a refactor, not a deliberate choice. For the exact-original arm,
+restore `torch.optim.Adam` (a one-line change at vjf/model.py:70).
 
 ## 4. Figure plan (claims-first)
 
