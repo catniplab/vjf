@@ -53,11 +53,10 @@ per-bin update and a slow periodic write --- instead of the variational gradient
 loop. On a 1000-second, biologically calibrated Poisson limit-cycle benchmark spanning the
 signal-to-noise range of population recordings ($-3$ to $8$\,dB), \svjf\ runs in about three
 milliseconds per five-millisecond bin on a single CPU --- real time --- and recovers the latent
-state online with the readout unknown. \emph{The gains concentrate in the low-SNR regime typical of
-neural data: there the projection encoder and the online readout recover the latent that raw-spike
-recognition cannot, whereas at high SNR the problem is easy enough that even a frozen
-principal-component readout is near-oracle.} Once the online readout has converged, freezing or
-annealing its refresh recovers forecast accuracy that continued rewriting would otherwise erode.
+state online with the readout unknown. \emph{In the low-SNR regime typical of neural data --- few neurons, sparse spikes --- the
+projection encoder and the online readout recover the latent state that raw-spike recognition
+cannot; at high SNR the problem is easy enough that even a frozen principal-component readout is
+near-oracle.}
 \end{abstract}
 
 \section{Introduction}
@@ -366,7 +365,7 @@ the trajectory's coverage of state space) that we do not attempt to quantify her
 is consequential: a regime can carry enough state SNR to filter the latent accurately yet too
 little dynamics information to learn a flow that forecasts (\cref{sec:results}). The lower three ($-3/0/3$\,dB) are the sparse, few-neuron regime typical of
 population recordings; the upper two are the easy end, included for completeness. We compare four
-configurations of recognition input (spike vs.\ projection encoder) and readout source (a selected
+configurations of recognition input (raw-spike vs.\ projection encoder) and readout source (a selected
 set, not a full cross): projection$+$oracle (the ceiling, true loading $\vC$), projection$+$online
 (the achievable method, the decoupled online readout of \cref{ssec:readout}, $\tau{=}8$),
 spike$+$oracle (the raw-spike recognition bound given a perfect readout), and spike$+$frozen-PCA (a
@@ -405,9 +404,10 @@ recovers the latent online and its value is greatest at low SNR --- where readou
 hard --- while at high SNR a frozen principal-component readout is already near-oracle; and once
 the online readout converges, freezing the refresh recovers the forecast accuracy that continued
 rewriting erodes.} \Cref{tab:r2} (filtered-latent $R^2$) and \cref{tab:onestep} (one-step
-prediction $R^2$), with \cref{fig:summary,fig:curves}, establish the SNR dependence;
-\cref{fig:readout} isolates the refresh schedule, \cref{fig:tau} the smoothing, and
-\cref{fig:timing} the real-time cost.
+prediction $R^2$), with \cref{fig:summary}, compare \svjf\ against its ablations and the oracle
+ceiling and establish the SNR dependence; the remaining figures then characterize \svjf\ itself ---
+\cref{fig:curves} its online convergence, \cref{fig:readout} the refresh schedule, \cref{fig:tau}
+the smoothing, and \cref{fig:timing} the real-time cost.
 
 \begin{table}[t]
 \centering
@@ -503,9 +503,14 @@ overhead that inflates the tail without lowering the median.)
 \centering
 \includegraphics[width=\textwidth]{figs/summary.pdf}
 \caption{Latent recovery across the five SNR conditions (filtered-latent $R^2$, mean $\pm$ s.e.;
-$3$ seeds, frozen PCA $2$), grouped by SNR. Projection$+$oracle (the ceiling) dominates;
-projection$+$online stays closest to that ceiling at low SNR and clears the no-oracle references,
-while at high SNR a frozen PCA is already near-oracle.}
+$3$ seeds, frozen PCA $2$), grouped by SNR. Each bar is one (encoder, readout) configuration. The
+\emph{encoder} is what the recognition network reads: the \emph{projection encoder} feeds it the
+readout's low-dimensional approximate inverse (a few latent coordinates, \cref{ssec:proj}); the
+\emph{raw-spike encoder} feeds it the full spike-count vector $\vy_t$. The \emph{readout} supplies
+$\vC$: \emph{oracle} (the true loading), the \svjf\ \emph{online} readout (\cref{ssec:readout}), or
+a \emph{frozen PCA} fit once on the first $60n$ bins. Projection$+$oracle (the ceiling) dominates;
+\svjf\ (projection$+$online) stays closest to that ceiling at low SNR and clears the no-oracle
+references, while at high SNR a frozen PCA is already near-oracle.}
 \label{fig:summary}
 \end{figure}
 

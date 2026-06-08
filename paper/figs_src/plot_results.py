@@ -188,7 +188,7 @@ def fig_kstep_curves():
             ax.set_ylabel("free-run forecast $R^2$")
     _h, _l = axes[0][0].get_legend_handles_labels()
     fig.legend(_h, _l, loc="outside right center", title="readout")
-    fig.suptitle(r"$k$-step free-run forecast skill ($\bullet$ = horizon, where $R^2$ drops "
+    fig.suptitle(r"sVJF $k$-step free-run forecast skill ($\bullet$ = horizon, where $R^2$ drops "
                  r"below half the filtering accuracy)")
     fig.savefig(os.path.join(FIGS, "kstep_curves.pdf")); plt.close(fig)
 
@@ -305,7 +305,7 @@ def fig_readout_snr():
     axes[1].axhline(CAP_S, ls="--", lw=0.8, color="0.55")
     _h, _l = axes[0].get_legend_handles_labels()
     fig.legend(_h, _l, loc="outside right center", title="readout", title_fontsize=8)
-    fig.suptitle("Readout schedule across SNR: adapt at low SNR, lock once converged at high SNR")
+    fig.suptitle("sVJF readout schedule across SNR: adapt at low SNR, lock once converged at high SNR")
     fig.savefig(os.path.join(FIGS, "readout_snr.pdf")); plt.close(fig)
 
 
@@ -370,7 +370,7 @@ def fig_tau():
         ax.set_xlabel(r"smoothing $\tau$ (bins)"); ax.set_ylabel(yl); ax.set_ylim(0, 1.0); ax.set_title(ttl)
     _h, _l = axes[1].get_legend_handles_labels()
     fig.legend(_h, _l, loc="outside right center", title="SNR")
-    fig.suptitle(r"Smoothing helps most at low SNR; the optimal $\tau$ grows with SNR")
+    fig.suptitle(r"sVJF smoothing: helps most at low SNR; the optimal $\tau$ grows with SNR")
     fig.savefig(os.path.join(FIGS, "tau_sweep.pdf")); plt.close(fig)
 
 
@@ -398,7 +398,7 @@ def fig_timing():
     ax.text(pos[-1] + 0.5, 5.08, "5 ms bin budget", ha="right", va="bottom", fontsize=8, color=INK)
     ax.set_ylim(0, 6.0); ax.set_xlim(0.5, len(d) + 0.5)
     ax.set_xticks(pos); ax.set_xticklabels(labels); ax.set_ylabel("per-bin wall time (ms)")
-    ax.set_title("Real-time per-bin latency (single core, Intel Xeon @ 2.20 GHz)\n"
+    ax.set_title("sVJF real-time per-bin latency (single core, Intel Xeon @ 2.20 GHz)\n"
                  "box = IQR, line = median, whiskers = 5-95%")
     fig.savefig(os.path.join(FIGS, "timing.pdf")); plt.close(fig)
 
@@ -416,10 +416,10 @@ def fig_summary():
     by = _main_runs()
     if not by:
         print("skip summary (no main data yet)"); return
-    modes = [("projoracle", "proj+oracle (ceiling)", METHOD_COLORS["proj_oracle"]),
-             ("online", "projection + online readout", METHOD_COLORS["online"]),
-             ("frozenpca", "spike + frozen PCA", METHOD_COLORS["frozen_pca"]),
-             ("spikeoracle", "spike + oracle", METHOD_COLORS["spike_oracle"])]
+    modes = [("projoracle", "projection enc. + oracle $C$ (ceiling)", METHOD_COLORS["proj_oracle"]),
+             ("online", "projection enc. + online readout (sVJF)", METHOD_COLORS["online"]),
+             ("frozenpca", "raw-spike enc. + frozen PCA", METHOD_COLORS["frozen_pca"]),
+             ("spikeoracle", "raw-spike enc. + oracle $C$", METHOD_COLORS["spike_oracle"])]
     modes = [m for m in modes if by.get(m[0])]
     fig, ax = plt.subplots(figsize=(FW(1.0), 3.0)); _faint_ygrid(ax)
     x = np.arange(len(SNRS)); w = 0.8 / len(modes)
@@ -458,7 +458,7 @@ def fig_curves():
         ax.plot(steps, m, color=SNR_COL[s], label=f"{s} dB")
     ax.set_xlabel("stream position (bins)"); ax.set_ylabel("aligned latent $R^2$")
     ax.set_ylim(-0.05, 1.0); ax.legend(title="SNR", loc="lower right")
-    ax.set_title("Online readout converges over the stream (slower / lower at low SNR)")
+    ax.set_title("sVJF online readout converges over the stream (slower / lower at low SNR)")
     fig.savefig(os.path.join(FIGS, "curves.pdf")); plt.close(fig)
 
 
