@@ -354,17 +354,18 @@ class RBFDS(Module):
     def __init__(self, n_rbf: int, xdim: int, udim: int, flow_learner: str = 'rls'):
         super().__init__()
         # How the velocity (flow) weights are learned:
-        #   'rls' - online recursive least squares (original VJF; fast convergence
-        #           but the precision matrix grows/ill-conditions over very long
-        #           streams and the weights can explode).
+        #   'sgd' - weights are an nn.Parameter trained by SGD/Adam via the dynamics
+        #           ELBO term (gradient-clipped in VJF.filter). This is the ORIGINAL
+        #           VJF (Zhao & Park 2020): every parameter is learned by stochastic
+        #           gradient. Stable but slow to converge online.
+        #   'rls' - online recursive least squares (a real-time deviation, not in the
+        #           original VJF; fast convergence because W enters linearly, but the
+        #           precision matrix grows/ill-conditions over very long streams and
+        #           the weights can explode).
         #   'srrls' - square-root (Potter) RLS: same fast convergence as 'rls' but
         #           propagates the covariance Cholesky factor directly (PD by
         #           construction, no precision accumulation/inversion), so it is
-        #           numerically stable over very long streams. Preferred.
-        #   'sgd' - weights are an nn.Parameter trained by SGD via the dynamics
-        #           ELBO term (gradient-clipped in VJF.filter). Stable over long
-        #           streams: unexcited RBF weights get ~zero gradient and stay at
-        #           their lstsq-warm-started init instead of drifting.
+        #           numerically stable over very long streams. Preferred for sVJF.
         if flow_learner not in ('rls', 'srrls', 'sgd'):
             raise ValueError(f"flow_learner must be 'rls', 'srrls' or 'sgd', got {flow_learner!r}")
         self.flow_learner = flow_learner

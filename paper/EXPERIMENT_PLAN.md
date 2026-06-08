@@ -70,6 +70,23 @@ Pass: p95 < 5 ms/bin.
 If budget allows: full-$n$ vs random vs shuffled-$C$ vs PCA vs $\vC^+$ projection, performance vs
 subspace angle, at low SNR. Sharpens *why* the projection helps. Not required for the story.
 
+### E6 -- Original VJF fails to converge (motivating figure, Sec 2 -> 3) [TO RUN]
+Demonstrate the *problem* before the fix: original VJF (raw-spike encoder; readout $\vC$ learned by
+the SGD/Adam ELBO gradient; flow by SGD; NO readout warm-start) on the synthetic stream. Log
+filtered-latent $R^2$ and one-step prediction $R^2$ vs stream position (x = time step, y = $R^2$).
+Expectation: both stay near zero (the readout collapses to the mean rate under sparse spikes), so
+the unknown-readout problem is fully motivated before introducing the projection encoder + decoupled
+readout. Self-contained (vjf.synthetic, flow_learner='sgd'); a single representative SNR (e.g. 3 dB).
+
+### E7 -- Flow learner: SGD/Adam vs square-root RLS (numerical comparison) [TO RUN, requested]
+Isolate the flow learner. Identical setup (projection encoder, a fixed/oracle readout so only the
+flow differs), vary ONLY how $\vW$ is learned: SGD/Adam (the original VJF) vs square-root RLS (sVJF).
+Compare online convergence speed and stability over the long stream: filtered-latent $R^2$ and
+one-step $R^2$ vs stream position, plus wall-time to a target $R^2$. Expectation: square-root RLS
+converges far faster (W enters linearly) and stays stable, motivating the srrls contribution
+(\cref{ssec:srrls}). Note: code keeps `flow_learner='sgd'` (torch.optim.SGD; swap to Adam for the
+exact original) and `'srrls'`.
+
 ## 4. Figure plan (claims-first)
 
 - Fig A (C1): metrics by method x **5 SNR** (the low-SNR win is the headline).

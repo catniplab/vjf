@@ -28,7 +28,7 @@
 \addbibresource{references.bib}
 
 \title{\svjf: \svjflong\ of neural dynamics\\ in real time with an unknown observation model}
-\author{I.~Memming Park}
+\author{I.~Memming Park, Yuan Zhao}
 \date{\today}
 
 \begin{document}
@@ -233,42 +233,53 @@ the readout to keep tracking, and detecting when to re-enable it is a question w
 (\cref{sec:discussion}).
 
 \subsection{Square-root RLS flow learner}\label{ssec:srrls}
-Over a long online pass the recursive least-squares (RLS) fit of the RBF velocity weights
-accumulates error in the precision matrix and eventually diverges. \textbf{Difference from VJF:}
-we propagate a covariance square-root factor $\vS$ ($\vP=\vS\vS\trp$) directly (square-root RLS,
-\autocite{haykin2014adaptive,schoenberg1983implementation}), avoiding the precision wind-up that
-destabilizes plain RLS over long ($\sim2\times10^5$-step) streams; stochastic-gradient flow is
-stable but slower to converge.
+\textbf{Difference from VJF:} the original VJF learns \emph{every} parameter --- including the RBF
+velocity weights $\vW$ --- by stochastic-gradient ascent on the ELBO (Adam)
+\autocite{zhao2020variational}. Because $\vW$ enters the velocity linearly given the latent path,
+we instead fit it by recursive least squares (RLS), which converges far faster online than a
+gradient step. Plain RLS, however, accumulates error in the propagated precision matrix and
+eventually diverges over a long ($\sim2\times10^5$-step) pass, so we carry a covariance
+square-root factor $\vS$ ($\vP=\vS\vS\trp$) directly (square-root RLS,
+\autocite{haykin2014adaptive,schoenberg1983implementation}): this keeps RLS's fast convergence
+while staying numerically stable. The original stochastic-gradient flow remains an option (stable,
+but markedly slower to converge online).
 
 \subsection{The real-time loop}\label{ssec:loop}
-The three changes above plug into a single per-sample driver (\cref{alg:rtvjf}), so a real-time
-consumer calls one function per arriving sample. The loop threads the posterior across bins; holds
-the dynamics frozen during a warm-up of $W$ bins while the recognition settles, then initializes
-$f$ once from the buffered latent means and narrows the RBF widths by $\rho$; recovers from
-divergence with a state-noise floor $\sigma^2_{\min}$ and a state-magnitude bound $B$ (repeating
-the last good mean); and refreshes the readout every $K$ steps (\cref{fig:timescales} sketches the
-three timescales $W$, $K$, $\tau$; an optional settling horizon $S$ freezes the refresh once the
-subspace has converged, \cref{ssec:readout}). The new hyperparameters are exactly
+The three changes above plug into a single per-sample driver (\cref{alg:rtvjf}), which a real-time
+consumer calls once per arriving sample. It runs in two phases. During a \emph{warm-up} of $W$ bins
+the dynamics are held off while the recognition settles and the latent means are buffered; at the
+boundary the flow $f$ is initialized once from those means and the RBF widths are narrowed by
+$\rho$. In the \emph{online} phase the loop threads the posterior across bins, updates the flow by
+square-root RLS, and refreshes the readout every $K$ steps (optionally frozen after a settling
+horizon $S$, \cref{ssec:readout}). Two numerical safeguards keep the per-bin update from blowing up
+over the long stream: a floor $\sigma^2_{\min}$ on the posterior state variance (it cannot collapse
+to zero) and a magnitude bound $B$ on the state (on a non-finite or out-of-bounds mean the
+posterior is reset and the last good mean repeated). The new hyperparameters are exactly
 $(W,K,\tau,\rho,\sigma^2_{\min},B,c)$ --- plus the optional $S$ --- with $c$ the feature
-pseudocount. The projection and readout add $O(nm)$ per step (the same order as the decoder); the
-total per-step cost also includes the recognition network and the square-root-RLS update.
+pseudocount (\cref{fig:timescales} sketches the three timescales $W$, $K$, $\tau$). The projection
+and readout add $O(nm)$ per step (the same order as the decoder); the total per-step cost also
+includes the recognition network and the square-root-RLS update.
 
 \begin{algorithm}[!ht]
-\caption{Real-time VJF with projection encoder and decoupled online readout (one pass).}
+\caption{\svjf: real-time VJF with projection encoder and decoupled online readout (one pass).}
 \label{alg:rtvjf}
 \begin{algorithmic}[1]
-\Require stream $\{\vy_t\}$; warm-up $W$; refresh interval $K$; smoothing $\tau$ ($\alpha{=}1/\tau$);
-  width scale $\rho$; noise floor $\sigma^2_{\min}$; state bound $B$; pseudocount $c$
-\State init VJF (recognition $h$, flow $\vW$, decoder $(\vC,\vb)$); readout state $\vnu,\bar\vb,\{\vv_i\}$; $q\gets\varnothing$; buffer $\mathcal B\gets[\,]$
-\For{$t=0,1,2,\dots$}
-  \If{$t = W$} \State initialize flow $f$ from $\mathcal B$; scale RBF widths by $\rho$ \Comment{turn dynamics on, once} \EndIf
+\Require stream $\{\vy_t\}$; warm-up $W$; refresh $K$; smoothing $\tau$ ($\alpha{=}1/\tau$); width
+  scale $\rho$; variance floor $\sigma^2_{\min}$; state bound $B$; pseudocount $c$; opt.\ settling $S$
+\State init VJF: recognition $h$, flow $f$, decoder $(\vC,\vb)$ (short PCA warm-start); readout state $\vnu,\bar\vb,\{\vv_i\}$; $q\gets\varnothing$; buffer $\mathcal B\gets[\,]$
+\Statex \textit{Phase 1 --- warm-up ($t=0,\dots,W{-}1$): dynamics off, collect latent means}
+\For{$t=0$ \textbf{to} $W-1$}
   \State $\vnu \gets (1-\alpha)\,\vnu + \alpha\,\vy_t$;\ \ $\vl \gets \log(\vnu+c)$;\ \ update $\bar\vb$ \Comment{link-matched feature, \cref{eq:ema}}
   \State CCIPCA step on $\vl-\bar\vb$;\ \ $\vpi \gets \vC^{+}(\vl-\bar\vb)$ \Comment{decoupled readout + projection, \cref{eq:hebb,eq:proj}}
-  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \textsc{learnDyn}{=}[t\ge W])$ \Comment{\cref{alg:vjf} on $\vpi$, with $\vC,\vb$ held fixed; decode on $\vy_t$}
-  \State clamp $\log\sigma^2 \ge \log\sigma^2_{\min}$ \Comment{state-noise floor}
-  \If{$\vmu_t$ non-finite \textbf{or} $\norm{\vmu_t}_\infty > B$} \State $q\gets\varnothing$;\ \ $\vmu_t\gets$ last good mean \Comment{divergence guard} \EndIf
-  \If{$t < W$} \State append $\vmu_t$ to $\mathcal B$ \EndIf
-  \If{$t>0$ \textbf{and} $t \bmod K = 0$} \State $\hat\vC_t\gets$ Procrustes-align to $\vC$ (\cref{eq:procrustes}); write $(\hat\vC_t,\bar\vb)$ to decoder; recompute $\vC^{+}$ \EndIf
+  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics off})$; \ \ append $\vmu_t$ to $\mathcal B$ \Comment{recognition only}
+\EndFor
+\State initialize flow $f$ from $\mathcal B$; scale RBF widths by $\rho$ \Comment{turn the dynamics on, once}
+\Statex \textit{Phase 2 --- online ($t=W,W{+}1,\dots$): full joint filtering, in real time}
+\For{$t=W,W+1,\dots$}
+  \State $\vnu \gets (1-\alpha)\,\vnu + \alpha\,\vy_t$;\ \ $\vl \gets \log(\vnu+c)$;\ \ update $\bar\vb$;\ \ CCIPCA step;\ \ $\vpi \gets \vC^{+}(\vl-\bar\vb)$
+  \State $\vmu_t, q \gets \textsc{VjfFilter}(\vy_t,\vpi,q;\ \text{dynamics on})$ \Comment{recognition + square-root-RLS flow update; $\vC,\vb$ fixed}
+  \State \textbf{safeguards:} clamp posterior $\log\sigma^2_t \ge \log\sigma^2_{\min}$;\ \ \textbf{if} $\vmu_t$ non-finite \textbf{or} $\norm{\vmu_t}_\infty > B$ \textbf{then} $q\gets\varnothing$, $\vmu_t\gets$ last good mean
+  \If{$t \bmod K = 0$ \textbf{and} ($S$ unset \textbf{or} $t-W<S$)} \State $\hat\vC_t\gets$ Procrustes-align to $\vC$ (\cref{eq:procrustes}); write $(\hat\vC_t,\bar\vb)$; recompute $\vC^{+}$ \EndIf
 \EndFor
 \end{algorithmic}
 \end{algorithm}
@@ -286,13 +297,15 @@ destabilizing the dynamics.}
 \label{fig:timescales}
 \end{figure}
 
-\paragraph{What changed.} Relative to vanilla VJF (\cref{alg:vjf}), the loop (\cref{alg:rtvjf})
-differs in exactly three places: the recognition reads the projection $\vpi_t$ rather than the raw
-$\vy_t$; the readout $\vC,\vb$ is removed from the ELBO gradient and instead estimated by CCIPCA
-with a Procrustes anchor (so the gradient step trains only the recognition, flow, and biases); and
-a warm-up, a state-noise floor, and a divergence guard make the single step safe to iterate for
-$10^5$ bins. Everything else --- the recognition network, the reparameterized ELBO gradient on the
-remaining parameters, and the posterior threading --- is the vanilla update.
+\paragraph{What changed.} Vanilla VJF (\cref{alg:vjf}) trains \emph{every} parameter by one
+reparameterized ELBO-gradient step. \Cref{alg:rtvjf} changes three of them: the recognition reads
+the projection $\vpi_t$ instead of the raw $\vy_t$; the readout $(\vC,\vb)$ is taken out of the
+gradient and estimated by CCIPCA with a Procrustes anchor; and the flow weights $\vW$ are taken out
+of the gradient and fit by square-root RLS. The ELBO-gradient step therefore trains only the
+recognition network (and the remaining biases). A warm-up, a posterior-variance floor, and a
+state-magnitude guard then make the single step safe to iterate for $10^5$ bins. Everything else
+--- the generative model, the reparameterized bound, and the posterior threading --- is the vanilla
+update.
 
 \section{Experiments}\label{sec:exp}
 We use a self-contained synthetic benchmark: a 2-D limit cycle (radius-relaxing, constant angular
