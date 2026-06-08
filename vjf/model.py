@@ -5,7 +5,7 @@ from typing import Sequence, Tuple, Union
 import torch
 from torch import Tensor, nn
 from torch.nn import Linear, Module, Parameter
-from torch.optim import SGD
+from torch.optim import SGD, Adam
 from torch.optim.lr_scheduler import ExponentialLR
 from tqdm import trange
 
@@ -49,7 +49,7 @@ def detach(q: Gaussian) -> Gaussian:
 
 class VJF(Module):
     def __init__(self, ydim: int, xdim: int, likelihood: Module, transition: Module, recognition: Module,
-                 *, lr: float = 1e-4, lr_decay: float = .9):
+                 *, lr: float = 1e-4, lr_decay: float = .9, optimizer: str = 'sgd'):
         """
         Use VJF.make_model
         :param likelihood: GLM likelihood, Gaussian or Poisson
@@ -67,7 +67,12 @@ class VJF(Module):
         self.register_parameter('mean', Parameter(torch.zeros(xdim)))
         self.register_parameter('logvar', Parameter(torch.zeros(xdim)))
 
-        self.optimizer = SGD(
+        # gradient optimizer for the ELBO step. 'sgd' (default) is the current behavior;
+        # 'adam' restores the optimizer used by the original VJF (Zhao & Park 2020).
+        opt_cls = {'sgd': SGD, 'adam': Adam}.get(optimizer.lower())
+        if opt_cls is None:
+            raise ValueError(f"optimizer must be 'sgd' or 'adam', got {optimizer!r}")
+        self.optimizer = opt_cls(
             [
                 {'params': self.likelihood.parameters(), 'lr': lr},
                 {'params': self.decoder.parameters(), 'lr': lr},

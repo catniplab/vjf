@@ -257,15 +257,13 @@ the readout to keep tracking, and detecting when to re-enable it is a question w
 
 \subsection{Square-root RLS flow learner}\label{ssec:srrls}
 \textbf{Difference from VJF:} the original VJF learns \emph{every} parameter --- including the RBF
-velocity weights $\vW$ --- by stochastic-gradient ascent on the ELBO (Adam)
-\autocite{zhao2020variational}. Because $\vW$ enters the velocity linearly given the latent path,
-we instead fit it by recursive least squares (RLS), which converges far faster online than a
-gradient step. Plain RLS, however, accumulates error in the propagated precision matrix and
-eventually diverges over a long ($\sim2\times10^5$-step) pass, so we carry a covariance
-square-root factor $\vS$ ($\vP=\vS\vS\trp$) directly (square-root RLS,
-\autocite{haykin2014adaptive,schoenberg1983implementation}): this keeps RLS's fast convergence
-while staying numerically stable. The original stochastic-gradient flow remains an option (stable,
-but markedly slower to converge online).
+velocity weights $\vW$ --- by stochastic-gradient ascent on the ELBO \autocite{zhao2020variational},
+which is stable but converges slowly online. Because $\vW$ enters the velocity linearly given the
+latent path, we instead fit it by recursive least squares (RLS), which converges far faster. Plain
+RLS, however, accumulates error in the propagated precision matrix and eventually diverges over a
+long ($\sim2\times10^5$-step) pass, so we carry a covariance square-root factor $\vS$
+($\vP=\vS\vS\trp$) directly (square-root RLS, \autocite{haykin2014adaptive,schoenberg1983implementation}):
+this keeps RLS's fast convergence while staying numerically stable.
 
 \subsection{The real-time loop}\label{ssec:loop}
 The three changes above plug into a single per-sample driver (\cref{alg:rtvjf}), which a real-time
