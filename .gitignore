@@ -851,3 +851,7 @@ paper/data/extra/vanilla_demo.json
 # stray artifacts: Dropbox save-conflict files and root-dir experiment scratch output
 *-SAVE-ERROR
 /vanilla_demo.json
+
+# Graf V1 follow-up: raw data (large, access-controlled) and run artifacts
+experiments/v1_graf/data/
+experiments/v1_graf/results/
