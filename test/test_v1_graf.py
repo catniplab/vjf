@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from experiments.v1_graf.graf_loader import bin_spikes
 from experiments.v1_graf.graf_loader import tuning_curve, well_tuned_mask, signal_metric
+from experiments.v1_graf.graf_loader import kmeans_centers
 
 
 def _fake_spk(N=3, n_trial=4, seed=20260609):
@@ -60,3 +61,11 @@ def test_signal_metric_monotone():
 
     # monotonicity: higher spike probability -> higher mean_rate_hz
     assert sm_hi["mean_rate_hz"] > sm_lo["mean_rate_hz"]
+
+
+def test_kmeans_centers_shapes():
+    rng = np.random.default_rng(20260609)
+    states = rng.standard_normal((500, 3)).astype(np.float32)
+    c, logw = kmeans_centers(states, n_rbf=20)
+    assert c.shape == (20, 3) and logw.shape == (20,)
+    assert np.isfinite(logw).all()

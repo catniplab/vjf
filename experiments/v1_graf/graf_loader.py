@@ -100,3 +100,20 @@ def signal_metric(counts: np.ndarray, *, t_total_ms: float = T_TOTAL_MS) -> dict
     n_trial, _, N = counts.shape
     return {"N": N, "total_spikes": float(counts.sum()),
             "mean_rate_hz": float(counts.sum() / (N * n_trial) / (t_total_ms / 1000.0))}
+
+
+def kmeans_centers(states: np.ndarray, n_rbf: int, *, width_scale: float = 1.0,
+                   seed: int = 20260609):
+    """Place n_rbf RBF centers by k-means on visited latent states (states: (T, xdim)),
+    widths = width_scale * median nearest-center distance. Returns (centers, logwidths)
+    as float32 numpy arrays for RBFDS.initialize(rbf_centers=..., rbf_logwidths=...)."""
+    from sklearn.cluster import KMeans
+    n = min(n_rbf, states.shape[0])
+    km = KMeans(n_clusters=n, n_init=4, random_state=seed).fit(states)
+    c = km.cluster_centers_.astype(np.float32)
+    d = np.linalg.norm(c[:, None, :] - c[None, :, :], axis=-1)
+    np.fill_diagonal(d, np.inf)
+    nn_dist = d.min(1)
+    w = (width_scale * np.median(nn_dist)).astype(np.float32)
+    logw = np.log(np.full(n, max(float(w), 1e-3), dtype=np.float32))
+    return c, logw

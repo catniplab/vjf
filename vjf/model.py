@@ -436,13 +436,14 @@ class RBFDS(Module):
         self.n_sample = n_sample
 
     @torch.no_grad()
-    def initialize(self, xt: Tensor, xs: Tensor, ut: Tensor = None):
+    def initialize(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *,
+                   rbf_centers: Tensor = None, rbf_logwidths: Tensor = None):
         xs = torch.atleast_2d(xs)
         xt = torch.atleast_2d(xt)
         xu = nonecat(xs, ut)
         mse = (xt - xs).pow(2).mean()
         if self.flow_learner == 'srrls':
-            self.velocity.init_srls(xu, xt - xs)
+            self.velocity.init_srls(xu, xt - xs, centers=rbf_centers, logwidths=rbf_logwidths)
         else:
             self.velocity.initialize(xu, xt - xs, mse)
         d = self._velocity_mean(xu)

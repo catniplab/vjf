@@ -49,3 +49,16 @@ def test_RBFN():
     y = torch.randn(N, n_dim)
 
     rbfn(x)
+
+
+def test_init_srls_uses_preset_centers():
+    torch.manual_seed(0)
+    feat = RBF(2, 5)
+    lr = LinearRegression(feat, 2, bayes=True)
+    centers = torch.tensor([[0., 0.], [1., 0.], [0., 1.], [1., 1.], [2., 2.]])
+    logw = torch.log(torch.full((5,), 0.3))
+    x = torch.randn(20, 2)
+    y = torch.randn(20, 2)
+    lr.init_srls(x, y, centers=centers, logwidths=logw)
+    assert torch.allclose(lr.feature.centroid.data, centers)
+    assert torch.allclose(lr.feature.logwidth.data, logw)

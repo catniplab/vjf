@@ -173,12 +173,22 @@ class LinearRegression(Module):
         # self.kalman(x, target, torch.tensor(.1))
 
     @torch.no_grad()
-    def init_srls(self, x: Tensor, target: Tensor, p0: float = 1.0):
+    def init_srls(self, x: Tensor, target: Tensor, p0: float = 1.0,
+                  centers: Tensor = None, logwidths: Tensor = None):
         """Initialize the square-root RLS state: features, lstsq warm-start of
-        w_mean, and the covariance square root w_chol = sqrt(p0)*I (P = w_chol w_chol')."""
-        r = x.norm(dim=1).max().item()
-        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
-        nn.init.constant_(self.feature.logwidth, math.log(r))
+        w_mean, and the covariance square root w_chol = sqrt(p0)*I (P = w_chol w_chol').
+
+        If ``centers`` (n_basis, n_dim) is given, the RBF centers/widths are set from
+        it (data-driven placement); otherwise the original uniform-box init over the
+        state radius is used."""
+        if centers is not None:
+            self.feature.centroid.data.copy_(torch.as_tensor(centers, dtype=self.feature.centroid.dtype))
+            if logwidths is not None:
+                self.feature.logwidth.data.copy_(torch.as_tensor(logwidths, dtype=self.feature.logwidth.dtype))
+        else:
+            r = x.norm(dim=1).max().item()
+            nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+            nn.init.constant_(self.feature.logwidth, math.log(r))
         feat = self.feature(x)
         self.w_mean = torch.linalg.lstsq(feat, target).solution
         n = self.feature.n_feature
