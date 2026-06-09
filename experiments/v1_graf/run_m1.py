@@ -7,7 +7,8 @@ timing. This is integration glue over already-tested building blocks
 (``graf_loader``, ``vjf.realtime.online_filter_trials``, ``vjf.readout``,
 ``eval``); no new math.
 
-FULL mode: all 72 directions x 50 trials/direction, the ~63 well-tuned neurons,
+FULL mode: all 72 directions x 50 trials/direction, well-tuned neurons (r2 >= 0.75;
+~74 for array_5, threshold-sensitive),
 n_rbf=200. QUICK mode (the smoke test): a handful of directions/trials and a
 small fixed neuron subset, to finish in well under a couple of minutes.
 """
@@ -56,6 +57,7 @@ def _provenance(cfg: dict) -> dict:
         "torch": torch.__version__,
         "numpy": np.__version__,
         "platform": platform.platform(),
+        "cpu": platform.processor(),
     }
 
 
@@ -79,9 +81,15 @@ def _infer_latent_paths(model, readout, trial_counts_list):
     """TRULY frozen inference: per trial, run the per-sample filter with NO learning
     (sgd=False, update=False) and the frozen readout projection (mirrors
     leave_one_neuron_rates but keeps every neuron). Returns a list of (n_bin, xdim)
-    latent-mean paths, one per trial. Posterior is reset to the prior each trial."""
+    latent-mean paths, one per trial. Posterior is reset to the prior each trial.
+
+    EMA discipline: snapshot readout.nu at entry so every trial starts from the SAME
+    fixed EMA state (order-independent, side-effect-free) - consistent with the
+    leave_one_neuron_rates path."""
+    nu_snapshot = readout.nu.copy()                              # freeze EMA entry state
     paths = []
     for tc in trial_counts_list:
+        readout.nu = nu_snapshot.copy()                          # each trial sees same EMA
         q = None
         means = []
         for t in range(tc.shape[0]):
@@ -93,6 +101,7 @@ def _infer_latent_paths(model, readout, trial_counts_list):
             q = qt
             means.append(qt.mean.detach().cpu().numpy()[0])
         paths.append(np.asarray(means))
+    readout.nu = nu_snapshot                                     # restore caller's EMA state
     return paths
 
 
