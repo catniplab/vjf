@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import numpy as np
 from scipy.io import loadmat
+from scipy.optimize import curve_fit
 
 N_REP, N_ORI, T_TOTAL_MS, STIM_MS = 50, 72, 2560.0, 1280.0
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "raw")
@@ -42,3 +43,60 @@ def bin_spikes(spk_times: np.ndarray, bin_ms: float = 10.0,
             t = t[(t >= 0.0) & (t < t_total_ms)]
             counts[c, :, i] = np.histogram(t, bins=edges)[0]
     return counts
+
+
+def tuning_curve(counts: np.ndarray, ori: np.ndarray, *, bin_ms: float = 10.0,
+                 stim_only: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """Mean spike rate (Hz) per neuron per direction. counts shape: (trial, bin, neuron).
+    stim_only restricts to the first STIM_MS of each trial."""
+    n_bin = counts.shape[1]
+    sl = slice(0, int(round(STIM_MS / bin_ms))) if stim_only else slice(None)
+    win_s = (n_bin if sl.stop is None else sl.stop) * bin_ms / 1000.0
+    per_trial = counts[:, sl, :].sum(1)                       # (trial, neuron) counts
+    axis = np.unique(ori)
+    tc = np.stack([per_trial[ori == d].mean(0) for d in axis], axis=1)  # (neuron, n_ori)
+    return tc / win_s, axis                                   # Hz
+
+
+def _von_mises2(theta, b, a1, mu1, k1, a2, mu2, k2):
+    t = np.deg2rad(theta)
+    return (b + a1 * np.exp(k1 * (np.cos(t - np.deg2rad(mu1)) - 1))
+              + a2 * np.exp(k2 * (np.cos(t - np.deg2rad(mu2)) - 1)))
+
+
+def well_tuned_mask(counts: np.ndarray, ori: np.ndarray, *, bin_ms: float = 10.0,
+                    r2_thresh: float = 0.75) -> tuple[np.ndarray, np.ndarray]:
+    """Keep neurons whose direction tuning is fit (R^2 >= thresh) by a sum of two
+    von Mises bumps (~180 deg apart), mirroring vLGP's selection."""
+    tc, axis = tuning_curve(counts, ori, bin_ms=bin_ms, stim_only=True)
+    N = tc.shape[0]
+    r2 = np.zeros(N)
+    # bounds: b>=0, a1>=0, mu1 in [0,360), k1>=0, a2>=0, mu2 in [0,360), k2>=0
+    bounds = ([0, 0, 0, 0, 0, 0, 0], [np.inf, np.inf, 360, 20, np.inf, 360, 20])
+    for n in range(N):
+        y = tc[n]
+        if y.max() <= 0:
+            continue
+        amp = float(y.max() - y.min())
+        pk = axis[int(np.argmax(y))]
+        # amplitude initial guess is range above baseline, not the raw max
+        p0 = [float(y.min()), amp, float(pk), 2.0, 0.5 * amp, float((pk + 180) % 360), 2.0]
+        try:
+            popt, _ = curve_fit(_von_mises2, axis, y, p0=p0, bounds=bounds, maxfev=10000)
+            yhat = _von_mises2(axis, *popt)
+            ss = ((y - y.mean()) ** 2).sum()
+            if ss < 1e-9:
+                r2[n] = 0.0
+                continue
+            r2[n] = 1.0 - ((y - yhat) ** 2).sum() / (ss + 1e-12)
+        except (RuntimeError, ValueError):
+            r2[n] = 0.0
+    return r2 >= r2_thresh, r2
+
+
+def signal_metric(counts: np.ndarray, *, t_total_ms: float = T_TOTAL_MS) -> dict:
+    """Per-array signal proxy for strongest-first ordering.
+    mean_rate_hz is the per-neuron, per-trial mean firing rate."""
+    n_trial, _, N = counts.shape
+    return {"N": N, "total_spikes": float(counts.sum()),
+            "mean_rate_hz": float(counts.sum() / (N * n_trial) / (t_total_ms / 1000.0))}
