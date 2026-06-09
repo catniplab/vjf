@@ -165,7 +165,10 @@ original procedure (\cref{alg:vjf}; readout $\vC$ and flow $\vW$ learned by the 
 two optimizers (Adam, SGD) $\times$ two readout initializations (random, oracle), and for \svjf.
 A \emph{random} readout init never recovers the latent (one-step $R^2\!\approx\!0.2$--$0.4$,
 regardless of optimizer); an \emph{oracle} readout init converges ($\approx0.94$); \svjf\ reaches
-$\approx0.93$ from spikes alone. The bottleneck is the readout, not the dynamics. $n{=}50$; a
+$\approx0.93$ from spikes alone. Although the oracle arms keep learning $\vC$ by the same ELBO
+gradient, it is not pulled back toward the mean-rate collapse: $R^2$ rises to $\approx0.94$ over the
+stream rather than decaying --- the obstacle is \emph{reaching} a good readout, not maintaining one. The bottleneck is
+the readout, not the dynamics. $n{=}50$; a
 single-stream illustration --- the systematic 5-SNR comparison is \cref{tab:r2}.}
 \label{fig:motivation}
 \end{figure}
@@ -204,11 +207,21 @@ recomputed only when the readout is refreshed (\cref{ssec:readout}) and reused a
 per bin. The timescale $\tau$ is a fixed hyperparameter ($\tau\ll$ the dynamics timescale), not
 ELBO-learned.
 
+\emph{Relation to teacher forcing.} The same pseudo-inverse appears in generalized teacher
+forcing for chaotic-RNN reconstruction \autocite{hess2023generalized}: its data-inferred control
+signal $\hat\vz_t=\vB^{+}\vx_t$ applies the Moore--Penrose inverse of a linear observation model
+$\vx=\vB\vz$ to bring each measurement into latent coordinates and tie the network's latent state
+to the data, exactly as \cref{eq:proj} does with the readout $\vC$. We differ in role and
+estimation: there $\vB$ is learned by backpropagation and the projection is a \emph{training-time}
+forcing signal only, whereas here $\vC$ is estimated outside the ELBO gradient (\cref{ssec:readout})
+on a link-matched feature $\tilde g(\vy_t)$ suited to point-process observations, and the projection
+feeds the recognition network throughout --- at deployment as well as during learning.
+
 \subsection{Decoupled online readout}\label{ssec:readout}
 Estimating $\vC$ by $\partial\hat{\mathcal L}/\partial\vC$ under sparse low-rate Poisson collapses
 to the trivial mean-rate solution: the gradient is scaled by the per-bin expected count
-$g(\vC\vx_t+\vb)\!\approx\!10^{-1}$, so $\vC$ barely moves and a basin with $\vC\!\to\!0$ absorbs
-the loss. \textbf{Difference from VJF:} we replace this gradient by a decoupled online
+$g(\vC\vx_t+\vb)\!\approx\!10^{-1}$, so $\vC$ barely moves and the trivial $\vC\!\to\!0$ solution
+absorbs the loss. \textbf{Difference from VJF:} we replace this gradient by a decoupled online
 second-moment estimator. Let $\vl_t=\tilde g(\vy_t)$ and $\bar\vb_t$ its running mean, which we use
 as the bias $\vb$ in \cref{eq:lik}. Intuitively, the readout subspace is just the top principal
 subspace of the smoothed log-rate, which we can track online without ever forming a covariance.
