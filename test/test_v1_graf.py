@@ -129,3 +129,17 @@ def test_decode_and_torus_shapes():
     assert acc > 0.5
     emb, axis = torus_embedding(lat, dirs)
     assert emb.shape[0] == 72 and emb.shape[1] == 3
+
+
+import os
+_DATA5 = os.path.join(os.path.dirname(__file__), "..", "experiments", "v1_graf",
+                      "data", "raw", "array_5.mat")
+
+
+@pytest.mark.skipif(not os.path.exists(_DATA5), reason="Graf array_5 not downloaded")
+def test_run_m1_quick():
+    from experiments.v1_graf.run_m1 import main
+    out = main(quick=True, latent_dim=3)
+    assert out["pll_bits_per_spike"] > -1.0
+    assert 0.0 <= out["decode_acc"] <= 1.0
+    assert out["median_ms_per_bin"] > 0
