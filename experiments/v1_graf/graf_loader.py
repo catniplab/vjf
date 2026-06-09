@@ -108,12 +108,14 @@ def kmeans_centers(states: np.ndarray, n_rbf: int, *, width_scale: float = 1.0,
     widths = width_scale * median nearest-center distance. Returns (centers, logwidths)
     as float32 numpy arrays for RBFDS.initialize(rbf_centers=..., rbf_logwidths=...)."""
     from sklearn.cluster import KMeans
-    n = min(n_rbf, states.shape[0])
-    km = KMeans(n_clusters=n, n_init=4, random_state=seed).fit(states)
+    if states.shape[0] < n_rbf:
+        raise ValueError(
+            f"need >= n_rbf states to seed {n_rbf} centers, got {states.shape[0]}")
+    km = KMeans(n_clusters=n_rbf, n_init=4, random_state=seed).fit(states)
     c = km.cluster_centers_.astype(np.float32)
     d = np.linalg.norm(c[:, None, :] - c[None, :, :], axis=-1)
     np.fill_diagonal(d, np.inf)
     nn_dist = d.min(1)
     w = (width_scale * np.median(nn_dist)).astype(np.float32)
-    logw = np.log(np.full(n, max(float(w), 1e-3), dtype=np.float32))
+    logw = np.log(np.full(n_rbf, max(float(w), 1e-3), dtype=np.float32))
     return c, logw

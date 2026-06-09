@@ -17,6 +17,20 @@ def test_RBFLDS():
     lds.update(x, x, torch.randn(N, udim))
 
 
+def test_rbfds_seeded_centers_require_srrls():
+    # rbf_centers/rbf_logwidths are honored only by the srrls flow; passing them to
+    # any other flow_learner must fail loudly rather than silently ignore them.
+    import pytest
+    xt = torch.randn(20, 2)
+    xs = torch.randn(20, 2)
+    centers = torch.zeros(5, 2)
+    rls_ds = RBFDS(n_rbf=5, xdim=2, udim=0, flow_learner='rls')
+    with pytest.raises(NotImplementedError):
+        rls_ds.initialize(xt, xs, rbf_centers=centers)
+    srrls_ds = RBFDS(n_rbf=5, xdim=2, udim=0, flow_learner='srrls')
+    srrls_ds.initialize(xt, xs, rbf_centers=centers)   # must NOT raise
+
+
 def test_Recognition():
     ydim = 10
     xdim = 3

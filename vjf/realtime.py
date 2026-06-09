@@ -196,6 +196,7 @@ def online_filter_trials(model, trials, *, readout=None, adapt_readout=True,
     """
     xdim = model.mean.shape[-1]
     warm_means = []
+    warm_trial_starts = []                         # index into warm_means at each warm-trial start
     initialized = False
     global_t = 0
     for ti, trial in enumerate(trials):
@@ -203,15 +204,25 @@ def online_filter_trials(model, trials, *, readout=None, adapt_readout=True,
         q = None                                   # reset to prior at trial start
         prev_mean = np.zeros(xdim, dtype=np.float32)
         for k, y_t in enumerate(trial):
+            if warm and k == 0:
+                warm_trial_starts.append(len(warm_means))
             # one-time init at the coverage boundary (first sample after warm-up trials)
             if ti == warmup_trials and not initialized and len(warm_means) > 1:
                 m = torch.as_tensor(np.asarray(warm_means), dtype=torch.get_default_dtype())
+                # Consecutive transition pairs (i -> i+1), EXCLUDING the spurious ones
+                # that straddle a warm-trial boundary (the posterior reset to the prior
+                # at each trial start, so last-bin(trial)->first-bin(next-trial) is not a
+                # real transition). The center seeding still uses ALL warm states.
+                starts = set(warm_trial_starts)
+                idx = [i for i in range(len(warm_means) - 1) if (i + 1) not in starts]
+                xs = m[idx]
+                xt = m[[i + 1 for i in idx]]
                 if seed_centers is not None:
                     centers, logw = seed_centers(np.asarray(warm_means))
-                    model.transition.initialize(m[1:], m[:-1], None,
+                    model.transition.initialize(xt, xs, None,
                                                 rbf_centers=centers, rbf_logwidths=logw)
                 else:
-                    model.transition.initialize(m[1:], m[:-1], None)
+                    model.transition.initialize(xt, xs, None)
                     model.transition.velocity.feature.logwidth.data += math.log(rbf_width_scale)
                 initialized = True
             pred = None
@@ -243,24 +254,34 @@ def online_filter_trials(model, trials, *, readout=None, adapt_readout=True,
                 continue
             model.transition.logvar.data.clamp_(min=logvar_floor)
             mu = qt.mean.detach()
-            diverged = (not torch.isfinite(mu).all()) or (mu.abs().max() > max_abs_state)
+            if (not torch.isfinite(mu).all()) or (mu.abs().max() > max_abs_state):
+                # Same nan sentinel as the AssertionError path / online_filter: reject the
+                # posterior, emit nan metrics + zero logvar + repeat-last mean (not the
+                # rejected step's finite values).
+                q = None
+                if warm:
+                    warm_means.append(prev_mean.copy())
+                yield OnlineResult(step=global_t, mean=prev_mean.copy(),
+                                   logvar=np.zeros(xdim, np.float32), pred_mean=None,
+                                   loss=float("nan"), recon=float("nan"), dynamics=float("nan"),
+                                   entropy=float("nan"), warming_up=warm, diverged=True,
+                                   refreshed=False, elapsed_s=time.perf_counter()-t0,
+                                   trial=ti, t_in_trial=k)
+                global_t += 1
+                continue
             refreshed = False
-            if not diverged and readout is not None and adapt_readout and not warm:
+            if readout is not None and adapt_readout and not warm:
                 refreshed = bool(readout.maybe_refresh(model.decoder, global_t))
             elapsed = time.perf_counter() - t0
-            if diverged:
-                q = None
-                mean_np = prev_mean.copy()
-            else:
-                q = qt
-                mean_np = mu.cpu().numpy()[0].astype(np.float32)
-                prev_mean = mean_np
+            q = qt
+            mean_np = mu.cpu().numpy()[0].astype(np.float32)
+            prev_mean = mean_np
             if warm:
                 warm_means.append(mean_np)
             yield OnlineResult(step=global_t, mean=mean_np,
                                logvar=qt.logvar.detach().cpu().numpy()[0].astype(np.float32),
                                pred_mean=pred, loss=float(loss.detach()), recon=float(recon.detach()),
                                dynamics=float(dyn.detach()), entropy=float(ent.detach()),
-                               warming_up=warm, diverged=diverged, refreshed=refreshed,
+                               warming_up=warm, diverged=False, refreshed=refreshed,
                                elapsed_s=elapsed, trial=ti, t_in_trial=k)
             global_t += 1

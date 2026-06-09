@@ -438,6 +438,12 @@ class RBFDS(Module):
     @torch.no_grad()
     def initialize(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *,
                    rbf_centers: Tensor = None, rbf_logwidths: Tensor = None):
+        # Seeded centers/widths are only consumed by the srrls init path; reject them
+        # for other flow learners rather than silently ignoring (the caller would get
+        # default centers and never know).
+        if rbf_centers is not None and self.flow_learner != 'srrls':
+            raise NotImplementedError(
+                "rbf_centers/rbf_logwidths are only supported for flow_learner='srrls'")
         xs = torch.atleast_2d(xs)
         xt = torch.atleast_2d(xt)
         xu = nonecat(xs, ut)

@@ -69,3 +69,12 @@ def test_kmeans_centers_shapes():
     c, logw = kmeans_centers(states, n_rbf=20)
     assert c.shape == (20, 3) and logw.shape == (20,)
     assert np.isfinite(logw).all()
+
+
+def test_kmeans_centers_requires_enough_states():
+    # fewer visited states than requested centers should fail clearly, not silently
+    # clamp the cluster count (which would return < n_rbf centers).
+    rng = np.random.default_rng(20260609)
+    states = rng.standard_normal((10, 3)).astype(np.float32)
+    with pytest.raises(ValueError):
+        kmeans_centers(states, n_rbf=20)

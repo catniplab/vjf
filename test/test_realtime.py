@@ -199,6 +199,49 @@ def test_synthetic_calibration_and_reproducibility():
     assert np.array_equal(s1, s2) and s1.shape == (400, 40)
 
 
+def test_trials_warmup_excludes_cross_trial_pairs():
+    # The boundary flow init must not consume the spurious last-bin(trial i) ->
+    # first-bin(trial i+1) transition pairs (the posterior resets to the prior at
+    # each trial start). With warmup_trials=2 over trials of length 6 and 5, the
+    # warm buffer has 11 means; the consecutive pairs spanning the two warm trials
+    # number 11 - 1 = 10, but the single cross-trial pair must be dropped, leaving
+    # 11 - 2 = 9 (= total_warm_means - n_warm_trials).
+    counts = _counts(T=11)
+    trials = [counts[:6], counts[6:11], counts[:6]]   # warm: 6 + 5; then one eval trial
+    m = _model(0, encoder="spikes")
+    rec = {"xt": None, "xs": None}
+    orig = m.transition.initialize
+    def spy(xt, xs, ut=None, **kw):
+        rec["xt"] = xt.detach().clone()
+        rec["xs"] = xs.detach().clone()
+        return orig(xt, xs, ut, **kw)
+    m.transition.initialize = spy
+
+    list(online_filter_trials(m, trials, warmup_trials=2, readout=None))
+    assert rec["xt"] is not None                       # init fired at the boundary
+    total_warm_means, n_warm_trials = 11, 2
+    assert rec["xt"].shape[0] == total_warm_means - n_warm_trials   # 9, not 10
+    assert rec["xs"].shape[0] == total_warm_means - n_warm_trials
+
+
+def test_trials_magnitude_guard_emits_nan_sentinel():
+    # When the magnitude/non-finite guard trips, the diverged result must be the
+    # same sentinel as online_filter / the AssertionError path: loss=nan and a zero
+    # logvar (not the rejected posterior's finite metrics/logvar).
+    counts = _counts(T=8)
+    trials = [counts[:4], counts[4:8]]
+    m = _model(0, encoder="spikes")
+    res = list(online_filter_trials(m, trials, warmup_trials=0,
+                                    max_abs_state=1e-9, readout=None))
+    diverged = [r for r in res if r.diverged]
+    assert len(diverged) >= 1                           # the tiny bound trips the guard
+    for r in diverged:
+        assert math.isnan(r.loss)
+        assert math.isnan(r.recon) and math.isnan(r.dynamics) and math.isnan(r.entropy)
+        assert np.allclose(r.logvar, 0)
+        assert r.pred_mean is None and r.refreshed is False
+
+
 def test_trials_reset_posterior_each_trial():
     counts = _counts(T=20)
     trials = [counts[:10], counts[10:]]            # two 10-step trials
