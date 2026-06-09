@@ -847,3 +847,7 @@ experiments/lc_poisson_stream/results/
 experiments/lc_poisson_stream/results_e1/
 experiments/lc_poisson_stream/*.pdf
 paper/data/extra/vanilla_demo.json
+
+# stray artifacts: Dropbox save-conflict files and root-dir experiment scratch output
+*-SAVE-ERROR
+/vanilla_demo.json
