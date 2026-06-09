@@ -41,3 +41,35 @@ def leave_one_neuron_rates(model, readout, trial_counts: np.ndarray) -> np.ndarr
             lam[t, n] = np.exp(C[n] @ xm + b[n])
     readout.nu = nu_snapshot                                    # restore caller's EMA state
     return lam
+
+
+def orientation_decode_acc(latent_per_trial: np.ndarray, dirs: np.ndarray, *,
+                           n_splits: int = 5, seed: int = 20260609) -> float:
+    """Cross-validated direction-decoding accuracy from per-trial latent summaries
+    (latent_per_trial: (n_trial, feat)). Multinomial logistic regression."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import cross_val_score
+    clf = LogisticRegression(max_iter=2000)
+    y = np.round(dirs).astype(int)
+    return float(cross_val_score(clf, latent_per_trial, y, cv=n_splits).mean())
+
+
+def torus_embedding(latent: np.ndarray, dirs: np.ndarray):
+    """Trial-averaged latent per direction, projected to its first 3 singular vectors
+    (reproduces vLGP Fig 8). latent (n_trial, m). Returns (72, 3) and the direction axis."""
+    axis = np.unique(dirs)
+    avg = np.stack([latent[dirs == d].mean(0) for d in axis], 0)   # (72, m)
+    u, s, vt = np.linalg.svd(avg - avg.mean(0), full_matrices=False)
+    return (avg - avg.mean(0)) @ vt[:3].T, axis
+
+
+@torch.no_grad()
+def forecast_r2(model, x0: np.ndarray, true_path: np.ndarray, k: int) -> float:
+    """Affine-aligned R^2 of a k-step free run of the learned flow from x0 vs true_path
+    (true_path: (k, m)). Mirrors the synthetic forecast metric."""
+    x, _ = model.forecast(torch.as_tensor(x0[None].astype(np.float32)), n_step=k)
+    pred = x.detach().cpu().numpy()[1:, 0, :]
+    A = np.concatenate([pred, np.ones((k, 1))], 1)
+    W, *_ = np.linalg.lstsq(A, true_path, rcond=None)
+    sse = ((true_path - A @ W) ** 2).sum(); tss = ((true_path - true_path.mean(0)) ** 2).sum() + 1e-12
+    return float(1 - sse / tss)

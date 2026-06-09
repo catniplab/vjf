@@ -117,3 +117,15 @@ def test_leave_one_neuron_rates_emastate_isolated():
     assert np.allclose(ro.nu, nu_before)         # restored on exit (no side effect)
     lam2 = leave_one_neuron_rates(m, ro, trial)
     assert np.allclose(lam1, lam2)               # deterministic / order-independent
+
+
+from experiments.v1_graf.eval import orientation_decode_acc, torus_embedding
+def test_decode_and_torus_shapes():
+    rng = np.random.default_rng(20260609)
+    dirs = np.repeat(np.arange(0, 360, 5.0), 4)
+    lat = np.stack([np.cos(np.deg2rad(dirs)), np.sin(np.deg2rad(dirs)),
+                    rng.standard_normal(dirs.size) * 0.01], 1).astype(np.float32)
+    acc = orientation_decode_acc(lat, dirs, n_splits=4, seed=20260609)
+    assert acc > 0.5
+    emb, axis = torus_embedding(lat, dirs)
+    assert emb.shape[0] == 72 and emb.shape[1] == 3
