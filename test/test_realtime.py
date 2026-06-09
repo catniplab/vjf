@@ -8,7 +8,7 @@ from vjf import synthetic as syn
 from vjf.distribution import Gaussian
 from vjf.model import VJF
 from vjf.readout import OnlineReadout
-from vjf.realtime import online_filter
+from vjf.realtime import online_filter, online_filter_trials
 
 YDIM, XDIM, N_RBF = 12, 2, 8
 
@@ -197,3 +197,18 @@ def test_synthetic_calibration_and_reproducibility():
     s1 = np.array(list(syn.stream(z, C, b, seed=2)))
     s2 = np.array(list(syn.stream(z, C, b, seed=2)))
     assert np.array_equal(s1, s2) and s1.shape == (400, 40)
+
+
+def test_trials_reset_posterior_each_trial():
+    counts = _counts(T=20)
+    trials = [counts[:10], counts[10:]]            # two 10-step trials
+    m = _model(encoder="spikes")
+    results = list(online_filter_trials(m, trials, warmup_trials=1, readout=None))
+    # one result per sample, with trial index and in-trial step
+    assert len(results) == 20
+    assert [r.trial for r in results[:10]] == [0]*10
+    assert [r.trial for r in results[10:]] == [1]*10
+    # first sample of each trial starts from the prior: pred_mean is None
+    assert results[0].pred_mean is None and results[10].pred_mean is None
+    # within a trial, later samples have a one-step prediction
+    assert results[5].pred_mean is not None

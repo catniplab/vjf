@@ -59,6 +59,8 @@ class OnlineResult:
     diverged: bool              # guard tripped; mean repeats the previous good mean
     refreshed: bool             # projection (C,b) Procrustes refresh fired this step
     elapsed_s: float            # wall time of the online inference region (excl. diagnostics)
+    trial: int = -1            # trial index (real-time multi-trial use)
+    t_in_trial: int = -1       # step within the trial
 
 
 def online_filter(model, stream: Iterable, *, readout=None, u_stream: Optional[Iterable] = None,
@@ -173,3 +175,92 @@ def online_filter(model, stream: Iterable, *, readout=None, u_stream: Optional[I
             pred_mean=pred, loss=float(loss.detach()), recon=float(recon.detach()),
             dynamics=float(dyn.detach()), entropy=float(ent.detach()),
             warming_up=warm, diverged=False, refreshed=refreshed, elapsed_s=elapsed)
+
+
+def online_filter_trials(model, trials, *, readout=None, adapt_readout=True,
+                         warmup_trials=1, rbf_width_scale=1.0,
+                         logvar_floor=math.log(1e-6), max_abs_state=1e3,
+                         seed_centers=None):
+    """Drive ``model`` over a sequence of independent ``trials`` (each an iterable of
+    y_t), resetting the posterior to the prior at every trial start. The model
+    (readout, flow) persists across trials. Trials 0..warmup_trials-1 are the
+    coverage warm-up (dynamics off, latent means buffered across ALL of them); at the
+    boundary the flow is initialized once from the buffered means, and (if
+    ``seed_centers``) RBF centers are placed data-drivenly (Task 4). Yields one
+    OnlineResult per sample with .trial/.t_in_trial set.
+
+    No new math: every step calls model.filter / OnlineReadout, exactly as
+    online_filter, only the reset bookkeeping differs.
+
+    Note: seed_centers requires the data-driven RBFDS.initialize kwargs from Task 4.
+    """
+    xdim = model.mean.shape[-1]
+    warm_means = []
+    initialized = False
+    global_t = 0
+    for ti, trial in enumerate(trials):
+        warm = ti < warmup_trials
+        q = None                                   # reset to prior at trial start
+        prev_mean = np.zeros(xdim, dtype=np.float32)
+        for k, y_t in enumerate(trial):
+            # one-time init at the coverage boundary (first sample after warm-up trials)
+            if ti == warmup_trials and not initialized and len(warm_means) > 1:
+                m = torch.as_tensor(np.asarray(warm_means), dtype=torch.get_default_dtype())
+                if seed_centers is not None:
+                    centers, logw = seed_centers(np.asarray(warm_means))
+                    model.transition.initialize(m[1:], m[:-1], None,
+                                                rbf_centers=centers, rbf_logwidths=logw)
+                else:
+                    model.transition.initialize(m[1:], m[:-1], None)
+                    model.transition.velocity.feature.logwidth.data += math.log(rbf_width_scale)
+                initialized = True
+            pred = None
+            if q is not None:
+                with torch.no_grad():
+                    pred = _mean(model.transition(q.mean, None, sampling=False)).detach().cpu().numpy()[0]
+            t0 = time.perf_counter()
+            y_enc = None
+            if readout is not None:
+                g = readout.feature(np.asarray(y_t), update_mean=adapt_readout)
+                if adapt_readout:
+                    readout.update(g)
+                y_enc = torch.as_tensor(readout.project(g))
+            try:
+                qt, loss, recon, dyn, ent = model.filter(
+                    y_t, None, q, sgd=True, update=True, verbose=True, warm_up=warm, y_enc=y_enc)
+            except AssertionError:
+                model.transition.logvar.data.clamp_(min=logvar_floor)
+                q = None
+                if warm:
+                    warm_means.append(prev_mean.copy())
+                yield OnlineResult(step=global_t, mean=prev_mean.copy(),
+                                   logvar=np.zeros(xdim, np.float32), pred_mean=None,
+                                   loss=float("nan"), recon=float("nan"), dynamics=float("nan"),
+                                   entropy=float("nan"), warming_up=warm, diverged=True,
+                                   refreshed=False, elapsed_s=time.perf_counter()-t0,
+                                   trial=ti, t_in_trial=k)
+                global_t += 1
+                continue
+            model.transition.logvar.data.clamp_(min=logvar_floor)
+            mu = qt.mean.detach()
+            diverged = (not torch.isfinite(mu).all()) or (mu.abs().max() > max_abs_state)
+            refreshed = False
+            if not diverged and readout is not None and adapt_readout and not warm:
+                refreshed = bool(readout.maybe_refresh(model.decoder, global_t))
+            elapsed = time.perf_counter() - t0
+            if diverged:
+                q = None
+                mean_np = prev_mean.copy()
+            else:
+                q = qt
+                mean_np = mu.cpu().numpy()[0].astype(np.float32)
+                prev_mean = mean_np
+            if warm:
+                warm_means.append(mean_np)
+            yield OnlineResult(step=global_t, mean=mean_np,
+                               logvar=qt.logvar.detach().cpu().numpy()[0].astype(np.float32),
+                               pred_mean=pred, loss=float(loss.detach()), recon=float(recon.detach()),
+                               dynamics=float(dyn.detach()), entropy=float(ent.detach()),
+                               warming_up=warm, diverged=diverged, refreshed=refreshed,
+                               elapsed_s=elapsed, trial=ti, t_in_trial=k)
+            global_t += 1
