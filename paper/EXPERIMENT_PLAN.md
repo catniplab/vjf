@@ -66,19 +66,23 @@ low SNR**.
 p50/p95/max per-bin latency + refresh-bin vs ordinary-bin, from the uncontended serial runs.
 Pass: p95 < 5 ms/bin.
 
-### E4 -- Projection mechanism ablation (optional, C1)
-If budget allows: full-$n$ vs random vs shuffled-$C$ vs PCA vs $\vC^+$ projection, performance vs
-subspace angle, at low SNR. Sharpens *why* the projection helps. Not required for the story.
+### E4 -- Projection mechanism ablation (optional, C1) [DROPPED 2026-06-09]
+Would have been: full-$n$ vs random vs shuffled-$C$ vs PCA vs $\vC^+$ projection, performance vs
+subspace angle, at low SNR, to sharpen *why* the projection helps. **Dropped:** not required for the
+story; C1 is already carried by the projection-vs-oracle rows in Tab 1/2 and Fig A.
 
-### E6 -- Original VJF fails to converge (motivating figure, Sec 2 -> 3) [TO RUN]
+### E6 -- Original VJF fails to converge (motivating figure, Sec 2 -> 3) [DONE]
 Demonstrate the *problem* before the fix: original VJF (raw-spike encoder; readout $\vC$ learned by
 the SGD/Adam ELBO gradient; flow by SGD; NO readout warm-start) on the synthetic stream. Log
 filtered-latent $R^2$ and one-step prediction $R^2$ vs stream position (x = time step, y = $R^2$).
 Expectation: both stay near zero (the readout collapses to the mean rate under sparse spikes), so
 the unknown-readout problem is fully motivated before introducing the projection encoder + decoupled
 readout. Self-contained (vjf.synthetic, flow_learner='sgd'); a single representative SNR (e.g. 3 dB).
+**Done** (`motivation_compare.py`, 5 seeds): 4 original arms {random, oracle $\vC$} x {Adam, SGD} +
+sVJF -> `data/extra/motivation_compare.json` -> Fig 1 (`motivation.pdf`). Random-init stalls (one-step
+$R^2$ 0.2-0.4); oracle-init converges (~0.94) and does not drift back; sVJF reaches ~0.93 from spikes.
 
-### E7 -- Flow learner: SGD/Adam vs square-root RLS (numerical comparison) [TO RUN, requested]
+### E7 -- Flow learner: SGD/Adam vs square-root RLS (numerical comparison) [DONE]
 Isolate the flow learner. Identical setup (projection encoder, a fixed/oracle readout so only the
 flow differs), vary ONLY how $\vW$ is learned: SGD/Adam (the original VJF) vs square-root RLS (sVJF).
 Compare online convergence speed and stability over the long stream: filtered-latent $R^2$ and
@@ -88,6 +92,9 @@ converges far faster (W enters linearly) and stays stable, motivating the srrls 
 selectable via `VJF.make_model(..., optimizer='adam'|'sgd')` (Adam restored). The original VJF used
 Adam (it had been swapped to SGD on 2021-07-27, commits cda9668/d2e687e, during a refactor), so the
 exact-original arm is `flow_learner='sgd', optimizer='adam'`.
+**Done** (`flow_compare.py`, oracle readout fixed, 5 seeds) -> `data/extra/flow_compare.json` ->
+Appendix `fig:flow`. With a clean readout the flow learner barely affects accuracy (one-step $R^2$
+0.88-0.97 for srrls/Adam/SGD); srrls converges fastest early and stays stable, plain RLS diverges.
 
 ## 4. Figure plan (claims-first)
 
@@ -105,7 +112,9 @@ Vector PDF, proper font sizes at final print size (no LaTeX downscaling), `pdf.f
 consistent per-method/per-SNR colors, regenerated from `summary.json` by one plotting module.
 
 ## 5. Status / logistics
-- E1 done (8 seeds, VM torn down). E2 done. E3 finishing (oracle control). E5 from serial runs.
+- **All planned experiments executed except E4 (dropped 2026-06-09).** E1 done (8 seeds + SNR-sweep),
+  E2 done, E3 done, E5 done, E6 done (Fig 1), E7 done (fig:flow). Paper has 0 unfilled `\TD{}`; all
+  figures staged. This v5 set is complete -- next set planned separately.
 - Code on `exp/better-experiments` (pushed). Tracker: `EXPERIMENT_PROGRESS.md`.
 
 ## 6. Final delivery (standing)

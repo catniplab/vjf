@@ -1,6 +1,6 @@
 # Experiment progress tracker
 
-Single source of truth for the run state of the experiments in `EXPERIMENT_PLAN.md` (v4).
+Single source of truth for the run state of the experiments in `EXPERIMENT_PLAN.md` (v5).
 Target: finish within 24 h wall-clock; shard across up to 4 GCP instances if a single VM would
 exceed that. Update on each launch and each pull.
 
@@ -16,13 +16,15 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 | E5  | C5 timing | (from E2/E3 uncontended serial runs) | 1fc65e6 | - | covered (p50/p95/max + refresh-vs-ordinary in summary.json) | - | - | no separate VM needed |
 | E2  | K sweep {250,1000,4000,1e5} x 5 SNR | exp-20260605-192841-vjf-e2 | 1fc65e6 | 20260602 | **running** (launched 19:29 UTC, ~2-3h) | - | results/e2_K*/ | per-bin percentiles included (E5) |
 | E3  | tau {1,2,4,8,16,32} x 5 SNR, online + oracle ctrl | exp-20260605-192819-vjf-e3 | 1fc65e6 | 20260602 | **running** (launched 19:28 UTC, ~6h) | - | results/e3_*/ | rate corr + filtered R^2 vs tau |
-| E4  | projection mechanism ablation | - | - | - | deferred (optional Fig F; needs encoder-feature modes) | - | - | run if budget allows after E1-E3 |
+| E4  | projection mechanism ablation | - | - | - | **DROPPED** (2026-06-09; optional) | - | - | not required; C1 carried by Tab 1/2 + Fig A |
+| E6  | original VJF fails to converge (Fig 1) | local (self-contained) | - | 20260605..09 (5) | **DONE** | - | data/extra/motivation_compare.json | oracle-init ~0.94 (no drift), random-init 0.2-0.4, sVJF ~0.93 -> motivation.pdf |
+| E7  | flow learner: SGD/Adam vs srrls | local (self-contained) | - | 5 | **DONE** | - | data/extra/flow_compare.json | one-step R^2 0.88-0.97 (stable arms); plain RLS diverges -> fig:flow |
 
 ## Instance allocation (3 of 4 used)
 - inst-1: E1 (exp-20260605-171155-vjf-e1) -- 8 seeds x 7 arms
 - inst-2: E3 (exp-20260605-192819-vjf-e3) -- tau sweep online + oracle control
 - inst-3: E2 (exp-20260605-192841-vjf-e2) -- K sweep
-- inst-4: free (reserve for E4 or reruns)
+- inst-4: free (E4 dropped; was its reserve)
 - E5 timing: extracted from E2/E3 serial runs (uncontended), not a separate VM
 
 ## Log
@@ -96,6 +98,12 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
   regenerate figs (`plot_results.py`), pull 5-SNR raster, build -> `/codex-review` -> academic_editor
   + writing-style proofread -> revise -> build -> push -> Slack #joint-filtering.
 
+- **2026-06-09 (reconciliation):** E4 (projection mechanism ablation) **DROPPED** -- optional, not
+  required (C1 carried by Tab 1/2 + Fig A). E6 (motivation, Fig 1) and E7 (flow learner, fig:flow)
+  confirmed **DONE** from self-contained local runs (`data/extra/motivation_compare.json`,
+  `data/extra/flow_compare.json`). Paper has 0 unfilled `\TD{}`; all figures staged. The v5 set is
+  complete and the plan/progress docs now match the shipped state. Next experiment set planned separately.
+
 ## Final delivery (when all experiments done) -- standing instruction
 
 1. Regenerate all figures as publication-quality vector PDF from the run artifacts.
@@ -107,5 +115,5 @@ queued / running / done / failed. Code is pinned to a single commit per run (git
 7. Post the compiled PDF tech report to Slack #joint-filtering.
 
 ## Pending decisions / blockers
-- Awaiting approval to implement E0 instrumentation + E1 code (subspace-tracking, imposed-rotation
-  injector, decoder-freeze) and to start GCP runs.
+- (resolved) E0 instrumentation + E1 code implemented and run; v5 experiment set complete (E4 dropped).
+- Next: scope the next experiment set (real data / richer dynamics / non-stationarity trigger -- TBD).
