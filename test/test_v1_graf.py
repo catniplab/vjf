@@ -78,3 +78,42 @@ def test_kmeans_centers_requires_enough_states():
     states = rng.standard_normal((10, 3)).astype(np.float32)
     with pytest.raises(ValueError):
         kmeans_centers(states, n_rbf=20)
+
+
+from experiments.v1_graf.eval import predictive_ll_bits_per_spike
+def test_pll_perfect_vs_baseline():
+    rng = np.random.default_rng(20260609)
+    ybar = 0.1
+    y = rng.poisson(ybar, size=(5, 100, 8)).astype(np.float32)
+    # model that predicts the true generating rate equals the mean-rate baseline -> ~0 bits/spike
+    lam_true = np.full_like(y, ybar)
+    pll = predictive_ll_bits_per_spike(y, lam_true, ybar)
+    assert abs(pll) < 0.05
+    lam_better = np.clip(y.mean(0, keepdims=True).repeat(5, 0), 1e-3, None)  # PSTH predictor
+    assert predictive_ll_bits_per_spike(y, lam_better, ybar) >= -0.05
+
+
+import torch
+from vjf.model import VJF
+from vjf.readout import OnlineReadout
+from experiments.v1_graf.eval import leave_one_neuron_rates
+
+def test_leave_one_neuron_rates_emastate_isolated():
+    rng = np.random.default_rng(20260609)
+    torch.manual_seed(0)
+    m = VJF.make_model(8, 2, 0, 8, hidden_sizes=[8, 8], likelihood="poisson",
+                       transition_flow="srrls", encoder="projection")
+    ro = OnlineReadout(8, 2, refresh_K=1000)
+    win = rng.poisson(0.3, size=(15, 8)).astype(np.float32)
+    Cp, bp = ro.warm_start(win)
+    with torch.no_grad():
+        m.decoder.decode.weight.copy_(torch.as_tensor(Cp))
+        m.decoder.decode.bias.copy_(torch.as_tensor(bp.reshape(-1)))
+    ro.nu = np.abs(rng.standard_normal(8))       # non-trivial EMA entry state (positive to avoid log NaN)
+    nu_before = ro.nu.copy()
+    trial = rng.poisson(0.3, size=(10, 8)).astype(np.float32)
+    lam1 = leave_one_neuron_rates(m, ro, trial)
+    assert lam1.shape == (10, 8)
+    assert np.allclose(ro.nu, nu_before)         # restored on exit (no side effect)
+    lam2 = leave_one_neuron_rates(m, ro, trial)
+    assert np.allclose(lam1, lam2)               # deterministic / order-independent
