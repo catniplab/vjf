@@ -195,6 +195,43 @@ class LinearRegression(Module):
         self.w_chol = (p0 ** 0.5) * torch.eye(n, dtype=feat.dtype, device=feat.device)
 
     @torch.no_grad()
+    def grow_basis(self, center: Tensor, logwidth: float, p0: float = 1.0):
+        """Append ONE RBF basis function for the square-root-RLS path: a new center
+        with a ZERO weight row (so the current velocity prediction is unchanged at
+        every point) and a fresh independent prior block ``sqrt(p0)`` appended to the
+        covariance square-root factor ``w_chol``. This is the standard way to add a
+        parameter to a square-root RLS filter; the new weight is then learned online
+        by subsequent ``srls`` updates. Bayes (srrls) path only; no intercept.
+        """
+        if not self.bayes:
+            raise NotImplementedError("grow_basis is only for the bayesian (srrls) path")
+        if self.feature.intercept:
+            raise NotImplementedError("grow_basis assumes RBF without an intercept column")
+        feat = self.feature
+        c = torch.atleast_2d(torch.as_tensor(center, dtype=feat.centroid.dtype,
+                                             device=feat.centroid.device))
+        lw = torch.as_tensor([float(logwidth)], dtype=feat.logwidth.dtype,
+                             device=feat.logwidth.device)
+        feat.centroid = Parameter(torch.cat([feat.centroid.data, c], 0),
+                                  requires_grad=feat.centroid.requires_grad)
+        feat.logwidth = Parameter(torch.cat([feat.logwidth.data, lw], 0),
+                                  requires_grad=feat.logwidth.requires_grad)
+        feat.n_basis += 1
+        n = self.w_chol.shape[0]
+        z = torch.zeros(1, self.n_output, dtype=self.w_mean.dtype, device=self.w_mean.device)
+        self.w_mean = torch.cat([self.w_mean, z], 0)             # zero weight -> prediction unchanged
+        S = torch.zeros(n + 1, n + 1, dtype=self.w_chol.dtype, device=self.w_chol.device)
+        S[:n, :n] = self.w_chol
+        S[n, n] = float(p0) ** 0.5                               # fresh prior for the new weight
+        self.w_chol = S
+        # keep the precision-form arrays shape-consistent (unused by srls; padded as identity)
+        for name in ("w_precision", "w_pchol"):
+            old = getattr(self, name)
+            M = torch.eye(n + 1, dtype=old.dtype, device=old.device)
+            M[:n, :n] = old
+            setattr(self, name, M)
+
+    @torch.no_grad()
     def srls(self, x: Tensor, target: Tensor, v: Union[Tensor, float], shrink: float = 1.):
         """Square-root (Potter) recursive least squares update.
 

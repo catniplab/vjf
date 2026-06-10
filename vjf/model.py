@@ -382,10 +382,41 @@ class RBFDS(Module):
         # (shrink=1, ridge=0). Set shrink<1 with ridge>0 to bound the precision.
         self.rls_shrink = 1.0
         self.rls_ridge = 0.0
+        # Growing RBF basis ('srrls' flow only; off by default = original behavior).
+        # When grow_rbf, after each online update the current predictor's RBF coverage
+        # is checked: if the max basis activation < grow_thresh (all existing centers
+        # are far), a new center is appended there (LinearRegression.grow_basis). This
+        # lets the flow basis track a latent that drifts/inflates during learning.
+        self.grow_rbf = False
+        self.max_rbf = None          # cap on the number of centers (None = uncapped)
+        self.grow_thresh = 0.5       # add a center if max RBF activation falls below this
+        self.grow_min_gap = 1        # min update steps between additions
+        self.grow_logwidth = None    # new-center logwidth (None = median of existing)
+        self.grow_p0 = 1.0           # prior covariance for a new weight
+        self._since_grow = 0
+        self._n_grown = 0
 
     def _velocity_mean(self, xu: Tensor) -> Tensor:
         out = self.velocity(xu, sampling=False)
         return out.mean if isinstance(out, Gaussian) else out
+
+    @torch.no_grad()
+    def _maybe_grow(self, xu: Tensor) -> None:
+        """Append an RBF center at the current predictor if it is not yet covered by
+        the basis (max activation < grow_thresh = all existing centers far). Throttled
+        by grow_min_gap and bounded by max_rbf. The novelty test follows Memming's
+        criterion: grow when the RBF-projected state's activation is small."""
+        self._since_grow += 1
+        cap = self.max_rbf if self.max_rbf is not None else float('inf')
+        if self.velocity.feature.n_basis >= cap or self._since_grow < self.grow_min_gap:
+            return
+        phi = self.velocity.feature(xu)                  # (batch, n_basis)
+        if float(phi.max()) < self.grow_thresh:          # uncovered -> add a center here
+            lw = (self.grow_logwidth if self.grow_logwidth is not None
+                  else float(self.velocity.feature.logwidth.median()))
+            self.velocity.grow_basis(xu[:1], lw, p0=self.grow_p0)
+            self._since_grow = 0
+            self._n_grown += 1
 
     def forward(self, x: Tensor, u: Tensor = None, sampling: bool = True, leak: float = 0.) -> Union[Tensor, Gaussian]:
         xu = nonecat(x, u)
@@ -428,6 +459,8 @@ class RBFDS(Module):
                 self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
             elif self.flow_learner == 'srrls':
                 self.velocity.srls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink)
+                if self.grow_rbf:
+                    self._maybe_grow(xu)
             # 'sgd' flow is trained by the main optimizer via the dynamics ELBO instead.
         residual = dx - self._velocity_mean(xu)
         mse = residual.pow(2).mean()
