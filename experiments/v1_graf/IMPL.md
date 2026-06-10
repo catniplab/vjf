@@ -56,3 +56,22 @@ cannot itself represent 72 distinct orientations, and here it overrides the enco
 
 **M2 (5/1 ms) and the baseline plan (U5) are on hold pending this resolution.** The implementation
 (Tasks 1-7, branch `feat/v1-graf`) is sound and reviewed; the issue is configuration/design, not code.
+
+### UPDATE 2026-06-10 (diagnostic run + controls -> first hypothesis REFUTED)
+
+A diagnostic retrain (`diag_m1.py`: dynamics-ON vs a no-dynamics control) + a readout-projection
+localization (`diag_readout.py`) overturn the "oscillator dominates" read above. Full write-up with
+figures: `report_m1/REPORT_M1.md`. Corrected diagnosis -- the orientation is lost in TWO encoder
+stages, and the dynamics are exonerated:
+- batch PCA-3 of the feature decodes direction at **0.234** (information is present);
+- the readout projection pi (recognition INPUT) decodes at **0.126** (warm-start C) / 0.103 (online
+  C) -- the online readout subspace is **46.5 deg** off the ideal, ~halving the info;
+- the sVJF filtered latent (recognition OUTPUT) decodes at **chance (0.014)** -- and the
+  **no-dynamics control is also 0.014**, so the autonomous flow is NOT the cause (with the flow ON the
+  trial-averaged latent even shows a faint orientation ring the control lacks).
+- Root cause: **Poisson encoder collapse** -- the recognition network drives the posterior to a
+  near-constant, collapsed latent, discarding the orientation in pi (the projection encoder reduced
+  but did not remove the documented collapse). Secondary: the readout subspace is suboptimal.
+- Next (decision): attack the encoder collapse (variance floor / entropy temper / recognition
+  warm-up or pre-train pi->latent), and improve the readout subspace (more coverage / longer
+  warm-start). Do NOT change the dynamics. See REPORT_M1.md for specifics.
