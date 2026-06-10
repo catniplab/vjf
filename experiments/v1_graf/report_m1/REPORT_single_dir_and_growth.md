@@ -79,18 +79,39 @@ confirmed; a per-row-novelty batched-update fix applied). 44->... tests pass.
 trajectory, fits an expanding spiral rather than a clean limit cycle, so its autonomous free-run
 degrades (worst at E=50). So **RBF coverage was not the limiting factor** for the predictive metrics.
 
-## 4. Conclusion and recommended next lever
+## 4. What drives the inflation: a readout-refresh x dynamics feedback (`inflation_probe.py`)
+
+![inflation probe](figs/inflation_probe.png)
+
+Latent running spread over training (dir 225, L=2, 20 epochs), three arms:
+
+| arm | final latent spread |
+|---|---|
+| baseline (refresh on, dynamics on) | 0.187 (inflates, 0.07 -> 0.19) |
+| frozen readout (no refresh), dynamics on | 0.034 (flat) |
+| dynamics off, refresh on | 0.045 (flat) |
+
+The inflation needs BOTH the readout refresh AND the dynamics -- turning off either keeps the latent
+flat. It is a positive feedback ratchet: the CCIPCA refresh rescales C by the latent's current
+variance (the `sqrt(eigenvalue)` fold in `OnlineReadout._scaled_C`), the recognition compensates,
+the flow amplifies, and the next refresh rescales again. **Freezing the readout after warm-start
+kills it most cleanly** -- which is exactly the freeze/anneal recipe the synthetic study already
+found ("freeze the refresh once converged recovers forecast"). So the V1 latent inflation and the
+synthetic forecast-erosion are the same phenomenon, and the fix likely transfers.
+
+## 5. Conclusion and recommended next lever
 
 - The single-condition machinery is sound (PLL near ceiling), so the path forward is real.
 - Growing RBFs is now a sound, tested, reviewed capability (kept in the library, off by default), but
   on this task it does not move PLL and hurts forecast -- coverage is not the bottleneck.
-- The recurring root cause across both regimes is **latent-scale control**: the latent *inflates*
-  here (single direction) and *collapsed* in the full 72-direction run. The next lever should target
-  that -- understand why the latent magnitude runs away during online learning (it is not a free
-  gauge given C-normalization; suspect the dynamics term and/or the readout's CCIPCA eigenvalue
-  rescaling feeding back into the recognition), and stabilize it. Separately, *beating* the PSTH
-  ceiling (genuine single-trial structure) likely needs readout/encoder work (the online readout
-  subspace was ~46 deg off the data PCA-3 even for one direction).
+- The recurring root cause is **latent-scale control** (inflates single-direction, collapsed
+  full-task). Sec 4 pins the single-direction inflation to the **readout-refresh x dynamics feedback**
+  (CCIPCA `sqrt(eigenvalue)` rescaling), confirming the earlier suspicion. **Concrete next lever:
+  freeze or anneal the readout refresh after warm-start** (already a recipe in the synthetic study and
+  shown here to keep the latent flat at 0.034) and re-check PLL/forecast; this is a config change, no
+  new machinery. Separately, *beating* the PSTH ceiling (genuine single-trial structure) likely needs
+  readout/encoder work (the online readout subspace was ~46 deg off the data PCA-3 even for one
+  direction).
 - Two earlier hypotheses were tested and dropped: "the autonomous oscillator dominates" (refuted by
   the no-dynamics control, `REPORT_M1.md`) and "pin the latent scale" (not a coherent separate knob,
   per Memming). The data-driven landing point is the inflation above.

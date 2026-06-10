@@ -95,3 +95,8 @@ stages, and the dynamics are exonerated:
   beating the PSTH ceiling likely needs readout/encoder work (online readout subspace ~46 deg off
   the data PCA-3). Two dropped hypotheses: "oscillator dominates" (refuted) and "pin latent scale"
   (not a coherent separate knob, per Memming).
+- Inflation cause pinned (`inflation_probe.py`): the single-direction latent inflation needs BOTH the
+  readout refresh AND the dynamics -- freezing the readout (no refresh) keeps spread flat at 0.034 and
+  dynamics-off at 0.045, vs baseline 0.187. It is the CCIPCA sqrt(eigenvalue) rescaling x dynamics
+  feedback ratchet. Concrete next lever: FREEZE/ANNEAL the readout refresh after warm-start (already a
+  synthetic-study recipe) and re-check PLL/forecast -- a config change, no new machinery.
