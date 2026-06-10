@@ -75,3 +75,23 @@ stages, and the dynamics are exonerated:
 - Next (decision): attack the encoder collapse (variance floor / entropy temper / recognition
   warm-up or pre-train pi->latent), and improve the readout subspace (more coverage / longer
   warm-start). Do NOT change the dynamics. See REPORT_M1.md for specifics.
+
+### UPDATE 2026-06-10b (scaled to single direction + growing RBF). See REPORT_single_dir_and_growth.md
+
+- Scaled the task to ONE direction (auto 225 deg, L=2, replay trials over epochs): sVJF WORKS --
+  leave-one-neuron-out PLL +0.61..+0.65 (PSTH ceiling +0.73), forecast +0.30..+0.42, stable. So the
+  M1 no-go was multi-condition scaling, not an inability to model V1. (PLL is just below the PSTH
+  ceiling -> captures stimulus-locked structure but does not yet beat the trial mean.)
+- Training-curve diagnostics: readout C subspace is STABLE (cumulative 2.4 deg / 50 epochs); the
+  drift is LATENT-SCALE INFLATION (spread 0.07->0.35, still rising), dragging the latent ~27x off the
+  once-seeded RBF centers. (Not a free gauge -- C is column-normalized.)
+- Implemented Memming's growing RBF (vjf grow_rbf; commits efdd11f + codex fix 92f5f64): coverage is
+  fixed (nearest-center dist 0.07 vs 0.35) BUT it bursts to the cap (100->400 in ~1 epoch, driven by
+  the inflation), PLL is UNCHANGED (~0.65), and forecast is WORSE (0.15..0.37 vs 0.30..0.42). So RBF
+  coverage is NOT the bottleneck; the 400-center basis fits the inflating spiral and degrades the
+  free-run.
+- Net: growing RBF is a sound, tested, reviewed capability (kept, off by default) but not the fix
+  here. Root cause to tackle next = latent-scale control (inflates single-dir, collapsed full-task);
+  beating the PSTH ceiling likely needs readout/encoder work (online readout subspace ~46 deg off
+  the data PCA-3). Two dropped hypotheses: "oscillator dominates" (refuted) and "pin latent scale"
+  (not a coherent separate knob, per Memming).
