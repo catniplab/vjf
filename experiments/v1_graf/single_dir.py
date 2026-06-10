@@ -34,7 +34,7 @@ matplotlib.rcParams.update({"font.size": 9, "figure.dpi": 130, "savefig.bbox": "
 
 
 def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim, N,
-                grow=False, grow_thresh=0.5, max_rbf=400, grow_min_gap=1):
+                grow=False, grow_thresh=0.5, max_rbf=400, grow_min_gap=1, refresh_k=500):
     torch.manual_seed(SEED)
     rep = train_trials * epochs
     cover_window = np.concatenate(train_trials[:WARMUP_TRIALS], 0)
@@ -46,7 +46,7 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
         model.transition.grow_thresh = grow_thresh
         model.transition.max_rbf = max_rbf
         model.transition.grow_min_gap = grow_min_gap
-    ro = OnlineReadout(N, latent_dim, smooth_tau=8.0, refresh_K=500, link="log")
+    ro = OnlineReadout(N, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log")
     Cw, bw = ro.warm_start(cover_window)
     with torch.no_grad():
         model.decoder.decode.weight.copy_(torch.as_tensor(Cw))
@@ -88,7 +88,7 @@ def _plot_latent(res, epochs, d_star, pll, fc, pll_psth, suffix=""):
 
 
 def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
-         grow=False, grow_thresh=0.5, max_rbf=400, grow_min_gap=1):
+         grow=False, grow_thresh=0.5, max_rbf=400, grow_min_gap=1, refresh_k=500, tag=""):
     os.makedirs(FIGS, exist_ok=True); os.makedirs(RESULTS, exist_ok=True)
     torch.set_default_dtype(torch.float32)
     torch.set_num_threads(max(1, os.cpu_count() - 1))
@@ -122,13 +122,13 @@ def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
 
     summary = {"direction_deg": d_star, "n_neurons": N, "n_train": len(train_trials),
                "n_test": len(test_trials), "latent_dim": latent_dim, "grow": grow,
-               "grow_thresh": grow_thresh, "max_rbf": max_rbf,
+               "grow_thresh": grow_thresh, "max_rbf": max_rbf, "refresh_k": refresh_k,
                "pll_psth_ceiling": float(pll_psth), "epochs": {}}
-    sfx = "_grow" if grow else ""
+    sfx = ("_" + tag) if tag else ("_grow" if grow else "")
     for E in epochs_list:
         res = _train_eval(train_trials, test_trials, test_counts, ybar, E, latent_dim, N,
                           grow=grow, grow_thresh=grow_thresh, max_rbf=max_rbf,
-                          grow_min_gap=grow_min_gap)
+                          grow_min_gap=grow_min_gap, refresh_k=refresh_k)
         _plot_latent(res, E, d_star, res["pll"], res["forecast_r2"], pll_psth, suffix=sfx)
         summary["epochs"][str(E)] = {"pll": res["pll"], "forecast_r2": res["forecast_r2"],
                                      "n_basis": res["n_basis"]}
@@ -165,7 +165,9 @@ if __name__ == "__main__":
     ap.add_argument("--grow-thresh", type=float, default=0.5)
     ap.add_argument("--max-rbf", type=int, default=400)
     ap.add_argument("--grow-min-gap", type=int, default=1)
+    ap.add_argument("--refresh-k", type=int, default=500)
+    ap.add_argument("--tag", type=str, default="")
     args = ap.parse_args()
     main(epochs_list=tuple(args.epochs), latent_dim=args.latent_dim, direction=args.direction,
          grow=args.grow, grow_thresh=args.grow_thresh, max_rbf=args.max_rbf,
-         grow_min_gap=args.grow_min_gap)
+         grow_min_gap=args.grow_min_gap, refresh_k=args.refresh_k, tag=args.tag)

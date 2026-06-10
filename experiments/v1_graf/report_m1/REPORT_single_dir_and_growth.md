@@ -99,6 +99,22 @@ kills it most cleanly** -- which is exactly the freeze/anneal recipe the synthet
 found ("freeze the refresh once converged recovers forecast"). So the V1 latent inflation and the
 synthetic forecast-erosion are the same phenomenon, and the fix likely transfers.
 
+**Freeze test (`single_dir.py --refresh-k huge --tag frozen`).** Freezing C at the warm-start value
+(no refresh) keeps the latent flat but is NOT a clean win:
+
+| epochs | PLL base | PLL frozen | forecast base | forecast frozen |
+|---|---|---|---|---|
+| 5  | 0.612 | 0.102 | 0.420 | 0.424 |
+| 20 | 0.652 | 0.469 | 0.299 | **0.597** |
+| 50 | 0.647 | 0.519 | 0.373 | 0.192 |
+
+Freezing from warm-start HURTS PLL (the 8-trial warm-start C is undertrained; the refresh was
+actually improving it via CCIPCA) and gives a mixed forecast (much better at E=20, 0.60 vs 0.30;
+worse at E=50). So the refresh does useful work (improves C -> PLL) AND harmful work (inflation ->
+forecast erosion). The right lever is therefore freeze/ANNEAL *after C has converged* (let the
+readout improve, then stop the sqrt(eigenvalue) rescaling) -- the synthetic study's freeze-after-S
+arm -- NOT a freeze from the start. That needs a small freeze-after mechanism (untested here).
+
 ## 5. Conclusion and recommended next lever
 
 - The single-condition machinery is sound (PLL near ceiling), so the path forward is real.
@@ -106,10 +122,13 @@ synthetic forecast-erosion are the same phenomenon, and the fix likely transfers
   on this task it does not move PLL and hurts forecast -- coverage is not the bottleneck.
 - The recurring root cause is **latent-scale control** (inflates single-direction, collapsed
   full-task). Sec 4 pins the single-direction inflation to the **readout-refresh x dynamics feedback**
-  (CCIPCA `sqrt(eigenvalue)` rescaling), confirming the earlier suspicion. **Concrete next lever:
-  freeze or anneal the readout refresh after warm-start** (already a recipe in the synthetic study and
-  shown here to keep the latent flat at 0.034) and re-check PLL/forecast; this is a config change, no
-  new machinery. Separately, *beating* the PSTH ceiling (genuine single-trial structure) likely needs
+  (CCIPCA `sqrt(eigenvalue)` rescaling), confirming the earlier suspicion. But the freeze test (sec 4)
+  shows the refresh is double-edged -- it improves C (PLL) while inflating (forecast) -- so a
+  freeze-from-warm-start is not the fix (it hurts PLL). **Concrete next lever: freeze/ANNEAL the
+  refresh AFTER C converges** (let the readout improve via CCIPCA for a settling horizon S, then stop
+  the `sqrt(eigenvalue)` rescaling) -- the synthetic study's freeze-after-S recipe. This needs a small
+  freeze-after mechanism in `OnlineReadout`/the driver (not yet built). Separately, *beating* the PSTH
+  ceiling (genuine single-trial structure) likely needs
   readout/encoder work (the online readout subspace was ~46 deg off the data PCA-3 even for one
   direction).
 - Two earlier hypotheses were tested and dropped: "the autonomous oscillator dominates" (refuted by

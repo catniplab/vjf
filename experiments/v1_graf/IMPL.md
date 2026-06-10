@@ -100,3 +100,9 @@ stages, and the dynamics are exonerated:
   dynamics-off at 0.045, vs baseline 0.187. It is the CCIPCA sqrt(eigenvalue) rescaling x dynamics
   feedback ratchet. Concrete next lever: FREEZE/ANNEAL the readout refresh after warm-start (already a
   synthetic-study recipe) and re-check PLL/forecast -- a config change, no new machinery.
+- Freeze test done (`single_dir.py --refresh-k huge --tag frozen`): freezing C from warm-start is NOT
+  a clean win -- PLL DROPS (0.10/0.47/0.52 vs 0.61/0.65/0.65; the 8-trial warm-start C is undertrained
+  and the refresh was improving it) while forecast is mixed (E=20 better 0.60 vs 0.30; E=50 worse).
+  So the refresh is double-edged (improves C -> PLL; inflates -> forecast erosion). The lever is
+  freeze/ANNEAL AFTER C converges (freeze-after-S), NOT from the start -- needs a small freeze-after
+  mechanism in OnlineReadout/driver (not yet built). That is the recommended next step.
