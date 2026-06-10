@@ -402,19 +402,23 @@ class RBFDS(Module):
 
     @torch.no_grad()
     def _maybe_grow(self, xu: Tensor) -> None:
-        """Append an RBF center at the current predictor if it is not yet covered by
-        the basis (max activation < grow_thresh = all existing centers far). Throttled
-        by grow_min_gap and bounded by max_rbf. The novelty test follows Memming's
-        criterion: grow when the RBF-projected state's activation is small."""
+        """Append an RBF center at the least-covered predictor row if it is not yet
+        covered by the basis (its max activation < grow_thresh = all existing centers
+        far). Throttled by grow_min_gap and bounded by max_rbf. The novelty test
+        follows Memming's criterion: grow when the RBF-projected state's activation is
+        small. Coverage is per ROW so a batched update (xu has batch>1) grows for its
+        most-novel row rather than being blocked by a single covered row."""
         self._since_grow += 1
         cap = self.max_rbf if self.max_rbf is not None else float('inf')
         if self.velocity.feature.n_basis >= cap or self._since_grow < self.grow_min_gap:
             return
         phi = self.velocity.feature(xu)                  # (batch, n_basis)
-        if float(phi.max()) < self.grow_thresh:          # uncovered -> add a center here
+        cover = phi.max(dim=1).values                    # per-row max activation (batch,)
+        j = int(cover.argmin())                          # least-covered (most novel) row
+        if float(cover[j]) < self.grow_thresh:           # uncovered -> add a center at that row
             lw = (self.grow_logwidth if self.grow_logwidth is not None
                   else float(self.velocity.feature.logwidth.median()))
-            self.velocity.grow_basis(xu[:1], lw, p0=self.grow_p0)
+            self.velocity.grow_basis(xu[j:j + 1], lw, p0=self.grow_p0)
             self._since_grow = 0
             self._n_grown += 1
 

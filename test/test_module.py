@@ -105,3 +105,19 @@ def test_rbfds_grow_triggers_on_far_state_only():
     ds.max_rbf = ds.velocity.feature.n_basis
     ds.update(torch.tensor([[-9.0, 9.0]]), torch.tensor([[-9.01, 9.01]]))
     assert ds.velocity.feature.n_basis == n1
+
+
+def test_rbfds_grow_per_row_in_batch():
+    from vjf.model import RBFDS
+    torch.manual_seed(0)
+    ds = RBFDS(n_rbf=4, xdim=2, udim=0, flow_learner='srrls')
+    xs = torch.randn(50, 2) * 0.05
+    ds.initialize(xs + torch.randn(50, 2) * 0.01, xs)
+    ds.grow_rbf, ds.grow_thresh, ds.grow_min_gap, ds.max_rbf = True, 0.5, 1, 50
+    n0 = ds.velocity.feature.n_basis
+    c0 = ds.velocity.feature.centroid[0:1]               # an existing center (covered)
+    far = torch.tensor([[8.0, -8.0]])                    # uncovered
+    xs_b = torch.cat([c0, far], 0)                       # batch: one covered, one far
+    ds.update(xs_b + 0.001, xs_b)
+    assert ds.velocity.feature.n_basis == n0 + 1         # grew despite a covered row in the batch
+    assert torch.allclose(ds.velocity.feature.centroid[-1], far[0], atol=1e-4)  # at the far row
