@@ -17,18 +17,31 @@ def test_RBFLDS():
     lds.update(x, x, torch.randn(N, udim))
 
 
-def test_rbfds_seeded_centers_require_srrls():
-    # rbf_centers/rbf_logwidths are honored only by the srrls flow; passing them to
-    # any other flow_learner must fail loudly rather than silently ignore them.
-    import pytest
+def test_rbfds_seeded_centers_applied():
+    # Data-driven rbf_centers are honored by the srrls AND sgd flows: they are written
+    # into the RBF centroids (growth then extends the basis from there).
     xt = torch.randn(20, 2)
     xs = torch.randn(20, 2)
     centers = torch.zeros(5, 2)
-    rls_ds = RBFDS(n_rbf=5, xdim=2, udim=0, flow_learner='rls')
-    with pytest.raises(NotImplementedError):
-        rls_ds.initialize(xt, xs, rbf_centers=centers)
-    srrls_ds = RBFDS(n_rbf=5, xdim=2, udim=0, flow_learner='srrls')
-    srrls_ds.initialize(xt, xs, rbf_centers=centers)   # must NOT raise
+    for flow in ('srrls', 'sgd'):
+        ds = RBFDS(n_rbf=5, xdim=2, udim=0, flow_learner=flow)
+        ds.initialize(xt, xs, rbf_centers=centers)            # must NOT raise
+        assert torch.allclose(ds.velocity.feature.centroid.data, centers)
+
+
+def test_grow_basis_sgd_keeps_parameter():
+    # grow_basis on the sgd flow appends a center and keeps w_mean a trainable Parameter
+    # (so VJF can re-point the optimizer at it); the zero row leaves predictions unchanged.
+    from torch.nn import Parameter
+    ds = RBFDS(n_rbf=4, xdim=2, udim=0, flow_learner='sgd')
+    nb0 = ds.velocity.feature.n_basis
+    assert isinstance(ds.velocity.w_mean, Parameter)
+    x = torch.randn(7, 2)
+    pred0 = ds.velocity(x, sampling=False)
+    ds.velocity.grow_basis(torch.zeros(1, 2), logwidth=0.0)
+    assert ds.velocity.feature.n_basis == nb0 + 1
+    assert isinstance(ds.velocity.w_mean, Parameter) and ds.velocity.w_mean.shape[0] == nb0 + 1
+    assert torch.allclose(ds.velocity(x, sampling=False), pred0, atol=1e-5)  # zero new weight
 
 
 def test_Recognition():

@@ -82,6 +82,7 @@ class VJF(Module):
             lr=lr,
         )
         self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
+        self._opt_n_grown = 0        # tracks transition basis growth to refresh the optimizer (sgd)
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -195,6 +196,34 @@ class VJF(Module):
         if transition:
             self.transition.update(xt, xs, u, warm_up=warm_up)
 
+    def _repoint_transition_params(self):
+        """Point the optimizer's transition group (index 2: likelihood, decoder,
+        transition, recognition) at the current parameters after grow_basis replaced the
+        sgd flow-weight Parameter with a larger one. Per-parameter optimizer state (Adam
+        exp_avg / exp_avg_sq) is migrated onto the enlarged tensor, zero-padding the grown
+        rows, so Adam does not restart its moments for the whole flow on every addition.
+        SGD keeps no such state, so this is then just a re-point."""
+        grp = self.optimizer.param_groups[2]
+        old_params = grp['params']
+        new_params = list(self.transition.parameters())
+        added = [p for p in new_params if id(p) not in {id(q) for q in old_params}]
+        removed = [p for p in old_params if id(p) not in {id(q) for q in new_params}]
+        for newp in added:                             # match the regrown weight to its predecessor
+            match = next((op for op in removed if op.dim() == newp.dim()
+                          and op.shape[1:] == newp.shape[1:] and op.shape[0] <= newp.shape[0]), None)
+            if match is not None and match in self.optimizer.state:
+                st = self.optimizer.state.pop(match)
+                mig = {}
+                for k, v in st.items():
+                    if torch.is_tensor(v) and v.shape == match.shape:
+                        pad = torch.zeros_like(newp)
+                        pad[:v.shape[0]] = v
+                        mig[k] = pad
+                    else:                              # e.g. the scalar step count -> keep as is
+                        mig[k] = v
+                self.optimizer.state[newp] = mig
+        grp['params'] = new_params
+
     def filter(self, y: Tensor, u: Tensor = None, qs: Gaussian = None, *,
                sgd: bool = True, update: bool = True, verbose: bool = False, warm_up: bool = False,
                y_enc: Tensor = None):
@@ -236,6 +265,13 @@ class VJF(Module):
                 self.optimizer.zero_grad()
         if update:
             self.update(y, xs, u, pt, qt, xt, py, warm_up=warm_up)  # non-gradient step
+            # grow_basis (sgd path) swaps the flow-weight Parameter for a larger one;
+            # re-point the optimizer at it (migrating any Adam moments) so the new weight
+            # is trained without restarting the optimizer state for the whole flow.
+            if (self.transition.flow_learner == 'sgd'
+                    and getattr(self.transition, '_n_grown', 0) != self._opt_n_grown):
+                self._repoint_transition_params()
+                self._opt_n_grown = self.transition._n_grown
 
         if verbose:
             return qt, loss, *elbos
@@ -393,6 +429,9 @@ class RBFDS(Module):
         self.grow_min_gap = 1        # min update steps between additions
         self.grow_logwidth = None    # new-center logwidth (None = median of existing)
         self.grow_p0 = 1.0           # prior covariance for a new weight
+        # new-weight init: 'zero' (srls fills it fast) or 'residual' (RAN-style: weight =
+        # current flow error at the new center, so the slow sgd gradient need not fill it).
+        self.grow_weight_init = 'zero'
         self._since_grow = 0
         self._n_grown = 0
 
@@ -401,13 +440,17 @@ class RBFDS(Module):
         return out.mean if isinstance(out, Gaussian) else out
 
     @torch.no_grad()
-    def _maybe_grow(self, xu: Tensor) -> None:
+    def _maybe_grow(self, xu: Tensor, dx: Tensor = None) -> None:
         """Append an RBF center at the least-covered predictor row if it is not yet
         covered by the basis (its max activation < grow_thresh = all existing centers
         far). Throttled by grow_min_gap and bounded by max_rbf. The novelty test
         follows Memming's criterion: grow when the RBF-projected state's activation is
         small. Coverage is per ROW so a batched update (xu has batch>1) grows for its
-        most-novel row rather than being blocked by a single covered row."""
+        most-novel row rather than being blocked by a single covered row.
+
+        ``dx`` (target velocity) enables the 'residual' weight init: the new center,
+        whose activation is ~1 at its own location, takes the current flow error there
+        so it corrects the local velocity immediately (needed for the slow sgd flow)."""
         self._since_grow += 1
         cap = self.max_rbf if self.max_rbf is not None else float('inf')
         if self.velocity.feature.n_basis >= cap or self._since_grow < self.grow_min_gap:
@@ -418,7 +461,10 @@ class RBFDS(Module):
         if float(cover[j]) < self.grow_thresh:           # uncovered -> add a center at that row
             lw = (self.grow_logwidth if self.grow_logwidth is not None
                   else float(self.velocity.feature.logwidth.median()))
-            self.velocity.grow_basis(xu[j:j + 1], lw, p0=self.grow_p0)
+            w_new = None
+            if self.grow_weight_init == 'residual' and dx is not None:
+                w_new = dx[j:j + 1] - self._velocity_mean(xu[j:j + 1])   # local flow error
+            self.velocity.grow_basis(xu[j:j + 1], lw, p0=self.grow_p0, weight=w_new)
             self._since_grow = 0
             self._n_grown += 1
 
@@ -463,9 +509,10 @@ class RBFDS(Module):
                 self.velocity.rls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink, ridge=self.rls_ridge)  # model dx
             elif self.flow_learner == 'srrls':
                 self.velocity.srls(xu, dx, self.logvar.exp(), shrink=self.rls_shrink)
-                if self.grow_rbf:
-                    self._maybe_grow(xu)
-            # 'sgd' flow is trained by the main optimizer via the dynamics ELBO instead.
+            # 'sgd' flow weights are trained by the main optimizer via the dynamics ELBO.
+            # The growing basis applies to srrls AND sgd ('rls' precision would degrade).
+            if self.grow_rbf and self.flow_learner in ('srrls', 'sgd'):
+                self._maybe_grow(xu, dx)
         residual = dx - self._velocity_mean(xu)
         mse = residual.pow(2).mean()
         var, n_sample = running_var(self.logvar.exp(), self.n_sample, mse, xs.shape[0], size_cap=500)
@@ -475,12 +522,6 @@ class RBFDS(Module):
     @torch.no_grad()
     def initialize(self, xt: Tensor, xs: Tensor, ut: Tensor = None, *,
                    rbf_centers: Tensor = None, rbf_logwidths: Tensor = None):
-        # Seeded centers/widths are only consumed by the srrls init path; reject them
-        # for other flow learners rather than silently ignoring (the caller would get
-        # default centers and never know).
-        if rbf_centers is not None and self.flow_learner != 'srrls':
-            raise NotImplementedError(
-                "rbf_centers/rbf_logwidths are only supported for flow_learner='srrls'")
         xs = torch.atleast_2d(xs)
         xt = torch.atleast_2d(xt)
         xu = nonecat(xs, ut)
@@ -488,7 +529,8 @@ class RBFDS(Module):
         if self.flow_learner == 'srrls':
             self.velocity.init_srls(xu, xt - xs, centers=rbf_centers, logwidths=rbf_logwidths)
         else:
-            self.velocity.initialize(xu, xt - xs, mse)
+            # rls/sgd: LinearRegression.initialize accepts the data-driven centers too
+            self.velocity.initialize(xu, xt - xs, mse, centers=rbf_centers, logwidths=rbf_logwidths)
         d = self._velocity_mean(xu)
         mse = (xt - xs - d).pow(2).mean()
         self.logvar.data = mse.log()

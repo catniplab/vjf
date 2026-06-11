@@ -158,10 +158,16 @@ class LinearRegression(Module):
         self.w_mean, self.w_chol = kalman.joseph_update(target, yhat, mhat, Vhat, H, R)
 
     @torch.no_grad()
-    def initialize(self, x: Tensor, target: Tensor, v):
-        r = x.norm(dim=1).max().item()
-        nn.init.uniform_(self.feature.centroid, a=-r, b=r)
-        nn.init.constant_(self.feature.logwidth, math.log(r))
+    def initialize(self, x: Tensor, target: Tensor, v, centers: Tensor = None,
+                   logwidths: Tensor = None):
+        if centers is not None:                          # data-driven placement (e.g. kmeans)
+            self.feature.centroid.data.copy_(torch.as_tensor(centers, dtype=self.feature.centroid.dtype))
+            if logwidths is not None:
+                self.feature.logwidth.data.copy_(torch.as_tensor(logwidths, dtype=self.feature.logwidth.dtype))
+        else:
+            r = x.norm(dim=1).max().item()
+            nn.init.uniform_(self.feature.centroid, a=-r, b=r)
+            nn.init.constant_(self.feature.logwidth, math.log(r))
         if self.bayes:
             self.rls(x, target, v)
         else:
@@ -195,16 +201,18 @@ class LinearRegression(Module):
         self.w_chol = (p0 ** 0.5) * torch.eye(n, dtype=feat.dtype, device=feat.device)
 
     @torch.no_grad()
-    def grow_basis(self, center: Tensor, logwidth: float, p0: float = 1.0):
-        """Append ONE RBF basis function for the square-root-RLS path: a new center
-        with a ZERO weight row (so the current velocity prediction is unchanged at
-        every point) and a fresh independent prior block ``sqrt(p0)`` appended to the
-        covariance square-root factor ``w_chol``. This is the standard way to add a
-        parameter to a square-root RLS filter; the new weight is then learned online
-        by subsequent ``srls`` updates. Bayes (srrls) path only; no intercept.
+    def grow_basis(self, center: Tensor, logwidth: float, p0: float = 1.0,
+                   weight: Tensor = None):
+        """Append ONE RBF basis function and a fresh independent prior block ``sqrt(p0)``
+        on the covariance square-root ``w_chol``. The new weight row defaults to ZERO
+        (prediction unchanged everywhere; ``srls`` then fills it fast). Pass ``weight``
+        (1, n_output) for a non-zero init -- e.g. the current flow error at the new
+        center (RAN-style), which the slow sgd gradient cannot fill from zero in time.
+
+        For the sgd path ``w_mean`` is an ``nn.Parameter``, so we re-create it as a
+        Parameter; the OWNING model must then re-point its optimizer at the new
+        Parameter (``VJF`` does this after the grow). No intercept.
         """
-        if not self.bayes:
-            raise NotImplementedError("grow_basis is only for the bayesian (srrls) path")
         if self.feature.intercept:
             raise NotImplementedError("grow_basis assumes RBF without an intercept column")
         feat = self.feature
@@ -218,8 +226,16 @@ class LinearRegression(Module):
                                   requires_grad=feat.logwidth.requires_grad)
         feat.n_basis += 1
         n = self.w_chol.shape[0]
-        z = torch.zeros(1, self.n_output, dtype=self.w_mean.dtype, device=self.w_mean.device)
-        self.w_mean = torch.cat([self.w_mean, z], 0)             # zero weight -> prediction unchanged
+        w_old = self.w_mean.data if isinstance(self.w_mean, Parameter) else self.w_mean
+        if weight is None:
+            z = torch.zeros(1, self.n_output, dtype=w_old.dtype, device=w_old.device)
+        else:
+            z = torch.atleast_2d(torch.as_tensor(weight, dtype=w_old.dtype, device=w_old.device))
+        new_w = torch.cat([w_old, z], 0)
+        if isinstance(self.w_mean, Parameter):                   # sgd: keep it a trainable Parameter
+            self.w_mean = Parameter(new_w, requires_grad=self.w_mean.requires_grad)
+        else:                                                    # rls/srrls: plain tensor
+            self.w_mean = new_w
         S = torch.zeros(n + 1, n + 1, dtype=self.w_chol.dtype, device=self.w_chol.device)
         S[:n, :n] = self.w_chol
         S[n, n] = float(p0) ** 0.5                               # fresh prior for the new weight
