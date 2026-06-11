@@ -129,7 +129,11 @@ class OnlineReadout:
             self._accumulate_mean(f)
             feats.append(f)
         lc = np.asarray(feats) - self.mean_b
-        w, v = np.linalg.eigh(lc.T @ lc)
+        # Seed vecs at the SAME scale the streaming update() converges to: ||v_i|| = lambda_i
+        # (the variance). eigh(scatter) gives eigenvalues ~ T*lambda, so divide by T -> the
+        # covariance. Without this, vecs start T-fold too large and migrate down over training,
+        # shrinking C and inflating the latent (Var(x_enc) drifts from 1/T toward 1).
+        w, v = np.linalg.eigh(lc.T @ lc / lc.shape[0])
         self.vecs = [(v[:, -1 - i] * w[-1 - i]).copy() for i in range(self.m)]
         self.C = self._scaled_C()
         self.C_pinv = np.linalg.pinv(self.C).astype(np.float32)
