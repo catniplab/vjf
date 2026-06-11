@@ -42,6 +42,25 @@ def test_incremental_pca_recovers_subspace():
     assert ang1 < np.deg2rad(10)
 
 
+def test_column_norm_unit_vs_eig():
+    rng = np.random.default_rng(20260602)
+    n, m = 30, 2
+    C_true = rng.standard_normal((n, m))
+    X = rng.standard_normal((400, m)) * np.array([3.0, 1.0])     # anisotropic -> distinct eigvals
+    Y = X @ C_true.T + 0.05 * rng.standard_normal((400, n))
+    ro_u = OnlineReadout(n, m, link='identity', column_norm='unit'); ro_u.warm_start(Y)
+    ro_e = OnlineReadout(n, m, link='identity', column_norm='eig'); ro_e.warm_start(Y)
+    assert np.allclose(np.linalg.norm(ro_u.C, axis=0), 1.0, atol=1e-4)       # unit columns
+    assert not np.allclose(np.linalg.norm(ro_e.C, axis=0), 1.0, atol=0.1)    # eig folds sqrt(lambda)
+    assert _principal_angle(ro_u.C, ro_e.C) < np.deg2rad(5)                  # same subspace
+
+
+def test_column_norm_validation():
+    import pytest
+    with pytest.raises(ValueError):
+        OnlineReadout(10, 2, column_norm='bogus')
+
+
 def test_procrustes_aligns():
     rng = np.random.default_rng(20260602)
     n, m = 15, 2

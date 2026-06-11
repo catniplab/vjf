@@ -76,12 +76,19 @@ class OnlineReadout:
     """
 
     def __init__(self, n_obs: int, latent_dim: int, *, smooth_tau: float = 8.0,
-                 log_c: float = 1e-2, refresh_K: int = 1000, link: str = 'log'):
+                 log_c: float = 1e-2, refresh_K: int = 1000, link: str = 'log',
+                 column_norm: str = 'eig'):
         if link not in ('log', 'identity'):
             raise ValueError(f"link must be 'log' or 'identity', got {link!r}")
+        if column_norm not in ('eig', 'unit'):
+            raise ValueError(f"column_norm must be 'eig' or 'unit', got {column_norm!r}")
         self.n, self.m = n_obs, latent_dim
         self.alpha = 1.0 / smooth_tau
         self.c, self.K, self.link = log_c, refresh_K, link
+        # 'eig': columns scaled by sqrt(eigenvalue) -> unit-variance latent (original).
+        # 'unit': unit-norm columns -> the scale gauge lives in the latent, not C; this
+        # removes the per-refresh sqrt(eigenvalue) rescaling that ratchets the latent scale.
+        self.column_norm = column_norm
         self.nu = np.zeros(n_obs)            # causal EMA state
         self.mean_b = np.zeros(n_obs)        # running mean of the feature (= bias b)
         self.count = 0
@@ -102,12 +109,13 @@ class OnlineReadout:
         self.mean_b += (feat - self.mean_b) / self.count
 
     def _scaled_C(self) -> np.ndarray:
-        """Loading from the current PCA vectors, scaled so the latent has unit variance
-        (fold sqrt(eigenvalue) into the columns)."""
+        """Loading from the current PCA vectors. 'eig' folds sqrt(eigenvalue) into the
+        columns (unit-variance latent); 'unit' returns unit-norm columns (the scale
+        gauge then lives in the latent, avoiding the per-refresh rescaling)."""
         cols = []
         for v in self.vecs:
             nv = np.linalg.norm(v) + 1e-12
-            cols.append(v / nv * math.sqrt(nv))
+            cols.append(v / nv if self.column_norm == 'unit' else v / nv * math.sqrt(nv))
         return np.stack(cols, 1).astype(np.float32)
 
     # --- API ------------------------------------------------------------------
