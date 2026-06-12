@@ -82,7 +82,8 @@ def _eval_model(model, ro, test_trials, test_counts, ybar):
 def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim, N,
                 grow=False, grow_thresh=0.5, max_rbf=None, grow_min_gap=None, refresh_k=500,
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
-                snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED):
+                snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
+                dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0, probe_fn=None):
     torch.manual_seed(seed)
     rep = train_trials * epochs
     steps_per_epoch = len(train_trials) * train_trials[0].shape[0]
@@ -109,6 +110,9 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
         model.transition.max_rbf = max_rbf_eff
         model.transition.grow_min_gap = gap
         model.transition.grow_weight_init = grow_weight_init
+    model.dyn_noise = dyn_noise                            # denoising stabilization (0 = off)
+    model.dyn_noise_period = dyn_noise_period
+    model.dyn_noise_decay = dyn_noise_decay
     ro = OnlineReadout(N, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
                        column_norm=column_norm)
     Cw, bw = ro.warm_start(cover_window)
@@ -126,11 +130,15 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
             loss_trace.append(res.loss)
         if si < len(snap_steps) and res.step >= snap_steps[si]:    # snapshot on a deepcopy
             si += 1
+            m2 = copy.deepcopy(model)                              # weights intact (eval is forward-only)
             pll_s, fc_s, paths_s, fr_s = _eval_model(
-                copy.deepcopy(model), copy.deepcopy(ro), test_trials, test_counts, ybar)
-            snaps.append(dict(epoch=res.step / steps_per_epoch, pll=pll_s, fc=fc_s,
-                              paths=paths_s, freerun=fr_s,
-                              n_basis=int(model.transition.velocity.feature.n_basis)))
+                m2, copy.deepcopy(ro), test_trials, test_counts, ybar)
+            snap = dict(epoch=res.step / steps_per_epoch, pll=pll_s, fc=fc_s,
+                        paths=paths_s, freerun=fr_s,
+                        n_basis=int(model.transition.velocity.feature.n_basis))
+            if probe_fn is not None:                              # extra mechanistic diagnostics
+                snap.update(probe_fn(m2, paths_s, fr_s))
+            snaps.append(snap)
     pll, fc, paths, _ = _eval_model(model, ro, test_trials, test_counts, ybar)
     centers = model.transition.velocity.feature.centroid.detach().cpu().numpy()
     widths = np.exp(model.transition.velocity.feature.logwidth.detach().cpu().numpy())

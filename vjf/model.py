@@ -1,4 +1,5 @@
 import logging
+import math
 from itertools import zip_longest
 from typing import Sequence, Tuple, Union
 
@@ -83,6 +84,16 @@ class VJF(Module):
         )
         self.scheduler = ExponentialLR(self.optimizer, gamma=lr_decay)
         self._opt_n_grown = 0        # tracks transition basis growth to refresh the optimizer (sgd)
+        # Denoising-stabilization noise added to the flow input for the DYNAMICS ELBO term
+        # only (pt; it is used nowhere else). Trains the flow to contract off-cycle states
+        # back to the trajectory -> a stable attractor. 0 = original ELBO (off by default).
+        # Schedule: a DECAYING RAISED SINUSOID over filter steps t --
+        #   sigma(t) = dyn_noise * dyn_noise_decay**(t/P) * 0.5*(1 - cos(2*pi*t/P)),  P = period
+        # i.e. a train of noise bumps (one per period) whose peak fades each period.
+        self.dyn_noise = 0.0          # peak std sigma_0 (0 = off)
+        self.dyn_noise_period = 1000  # steps per bump
+        self.dyn_noise_decay = 1.0    # per-period envelope decay (1 = undecayed sinusoid)
+        self._dyn_step = 0            # schedule step counter
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -119,7 +130,14 @@ class VJF(Module):
             qs = detach(qs)
 
         xs = reparametrize(qs)
-        pt = self.transition(xs, u, sampling=False)
+        x_dyn = xs                                       # flow input for the dynamics term
+        if self.dyn_noise > 0:                           # denoising bump (decaying raised sinusoid)
+            t, P = self._dyn_step, self.dyn_noise_period
+            sigma = (self.dyn_noise * self.dyn_noise_decay ** (t / P)
+                     * 0.5 * (1.0 - math.cos(2.0 * math.pi * t / P)))
+            x_dyn = xs + sigma * torch.randn_like(xs)    # perturb only pt's input, not xs (update uses xs)
+            self._dyn_step += 1
+        pt = self.transition(x_dyn, u, sampling=False)
 
         y = torch.atleast_2d(y)
         if y_enc is None:
