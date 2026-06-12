@@ -106,9 +106,14 @@ def _infer_latent_paths(model, readout, trial_counts_list):
 
 
 def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
-         quick: bool = False) -> dict:
+         quick: bool = False, n_dir: int = None, flow: str = "srrls", grow: bool = False,
+         grow_weight_init: str = "zero", dyn_noise: float = 0.0, dyn_noise_period: int = 1000,
+         dyn_noise_decay: float = 1.0, column_norm: str = "eig", optimizer: str = "sgd",
+         lr: float = 1e-4, rbf_base: int = 25, max_rbf: int = None, refresh_k: int = 1000,
+         seed: int = SEED) -> dict:
     torch.set_default_dtype(torch.float32)
-    rng = np.random.default_rng(SEED)
+    torch.manual_seed(seed)
+    rng = np.random.default_rng(seed)
 
     # 1. Load + bin.
     arr = load_array(array_num)
@@ -139,7 +144,8 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
         hidden = [32, 32]
         counts = counts[:, :n_bin_use, :]
     else:
-        keep_dirs = np.unique(dirs_all)
+        all_dirs = np.unique(dirs_all)
+        keep_dirs = all_dirs if n_dir is None else all_dirs[:n_dir]
         n_test, n_train = 10, 40
         n_rbf = 200
         hidden = [100, 100]
@@ -169,15 +175,33 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
 
     # n_rbf must not exceed the coverage-buffer state count.
     n_cov_states = sum(counts[i].shape[0] for i in coverage_idx)
-    n_rbf = min(n_rbf, n_cov_states)
+    n_bin = counts.shape[1]
+    n_dir_eff = len(keep_dirs)
+    # grow: seed a small basis, grow via novelty to an O(2^d) cap (optionally hard-capped
+    # by max_rbf so it does not explode at high latent_dim); fixed: the n_rbf basis.
+    rbf_budget = max_rbf if max_rbf is not None else rbf_base * (2 ** latent_dim)
+    max_rbf_eff = min(rbf_budget, n_cov_states)
+    n_seed = min(max(8, 2 ** latent_dim), n_cov_states) if grow else min(n_rbf, n_cov_states)
 
-    # 6. Build the projection sVJF.
-    model = VJF.make_model(ydim=n_kept, xdim=latent_dim, udim=0, n_rbf=n_rbf,
+    # 6. Build the projection sVJF (flow learner + optimizer configurable).
+    model = VJF.make_model(ydim=n_kept, xdim=latent_dim, udim=0, n_rbf=n_seed,
                            hidden_sizes=hidden, likelihood="poisson",
-                           transition_flow="srrls", encoder="projection")
+                           transition_flow=flow, encoder="projection",
+                           optimizer=optimizer, lr=lr)
+    if grow:
+        gap = max(1, (n_dir_eff * n_bin) // max(1, max_rbf_eff - n_seed))  # spread over ~1 trial/dir
+        model.transition.grow_rbf = True
+        model.transition.grow_thresh = 0.5
+        model.transition.max_rbf = max_rbf_eff
+        model.transition.grow_min_gap = gap
+        model.transition.grow_weight_init = grow_weight_init
+    model.dyn_noise = dyn_noise                            # denoising stabilization (0 = off)
+    model.dyn_noise_period = dyn_noise_period
+    model.dyn_noise_decay = dyn_noise_decay
 
     # 7. Readout warm-start from the concatenated coverage window -> decoder (C, b).
-    ro = OnlineReadout(n_kept, latent_dim, smooth_tau=8.0, refresh_K=1000, link="log")
+    ro = OnlineReadout(n_kept, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
+                       column_norm=column_norm)
     cover_window = np.concatenate([counts[i] for i in coverage_idx], 0)   # (W, N)
     C, b = ro.warm_start(cover_window)
     with torch.no_grad():
@@ -185,10 +209,10 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
         model.decoder.decode.bias.copy_(torch.as_tensor(b.reshape(-1)))
 
     # 8. Stream the train trials (coverage first); collect online-phase timing + diverge.
+    seed_fn = (lambda s: kmeans_centers(s, n_seed)) if flow in ("srrls", "sgd") else None
     elapsed_online, n_diverge = [], 0
     for res in online_filter_trials(model, train_trials, readout=ro,
-                                    warmup_trials=warmup_trials,
-                                    seed_centers=lambda s: kmeans_centers(s, n_rbf)):
+                                    warmup_trials=warmup_trials, seed_centers=seed_fn):
         if res.trial >= warmup_trials:
             elapsed_online.append(res.elapsed_s)
         if res.diverged:
@@ -210,7 +234,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
     smallest_class = int(np.unique(labels, return_counts=True)[1].min())
     n_splits = max(2, min(5, smallest_class))
     decode_acc = orientation_decode_acc(latent_per_trial, test_dirs,
-                                        n_splits=n_splits, seed=SEED)
+                                        n_splits=n_splits, seed=seed)
     torus, torus_axis = torus_embedding(latent_per_trial, test_dirs)
 
     #    9c. Forecast: free-run the flow over the first test trial's stimulus-window path.
@@ -224,7 +248,12 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
     p95_ms = float(1000.0 * np.percentile(elapsed, 95))
 
     cfg = {"array_num": array_num, "bin_ms": bin_ms, "latent_dim": latent_dim,
-           "quick": quick, "n_rbf": n_rbf, "hidden_sizes": hidden,
+           "quick": quick, "n_seed_rbf": int(n_seed), "max_rbf_eff": int(max_rbf_eff),
+           "hidden_sizes": hidden, "flow": flow, "grow": grow,
+           "grow_weight_init": grow_weight_init, "dyn_noise": dyn_noise,
+           "dyn_noise_period": dyn_noise_period, "dyn_noise_decay": dyn_noise_decay,
+           "column_norm": column_norm, "optimizer": optimizer, "lr": lr, "refresh_k": refresh_k,
+           "n_basis_final": int(model.transition.velocity.feature.n_basis), "seed": int(seed),
            "n_dir": int(len(keep_dirs)), "n_train_trials": len(train_trials),
            "n_test_trials": len(test_trials), "coverage_per_dir": coverage_per_dir,
            "warmup_trials": warmup_trials, "n_bin": int(counts.shape[1]),
@@ -257,10 +286,22 @@ if __name__ == "__main__":
     ap.add_argument("--bin-ms", type=float, default=10.0)
     ap.add_argument("--latent-dim", type=int, default=3)
     ap.add_argument("--quick", action="store_true")
+    ap.add_argument("--n-dir", type=int, default=None)
+    ap.add_argument("--flow", type=str, default="srrls", choices=["srrls", "sgd", "rls"])
+    ap.add_argument("--grow", action="store_true")
+    ap.add_argument("--grow-weight-init", type=str, default="zero", choices=["zero", "residual"])
+    ap.add_argument("--dyn-noise", type=float, default=0.0)
+    ap.add_argument("--dyn-noise-decay", type=float, default=1.0)
+    ap.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam"])
+    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--column-norm", type=str, default="eig", choices=["eig", "unit"])
     args = ap.parse_args()
 
     out = main(array_num=args.array_num, bin_ms=args.bin_ms,
-               latent_dim=args.latent_dim, quick=args.quick)
+               latent_dim=args.latent_dim, quick=args.quick, n_dir=args.n_dir,
+               flow=args.flow, grow=args.grow, grow_weight_init=args.grow_weight_init,
+               dyn_noise=args.dyn_noise, dyn_noise_decay=args.dyn_noise_decay,
+               optimizer=args.optimizer, lr=args.lr, column_norm=args.column_norm)
 
     print("=== sVJF M1 ===")
     print(f"  array_{args.array_num} @ {args.bin_ms} ms, L={args.latent_dim}, "
