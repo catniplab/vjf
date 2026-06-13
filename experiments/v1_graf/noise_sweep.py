@@ -12,8 +12,10 @@ from concurrent.futures import ProcessPoolExecutor
 import torch
 import matplotlib.pyplot as plt
 
-from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval, FIGS, RESULTS
+from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval, FIGS
 from experiments.v1_graf.figstyle import set_style, FW
+
+REPORT_DATA = os.path.join(os.path.dirname(FIGS), "data")     # report_m1/data (committed staged data)
 
 CHK = (1, 2, 3, 5, 8, 12, 16, 20, 25, 30, 40, 50)
 BASE = dict(latent_dim=4, optimizer="adam", lr=1e-4, grow=True, grow_weight_init="residual")
@@ -49,8 +51,8 @@ def main():
     d = _data()
     with ProcessPoolExecutor(max_workers=min(len(CONFIGS), max(1, (os.cpu_count() or 2) - 1))) as ex:
         out = list(ex.map(_run, CONFIGS))
-    os.makedirs(RESULTS, exist_ok=True)                        # stage data so the figure is replottable
-    with open(os.path.join(RESULTS, "noise_sweep.json"), "w") as fh:
+    os.makedirs(REPORT_DATA, exist_ok=True)                    # stage to the committed report-data path
+    with open(os.path.join(REPORT_DATA, "noise_sweep.json"), "w") as fh:
         json.dump({label: traj for label, traj in out}, fh, indent=2)
     fig, ax = plt.subplots(figsize=(FW(1.0), 3.0))             # included at \textwidth -> scale 1.0
     for label, traj in out:

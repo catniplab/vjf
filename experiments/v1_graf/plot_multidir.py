@@ -35,12 +35,21 @@ def main(json_path, out_name="scan_multidir_summary.png", latent_dim=3):
         xs = [r[key] for r in d if r["arm"] == arm and r["latent_dim"] == latent_dim and r["n_dir"] == nd]
         return mean(xs) if xs else None
 
+    def series(arm, key, scale_by_dir=False):                 # skip missing (arm, n_dir) cells
+        xs, ys = [], []
+        for nd in ndirs:
+            v = agg(arm, nd, key)
+            if v is None:
+                continue
+            xs.append(nd); ys.append(v * nd if scale_by_dir else v)
+        return xs, ys
+
     fig, ax = plt.subplots(1, 3, figsize=(FW(1.0), 2.7))
     for arm in arms:
         c, lab = ARM_STYLE[arm]
-        ax[0].plot(ndirs, [(agg(arm, nd, "decode_acc") or 0) * nd for nd in ndirs], "o-", color=c, label=lab)
-        ax[1].plot(ndirs, [agg(arm, nd, "pll") for nd in ndirs], "o-", color=c)
-        ax[2].plot(ndirs, [agg(arm, nd, "forecast_r2") for nd in ndirs], "o-", color=c)
+        x, y = series(arm, "decode_acc", scale_by_dir=True); ax[0].plot(x, y, "o-", color=c, label=lab)
+        x, y = series(arm, "pll"); ax[1].plot(x, y, "o-", color=c)
+        x, y = series(arm, "forecast_r2"); ax[2].plot(x, y, "o-", color=c)
     ax[0].axhline(1, color="0.6", lw=0.6, ls=":"); ax[0].set_title("decode / chance")
     ax[0].set_ylabel(r"$\times$ chance"); ax[0].legend(fontsize=6.5)
     ax[1].set_title("leave-1-neuron PLL"); ax[1].set_ylabel("bits/spk")
