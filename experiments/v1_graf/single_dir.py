@@ -83,7 +83,8 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
                 grow=False, grow_thresh=0.5, max_rbf=None, grow_min_gap=None, refresh_k=500,
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
                 snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
-                dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0, probe_fn=None):
+                dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0,
+                dyn_noise_fit_ref=0.0, probe_fn=None):
     torch.manual_seed(seed)
     rep = train_trials * epochs
     steps_per_epoch = len(train_trials) * train_trials[0].shape[0]
@@ -113,6 +114,7 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
     model.dyn_noise = dyn_noise                            # denoising stabilization (0 = off)
     model.dyn_noise_period = dyn_noise_period
     model.dyn_noise_decay = dyn_noise_decay
+    model.dyn_noise_fit_ref = dyn_noise_fit_ref            # gate noise by flow fit (0 = off)
     ro = OnlineReadout(N, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
                        column_norm=column_norm)
     Cw, bw = ro.warm_start(cover_window)

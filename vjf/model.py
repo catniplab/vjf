@@ -93,6 +93,11 @@ class VJF(Module):
         self.dyn_noise = 0.0          # peak std sigma_0 (0 = off)
         self.dyn_noise_period = 1000  # steps per bump
         self.dyn_noise_decay = 1.0    # per-period envelope decay (1 = undecayed sinusoid)
+        # Fit-gate: scale the injected noise by exp(-resid_var / fit_ref**2), where
+        # resid_var = exp(transition.logvar) is the running one-step dynamics residual.
+        # While the flow underfits (large residual) the gate -> 0, so we do not perturb a
+        # flow that cannot yet predict the clean transition. 0 = no gating (off).
+        self.dyn_noise_fit_ref = 0.0
         self._dyn_step = 0            # schedule step counter
 
     def prior(self, y: Tensor) -> Gaussian:
@@ -135,6 +140,9 @@ class VJF(Module):
             t, P = self._dyn_step, self.dyn_noise_period
             sigma = (self.dyn_noise * self.dyn_noise_decay ** (t / P)
                      * 0.5 * (1.0 - math.cos(2.0 * math.pi * t / P)))
+            if self.dyn_noise_fit_ref > 0:               # suppress noise while the flow underfits
+                resid_var = float(torch.exp(self.transition.logvar))
+                sigma *= math.exp(-resid_var / (self.dyn_noise_fit_ref ** 2))
             x_dyn = xs + sigma * torch.randn_like(xs)    # perturb only pt's input, not xs (update uses xs)
             self._dyn_step += 1
         pt = self.transition(x_dyn, u, sampling=False)

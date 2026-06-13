@@ -108,9 +108,9 @@ def _infer_latent_paths(model, readout, trial_counts_list):
 def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
          quick: bool = False, n_dir: int = None, flow: str = "srrls", grow: bool = False,
          grow_weight_init: str = "zero", dyn_noise: float = 0.0, dyn_noise_period: int = 1000,
-         dyn_noise_decay: float = 1.0, column_norm: str = "eig", optimizer: str = "sgd",
-         lr: float = 1e-4, rbf_base: int = 25, max_rbf: int = None, refresh_k: int = 1000,
-         seed: int = SEED) -> dict:
+         dyn_noise_decay: float = 1.0, dyn_noise_fit_ref: float = 0.0, column_norm: str = "eig",
+         optimizer: str = "sgd", lr: float = 1e-4, rbf_base: int = 25, max_rbf: int = None,
+         width_scale: float = 1.0, refresh_k: int = 1000, seed: int = SEED) -> dict:
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
@@ -198,6 +198,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
     model.dyn_noise = dyn_noise                            # denoising stabilization (0 = off)
     model.dyn_noise_period = dyn_noise_period
     model.dyn_noise_decay = dyn_noise_decay
+    model.dyn_noise_fit_ref = dyn_noise_fit_ref            # gate noise by flow fit (0 = off)
 
     # 7. Readout warm-start from the concatenated coverage window -> decoder (C, b).
     ro = OnlineReadout(n_kept, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
@@ -209,7 +210,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
         model.decoder.decode.bias.copy_(torch.as_tensor(b.reshape(-1)))
 
     # 8. Stream the train trials (coverage first); collect online-phase timing + diverge.
-    seed_fn = (lambda s: kmeans_centers(s, n_seed)) if flow in ("srrls", "sgd") else None
+    seed_fn = (lambda s: kmeans_centers(s, n_seed, width_scale=width_scale)) if flow in ("srrls", "sgd") else None
     elapsed_online, n_diverge = [], 0
     for res in online_filter_trials(model, train_trials, readout=ro,
                                     warmup_trials=warmup_trials, seed_centers=seed_fn):
@@ -252,6 +253,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
            "hidden_sizes": hidden, "flow": flow, "grow": grow,
            "grow_weight_init": grow_weight_init, "dyn_noise": dyn_noise,
            "dyn_noise_period": dyn_noise_period, "dyn_noise_decay": dyn_noise_decay,
+           "dyn_noise_fit_ref": dyn_noise_fit_ref, "width_scale": width_scale,
            "column_norm": column_norm, "optimizer": optimizer, "lr": lr, "refresh_k": refresh_k,
            "n_basis_final": int(model.transition.velocity.feature.n_basis), "seed": int(seed),
            "n_dir": int(len(keep_dirs)), "n_train_trials": len(train_trials),
@@ -292,6 +294,9 @@ if __name__ == "__main__":
     ap.add_argument("--grow-weight-init", type=str, default="zero", choices=["zero", "residual"])
     ap.add_argument("--dyn-noise", type=float, default=0.0)
     ap.add_argument("--dyn-noise-decay", type=float, default=1.0)
+    ap.add_argument("--dyn-noise-fit-ref", type=float, default=0.0)
+    ap.add_argument("--max-rbf", type=int, default=None)
+    ap.add_argument("--width-scale", type=float, default=1.0)
     ap.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam"])
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--column-norm", type=str, default="eig", choices=["eig", "unit"])
@@ -301,7 +306,9 @@ if __name__ == "__main__":
                latent_dim=args.latent_dim, quick=args.quick, n_dir=args.n_dir,
                flow=args.flow, grow=args.grow, grow_weight_init=args.grow_weight_init,
                dyn_noise=args.dyn_noise, dyn_noise_decay=args.dyn_noise_decay,
-               optimizer=args.optimizer, lr=args.lr, column_norm=args.column_norm)
+               dyn_noise_fit_ref=args.dyn_noise_fit_ref, max_rbf=args.max_rbf,
+               width_scale=args.width_scale, optimizer=args.optimizer, lr=args.lr,
+               column_norm=args.column_norm)
 
     print("=== sVJF M1 ===")
     print(f"  array_{args.array_num} @ {args.bin_ms} ms, L={args.latent_dim}, "
