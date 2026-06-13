@@ -68,7 +68,7 @@ We use the Graf et al.\ \cite{graf2011} anesthetized-macaque Utah-array recordin
 72 equally spaced drifting-grating directions ($5^\circ$ spacing) $\times$ 50 trials
 $=3600$ trials, each \SI{2560}{ms} (first \SI{1280}{ms} the drifting grating, then blank).
 We use \texttt{array\_5}, the highest mean-rate array (\SI{10.4}{Hz}, 148 single units), the
-same array analyzed by vLGP, binned at \SI{10}{ms}. The grating temporal frequency is
+same array analyzed by vLGP \cite{vlgp}, binned at \SI{10}{ms}. The grating temporal frequency is
 \SI{6.25}{Hz}, so the response period is \SI{160}{ms} $=16$ bins. We keep neurons whose
 orientation tuning (sum of two von Mises bumps) fits with $R^2\!\ge\!0.75$, leaving $N=74$
 well-tuned units, and split 40 train / 10 test trials per direction.
@@ -92,7 +92,7 @@ raw spikes; $(C,b)$ is Procrustes-anchored into the decoder every $K$ steps. CCI
 decoupled from the ELBO gradient, which collapses under sparse low-rate Poisson.
 
 \paragraph{Metrics.}
-\emph{Leave-one-neuron-out predictive log-likelihood} (PLL, bits/spike, vLGP Eq.~39):
+\emph{Leave-one-neuron-out predictive log-likelihood} (PLL, bits/spike; \cite{vlgp}, Eq.~39):
 for each held-out neuron $n$, filter the trial from the \emph{other} neurons' projection
 and score $\lambda_{:,n}$ against counts, relative to a homogeneous-Poisson baseline
 $\bar y$; $0$ equals the mean-rate baseline. \emph{Orientation decode accuracy}:
@@ -128,9 +128,9 @@ But the warm start seeded the vectors from the \emph{scatter} matrix
 ($\|v_i\| \approx T\lambda_i$, $T$ the warm-up window), a factor $T$ too large. Over
 training $\|v\|$ migrates from $T\lambda$ down toward $\lambda$; since the number of stream
 steps is $\ll T^2$, it never arrives. As $\|v\|$ shrinks, $C$ shrinks ($\propto\sqrt{\|v\|}$),
-$C^{+}$ grows, and the latent inflates to keep $Cx$ matching the data -- exactly the
-``latent-scale inflation'' previously observed (running spread $0.07\to0.35$ over 50
-epochs, the nearest-RBF-center distance growing $\sim\!27\times$). The fix is one line:
+$C^{+}$ grows, and the latent inflates to keep $Cx$ matching the data: a latent-scale
+inflation in which the running spread grows $0.07\to0.35$ over 50 epochs and the
+nearest-RBF-center distance grows $\sim\!27\times$. The fix is one line:
 divide the warm-start scatter by the sample count so the seed matches the streaming fixed
 point. On stationary data the loading norm and $\cov(\Renc)$ are then pinned across all of
 training (Fig.~\ref{fig:scalefix}); with the bug they drift by an order of magnitude.
@@ -197,27 +197,55 @@ right). The injection is default-off and leaves the baseline ELBO unchanged.
 \section{Multi-direction: the encoder rescue and a stabilization trade-off}
 Re-running the full multi-condition task (arms differing only in the readout/flow stack;
 one shared autonomous flow, per-trial reset) shows that the scale fix substantially
-rescues the original encoder collapse. Orientation decoding is now well above chance and
-its chance-ratio \emph{grows} with the number of directions, reaching $\sim\!14\times$
-chance at 72 directions for the scale-fixed original flow (Fig.~\ref{fig:multidir}, left).
-The encoder no longer collapses.
+rescues the original encoder collapse. With the scale-fixed original flow
+(\texttt{srrls\_base}), orientation decoding is well above chance and its chance-ratio
+\emph{grows} with the number of directions, reaching $13.8\times$ chance at 72 directions
+(decode $0.19$ vs chance $0.014$); the encoder no longer collapses (Table~\ref{tab:multidir},
+Fig.~\ref{fig:multidir}).
 
-However, the dynamics-stabilization machinery that was essential for the single-direction
-forecast (SGD growing flow $+$ denoising noise) does \emph{not} transfer: it is the
-\emph{worst} arm for decoding and reconstruction, while it helps the (single-trial, noisy)
-forecast. We read this as a trade-off -- one shared autonomous flow is being asked both to
-stabilize a cycle and to not wash out the direction information the encoder injects. The
-scale fix is the multi-condition lever; the dynamics work is a single-direction tool that
-competes with condition separation here.
+The dynamics-stabilization machinery that was essential for the single direction does not
+overturn this. We compare \texttt{srrls\_base} against the previous full stack
+(\texttt{sgd\_grow\_noise}: SGD growing flow $+$ denoising noise) and a refined stack
+(\texttt{sgd\_grow\_refined}: a larger, smaller-width basis with harder-annealed, fit-gated
+noise). The refinements help the dynamics arm -- they fill the basis as intended (the grown
+basis reaches its full $400$ centers at 8--24 directions, versus the previous run, which
+under-grew to $78$--$118$), and they raise decode from $3.5\times$ to $4.6\times$ chance
+and PLL from $0.857$ to $0.869$ -- but \texttt{srrls\_base} remains the strongest arm for
+both condition separation ($8.0\times$ chance) and reconstruction (PLL $0.903$). The
+dynamics arms win only the (single-trial, noisy) forecast. The trade-off therefore
+persists across the refinement: a single shared autonomous flow asked both to stabilize a
+cycle and to preserve the direction information the encoder injects does the former at the
+expense of the latter. \emph{The scale fix is the multi-condition lever; the dynamics
+stabilization is a single-direction tool that competes with condition separation here.}
+
+\begin{table}[t]
+  \centering
+  \caption{Multi-direction arms (L=3, mean over direction counts and seeds). Decode is
+    reported as a multiple of chance ($1/n_{\mathrm{dir}}$). Best per column in bold;
+    \texttt{srrls\_base} is the scale fix alone, the other two add the dynamics stack.}
+  \label{tab:multidir}
+  \begin{tabular}{lccc}
+    \toprule
+    arm & decode ($\times$chance) & PLL (bits/spk) & forecast $R^2$ \\
+    \midrule
+    \texttt{srrls\_base} (scale fix only) & \textbf{8.0} & \textbf{0.903} & 0.147 \\
+    \texttt{sgd\_grow\_noise} (full stack) & 3.5 & 0.857 & \textbf{0.415} \\
+    \texttt{sgd\_grow\_refined} (refined)  & 4.6 & 0.869 & 0.389 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{scan_multidir_summary.png}
-  \caption{Multi-direction scan (L=3, mean over seeds). \textbf{Left:} decode accuracy
-    relative to chance ($1/n_{\mathrm{dir}}$) rises with direction count; the scale-fixed
-    original flow (\texttt{srrls\_base}) is strongest. \textbf{Middle:} leave-one-neuron
-    PLL. \textbf{Right:} single-trial free-run forecast (noisy). The dynamics stack helps
-    forecast but trades off decode/PLL.}
+  \caption{Multi-direction scan (L=3, mean over seeds) vs direction count, for the scale
+    fix alone (\texttt{srrls\_base}), the full dynamics stack (\texttt{sgd\_grow\_noise}),
+    and the refined stack (\texttt{sgd\_grow\_refined}). \textbf{Left:} decode accuracy
+    relative to chance ($1/n_{\mathrm{dir}}$) rises with direction count and is strongest
+    for \texttt{srrls\_base}; the refined stack improves on the original dynamics arm but
+    does not catch it. \textbf{Middle:} leave-one-neuron PLL. \textbf{Right:} single-trial
+    free-run forecast (noisy), where the dynamics arms lead. The dynamics stabilization
+    helps the forecast but trades off decode/PLL.}
   \label{fig:multidir}
 \end{figure}
 
@@ -243,6 +271,9 @@ an input so direction-specific dynamics need not compete with a shared cycle.
 \begin{thebibliography}{9}
 \bibitem[Zhao \& Park(2020)]{zhao2020} Y.~Zhao and I.~M.~Park.
   Variational online learning of neural dynamics. \emph{Front. Comput. Neurosci.}, 2020.
+\bibitem[Zhao \& Park(2017)]{vlgp} Y.~Zhao and I.~M.~Park.
+  Variational latent Gaussian process for recovering single-trial dynamics from population
+  spike trains. \emph{Neural Computation}, 29(5):1293--1316, 2017.
 \bibitem[Graf et al.(2011)]{graf2011} A.~B.~A.~Graf, A.~Kohn, M.~Jazayeri, J.~A.~Movshon.
   Decoding the activity of neuronal populations in macaque primary visual cortex.
   \emph{Nat. Neurosci.}, 14(2):239--245, 2011.

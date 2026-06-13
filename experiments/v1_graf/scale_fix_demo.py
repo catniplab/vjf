@@ -61,8 +61,7 @@ def main():
     ax[1].axhline(1.0, color="0.6", lw=0.7, ls=":")
     ax[1].set_title(r"encoder-input variance $\mathrm{Var}(x_{enc})$")
     ax[1].set_xlabel("epoch"); ax[1].set_ylabel("variance")
-    fig.suptitle("CCIPCA warm-start scale: scatter seed drifts, covariance seed is pinned", fontsize=9)
-    out = os.path.join(FIGS, "scale_fix.png")
+    out = os.path.join(FIGS, "scale_fix.png")                  # title-free: the report caption carries it
     fig.savefig(out); fig.savefig(out.replace(".png", ".pdf"))
     print(f"bug:  ||v|| {vb[0]:.1f}->{vb[-1]:.1f}  Var {xb[0]:.4f}->{xb[-1]:.4f}")
     print(f"fix:  ||v|| {vf[0]:.2f}->{vf[-1]:.2f}  Var {xf[0]:.4f}->{xf[-1]:.4f}")

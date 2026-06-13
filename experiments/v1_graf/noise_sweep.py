@@ -5,13 +5,14 @@ and hold a high forecast across epochs.
 """
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import ProcessPoolExecutor
 
 import torch
 import matplotlib.pyplot as plt
 
-from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval, FIGS
+from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval, FIGS, RESULTS
 from experiments.v1_graf.figstyle import set_style, FW
 
 CHK = (1, 2, 3, 5, 8, 12, 16, 20, 25, 30, 40, 50)
@@ -48,14 +49,16 @@ def main():
     d = _data()
     with ProcessPoolExecutor(max_workers=min(len(CONFIGS), max(1, (os.cpu_count() or 2) - 1))) as ex:
         out = list(ex.map(_run, CONFIGS))
-    fig, ax = plt.subplots(figsize=(FW(0.66), 3.2))
+    os.makedirs(RESULTS, exist_ok=True)                        # stage data so the figure is replottable
+    with open(os.path.join(RESULTS, "noise_sweep.json"), "w") as fh:
+        json.dump({label: traj for label, traj in out}, fh, indent=2)
+    fig, ax = plt.subplots(figsize=(FW(1.0), 3.0))             # included at \textwidth -> scale 1.0
     for label, traj in out:
         ax.plot([e for e, _ in traj], [f for _, f in traj], marker="o", ms=3, label=label)
         print(label, " ".join(f"{e:.0f}:{f:+.2f}" for e, f in traj))
     ax.axhline(0, color="0.6", lw=0.6, ls=":")
     ax.set_xlabel("epoch"); ax.set_ylabel("free-run forecast R2"); ax.legend(fontsize=7)
-    ax.set_title(f"denoising noise vs forecast stability (adam/grow L=4 lr1e-4, dir {d['d_star']:.0f})")
-    out_png = os.path.join(FIGS, "noise_sweep.png")
+    out_png = os.path.join(FIGS, "noise_sweep.png")            # title-free: the report caption carries it
     fig.savefig(out_png); fig.savefig(out_png.replace(".png", ".pdf"))
     print("fig ->", out_png)
 
