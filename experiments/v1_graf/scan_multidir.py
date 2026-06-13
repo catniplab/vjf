@@ -29,7 +29,7 @@ ARMS = {
     # refined: more RBFs (bigger cap) + smaller widths (more growth) + harder-annealed,
     # fit-gated noise (suppressed while the flow underfits).
     "sgd_grow_refined": dict(flow="sgd", grow=True, grow_weight_init="residual", optimizer="adam",
-                             lr=1e-4, max_rbf=600, width_scale=0.4, dyn_noise=0.3,
+                             lr=1e-4, max_rbf=400, width_scale=0.4, dyn_noise=0.3,
                              dyn_noise_decay=0.9, dyn_noise_fit_ref=0.3),
 }
 DIM_DIRS = [(3, 8), (3, 24), (3, 72)]                # L=3 across direction counts
