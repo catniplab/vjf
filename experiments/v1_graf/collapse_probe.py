@@ -15,6 +15,7 @@ jac_radius >> 1 with large vel_mag.
 """
 from __future__ import annotations
 
+import json
 import os
 
 import numpy as np
@@ -65,19 +66,22 @@ def main(dyn_noise=0.0, dyn_noise_decay=1.0, tag=""):
               f"jac={x['jac_radius']:.3f}(max {x['jac_max']:.2f}) |w|={x['w_norm']:.2f} "
               f"lat_std={x['latent_std']:.2f} nb={x['n_basis']}")
 
+    sfx = ("_" + tag) if tag else ""
+    data_dir = os.path.join(os.path.dirname(FIGS), "data")     # stage to committed report-data path
+    os.makedirs(data_dir, exist_ok=True)
+    with open(os.path.join(data_dir, f"collapse_probe{sfx}.json"), "w") as fh:
+        json.dump(s, fh, indent=2)
+
     panels = [("forecast R2", get("fc"), 0.0), ("velocity magnitude", get("vel_mag"), None),
               ("Jacobian spectral radius", get("jac_radius"), 1.0),
               ("flow weight ||w||", get("w_norm"), None),
               ("latent spread (std)", get("latent_std"), None), ("n_basis", get("n_basis"), None)]
-    fig, ax = plt.subplots(2, 3, figsize=(FW(1.0), 4.6))
+    fig, ax = plt.subplots(2, 3, figsize=(FW(1.0), 4.6))       # title-free: the report caption carries it
     for a, (title, y, ref) in zip(ax.ravel(), panels):
         a.plot(ep, y, marker="o", ms=3, color="0.2")
         if ref is not None:
             a.axhline(ref, color="C3", lw=0.8, ls=":")
         a.set_title(title); a.set_xlabel("epoch")
-    fig.suptitle(f"adam/grow L=4 lr1e-4 (dyn_noise={dyn_noise}): mechanistic signals over training "
-                 "(red dotted = R2 0 / Jacobian unit circle)", fontsize=9)
-    sfx = ("_" + tag) if tag else ""
     out = os.path.join(FIGS, f"collapse_probe{sfx}.png")
     fig.savefig(out); fig.savefig(out.replace(".png", ".pdf"))
     print("fig ->", out)

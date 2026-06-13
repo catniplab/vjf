@@ -158,10 +158,10 @@ trial-averaged predictor.
 \paragraph{The RLS flow over-fits into a divergent free-run.}
 The square-root RLS flow attains an excellent forecast within one epoch
 ($R^2\!\approx\!0.8$) but, under replay, over-solves the (observation-corrected) filtered
-transitions and the autonomous free-run \emph{diverges permanently} by epoch 8
-(Fig.~\ref{fig:flow}, blue). A gradient-trained (SGD/Adam) flow does not wreck the
-warm-started field this way: its free-run stays alive across all 50 epochs. We therefore
-adopt the SGD/Adam flow for this regime. We further give the growing basis a non-zero,
+transitions and the autonomous free-run \emph{diverges permanently} by epoch 8. A
+gradient-trained (SGD/Adam) flow does not wreck the warm-started field this way: its
+free-run stays alive (if erratic) across all 50 epochs. We therefore adopt the SGD/Adam
+flow for this regime. We further give the growing basis a non-zero,
 resource-allocating weight init (the new center takes the current flow error at its
 location), since SGD cannot fill a zero-weight grown center fast enough.
 
@@ -173,7 +173,19 @@ is the flow-map Jacobian spectral radius, which is $>1$ \emph{everywhere}
 (1.0--1.5, peaks up to 5), including when the forecast is good. The learned ``cycle'' is
 locally expansive and has no stable attracting orbit; the free-run tracks the data only
 while the field transiently aligns, so small gradient-driven changes flip it between
-tracking and wandering off (Fig.~\ref{fig:flow}, middle).
+tracking and wandering off (Fig.~\ref{fig:collapse}).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{collapse_probe.png}
+  \caption{Why the free-run is fragile (one \texttt{adam/grow} L=4 run, dense checkpoints).
+    The forecast peaks, collapses mid-training, and partially recovers (top-left), yet none
+    of the gross signals -- velocity magnitude, flow-weight norm, latent spread -- changes
+    at the collapse. The diagnostic is the flow-map Jacobian spectral radius (top-right),
+    which is $>1$ (dotted line) \emph{everywhere}, including when the forecast is good: the
+    learned cycle is locally expansive, not an attractor, so the free-run is a knife-edge.}
+  \label{fig:collapse}
+\end{figure}
 
 \paragraph{Denoising noise restores a stable forecast.}
 We inject a small noise into the latent that feeds the dynamics term only -- training the
@@ -181,8 +193,8 @@ flow to map off-cycle states back onto the trajectory -- on a decaying-raised-si
 schedule $\sigma(t)=\sigma_0\,\gamma^{t/P}\cdot\tfrac12(1-\cos 2\pi t/P)$ (period
 $P=1000$ steps), gated by the flow's fit so a still-underfitting flow is not perturbed.
 Every noise amplitude we tried eliminates the collapse: the free-run holds $R^2\approx
-0.5$--$0.6$ across all of training, versus the no-noise trench (Fig.~\ref{fig:flow},
-right). The injection is default-off and leaves the baseline ELBO unchanged.
+0.5$--$0.6$ across all of training, versus the no-noise trench (Fig.~\ref{fig:flow}).
+The injection is default-off and leaves the baseline ELBO unchanged.
 
 \begin{figure}[t]
   \centering
