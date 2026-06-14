@@ -247,10 +247,16 @@ def merge(space: str) -> str:
 
     ok = [r for r in recs if "error" not in r]
     failed = [r for r in recs if "error" in r]
+    wts = {8: 0.5, 16: 0.3, 32: 0.2}                            # same weights as the persistence S
     for r in ok:
         ceil = r.get("pll_psth_ceiling", 0.0)
         S = r.get("weighted_persist_skill", float("nan"))
         r["gate_pass"] = bool(ceil > 0 and r.get("pll", -1) >= GATE_FRAC * ceil and _finite(S))
+        # Reference (NOT the selection key): weighted skill vs the near-oracle PSTH, from the
+        # per-k psth skills already stored in each record.
+        pk = [r.get(f"skill{k}_psth") for k in (8, 16, 32)]
+        r["weighted_psth_skill"] = (sum(w * v for w, v in zip(wts.values(), pk))
+                                    if all(_finite(v) for v in pk) else float("nan"))
     # Rank only finite-S configs (NaN = diverged/empty -> not comparable, pushed out).
     key = lambda r: r.get("weighted_persist_skill", float("nan"))
     eligible = sorted((r for r in ok if r["gate_pass"]), key=key, reverse=True)
@@ -267,22 +273,27 @@ def merge(space: str) -> str:
 
     lines = [f"# Search summary: {space} ({len(recs)} configs, {len(eligible)} pass gate, "
              f"{len(failed)} failed)\n",
-             f"Gate: val PLL >= {GATE_FRAC} x PSTH-ceiling PLL (and finite S). Ranked by weighted "
-             f"forecasted-reconstruction persist-skill S.\n"]
+             f"Gate: val PLL >= {GATE_FRAC} x PSTH-ceiling PLL (and finite S). **Ranked by the "
+             f"weighted persistence-skill S_persist** (the achievable forecast target). "
+             f"**S_psth** = weighted skill vs the stimulus-locked PSTH, a phase-aware near-oracle "
+             f"baseline -- shown for REFERENCE, it does not drive selection. Per-k skills are over "
+             f"the first k forecast bins (k=8/16/32 = half/one/two grating cycles).\n"]
     for w in coverage_warn:
         lines.append(f"> WARNING: {w}\n")
     for fn, err in bad_files:
         lines.append(f"> WARNING: unreadable shard {fn}: {err}\n")
-    lines += ["| rank | S | k8 vp/vpsth | PLL/ceil | gate | L | rbf_base | E | lr | dyn_noise | n_basis |",
-              "|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines += ["| rank | S_persist | S_psth(ref) | persist k8/k16/k32 | psth k8/k16/k32 | PLL/ceil | gate | L | E | lr | dyn_noise | n_basis |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(ranked_all[:25]):
         c = r["config"]
         dn = f"{c['dyn_noise']}/{c['dyn_noise_decay']}/{c['dyn_noise_fit_ref']}"
+        sp = [r.get(f"skill{k}_persist", float("nan")) for k in (8, 16, 32)]
+        sq = [r.get(f"skill{k}_psth", float("nan")) for k in (8, 16, 32)]
         lines.append(
-            f"| {i + 1} | {r['weighted_persist_skill']:+.4f} | "
-            f"{r.get('skill8_persist', float('nan')):+.3f}/{r.get('skill8_psth', float('nan')):+.3f} | "
+            f"| {i + 1} | {r['weighted_persist_skill']:+.4f} | {r.get('weighted_psth_skill', float('nan')):+.4f} | "
+            f"{sp[0]:+.3f}/{sp[1]:+.3f}/{sp[2]:+.3f} | {sq[0]:+.3f}/{sq[1]:+.3f}/{sq[2]:+.3f} | "
             f"{r.get('pll', float('nan')):.3f}/{r.get('pll_psth_ceiling', float('nan')):.3f} | "
-            f"{'Y' if r['gate_pass'] else 'n'} | {c['latent_dim']} | {c['rbf_base']} | "
+            f"{'Y' if r['gate_pass'] else 'n'} | {c['latent_dim']} | "
             f"{c['epochs']} | {c['lr']:g} | {dn} | {r.get('n_basis', '?')} |")
     if failed:
         lines.append(f"\n{len(failed)} failed configs:")
