@@ -87,7 +87,12 @@ SNR bound\footnote{\texttt{neuroFisherSNR} (\texttt{github.com/catniplab/neurofi
 how accurately the $d$-dim latent is estimable from the spikes of a $\lambda=\exp(Cx+b)$
 model.} of $\approx\!\SI{6.1}{dB}$ ($R^2\,0.75$) at $d{=}2$ and $\approx\!\SI{4.7}{dB}$
 ($R^2\,0.66$) at $d{=}3$ -- comparable to the \SI{3}{dB} synthetic regime of the original
-\svjf{} study. Peak rates reach $\sim\!\SI{190}{Hz}$ (mean $\sim\!\SI{22}{Hz}$).
+\svjf{} study. Peak rates reach $\sim\!\SI{190}{Hz}$ (mean $\sim\!\SI{22}{Hz}$). Over the
+stimulus window the population traces a low-dimensional cyclic trajectory -- a noisy limit
+cycle in the leading PCA plane of the link-matched log-rate feature, oscillating at the
+grating frequency, with different directions tracing distinct loops (\cref{fig:pca}; the
+first three PCs explain $\approx\!50\%$ of the variance). This is the recurring structure
+the autonomous flow is meant to capture and the encoder to separate by direction.
 
 \begin{figure}[t]
   \centering
@@ -104,10 +109,26 @@ model.} of $\approx\!\SI{6.1}{dB}$ ($R^2\,0.75$) at $d{=}2$ and $\approx\!\SI{4.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{tuning_curves.png}
-  \caption{Orientation tuning (mean stimulus-window rate vs direction) for the six
-    best-fit well-tuned neurons. The bimodal profile (two bumps $\sim\!180^\circ$ apart)
-    is the orientation tuning with direction selectivity that the readout must separate.}
+  \caption{Orientation tuning for the six best-fit well-tuned neurons (gray: mean
+    stimulus-window rate vs direction; red: the sum-of-two-von-Mises fit). The per-panel
+    $R^2$ is the \emph{tuning-fit} $R^2$ -- the goodness of the double-von-Mises fit to the
+    direction-tuning curve, which defines the well-tuned criterion ($R^2\!\ge\!0.75$) -- and
+    is distinct from the predictive (PLL) or free-run forecast $R^2$ reported elsewhere.
+    The bimodal profile (two bumps $\sim\!180^\circ$ apart, with direction selectivity) is
+    the structure the readout must separate.}
   \label{fig:tuning}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{pca_traj.png}
+  \caption{PCA of the population log-rate feature over the stimulus window (fit on the
+    per-direction trial averages). \textbf{Left:} the PC1--PC2 trajectory for the strongest
+    direction (colored by time within the trial) -- a noisy limit cycle. \textbf{Middle:}
+    the three PC scores over time, oscillating at the grating frequency. \textbf{Right:}
+    per-direction trajectories (six directions, consistent circular color scheme): distinct
+    loops carry the orientation information.}
+  \label{fig:pca}
 \end{figure}
 
 \section{\svjf{} on streaming V1}
@@ -301,6 +322,23 @@ the clean $\tilde x_{t-1}$, so the perturbation is confined to \cref{eq:denoise}
 noise amplitude we tried eliminates the collapse: the free-run holds $R^2\approx 0.5$--$0.6$
 across all of training, versus the no-noise trench (Fig.~\ref{fig:flow}). The injection is
 default-off ($\sigma_0{=}0$) and leaves the baseline ELBO unchanged.
+
+\paragraph{Forecast horizon.}
+Launching the stabilized flow as a free run from successive phases of a held-out trial's
+inferred cycle, the prediction follows the latent for roughly a cycle before the still
+imperfect flow's error accumulates and it relaxes toward a slow drift
+(\cref{fig:forecast}); the horizon is similar across start phases, consistent with the
+modest whole-trial forecast $R^2\approx0.4$.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{forecast_slices.png}
+  \caption{Free-run forecasts (solid, colored by start time) launched at six successive
+    cycle phases of a held-out trial, over the inferred latent path (dashed gray), per
+    latent dimension. Each forecast tracks the latent briefly, then relaxes as error
+    accumulates -- the limited but non-trivial predictive horizon of the learned flow.}
+  \label{fig:forecast}
+\end{figure}
 
 \begin{figure}[t]
   \centering

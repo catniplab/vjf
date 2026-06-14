@@ -84,7 +84,7 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
                 snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
                 dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0,
-                dyn_noise_fit_ref=0.0, probe_fn=None):
+                dyn_noise_fit_ref=0.0, probe_fn=None, return_model=False):
     torch.manual_seed(seed)
     rep = train_trials * epochs
     steps_per_epoch = len(train_trials) * train_trials[0].shape[0]
@@ -144,9 +144,12 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
     pll, fc, paths, _ = _eval_model(model, ro, test_trials, test_counts, ybar)
     centers = model.transition.velocity.feature.centroid.detach().cpu().numpy()
     widths = np.exp(model.transition.velocity.feature.logwidth.detach().cpu().numpy())
-    return dict(pll=float(pll), forecast_r2=float(fc), paths=paths, centers=centers,
-                widths=widths, loss_trace=np.asarray(loss_trace), snapshots=snaps,
-                n_basis=int(model.transition.velocity.feature.n_basis))
+    out = dict(pll=float(pll), forecast_r2=float(fc), paths=paths, centers=centers,
+               widths=widths, loss_trace=np.asarray(loss_trace), snapshots=snaps,
+               n_basis=int(model.transition.velocity.feature.n_basis))
+    if return_model:                                          # for downstream forecasting/probes
+        out["model"], out["ro"] = model, ro
+    return out
 
 
 def _plot_latent(res, epochs, d_star, pll, fc, pll_psth, suffix=""):

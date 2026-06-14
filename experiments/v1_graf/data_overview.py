@@ -12,10 +12,12 @@ import json
 import os
 
 import numpy as np
+from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import neurofisherSNR as nf
 
-from experiments.v1_graf.graf_loader import load_array, bin_spikes, well_tuned_mask, tuning_curve
+from experiments.v1_graf.graf_loader import (
+    load_array, bin_spikes, well_tuned_mask, tuning_curve, _von_mises2)
 from experiments.v1_graf.figstyle import set_style, FW
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +37,21 @@ def rough_snr(psth_stim, dims=(2, 3)):
         out[d] = {"snr": snr, "dB": float(nf.power_to_dB(snr)),
                   "R2": float(nf.powerDb_to_R2(nf.power_to_dB(snr)))}
     return out
+
+
+def fit_vm2(axis, y):
+    """Refit the sum-of-two-von-Mises tuning model (same init/bounds as well_tuned_mask).
+    Returns (popt, R2_of_the_tuning_fit) or (None, 0.0) on failure."""
+    amp = float(y.max() - y.min()); pk = float(axis[int(np.argmax(y))])
+    p0 = [float(y.min()), amp, pk, 2.0, 0.5 * amp, (pk + 180) % 360, 2.0]
+    bounds = ([0, 0, 0, 0, 0, 0, 0], [np.inf, np.inf, 360, 20, np.inf, 360, 20])
+    try:
+        popt, _ = curve_fit(_von_mises2, axis, y, p0=p0, bounds=bounds, maxfev=10000)
+        ss = ((y - y.mean()) ** 2).sum()
+        r2 = 1.0 - ((y - _von_mises2(axis, *popt)) ** 2).sum() / (ss + 1e-12) if ss > 1e-9 else 0.0
+        return popt, float(r2)
+    except (RuntimeError, ValueError):
+        return None, 0.0
 
 
 def main():
@@ -83,10 +100,15 @@ def main():
     # --- Figure 2: tuning curves for selected well-tuned neurons
     tc, tc_axis = tuning_curve(counts_m, dirs, bin_ms=BIN_MS)  # tc (N, n_dir) Hz; tc_axis (n_dir,) deg
     sel = np.argsort(r2_m)[::-1][:6]                         # the 6 best-fit (most tuned) neurons
+    fine = np.linspace(0, 360, 361)
     fig2, ax2 = plt.subplots(2, 3, figsize=(FW(1.0), 3.4), sharex=True)
     for a, nidx in zip(ax2.ravel(), sel):
-        a.plot(tc_axis, tc[nidx], "o-", ms=2, color="0.2")
-        a.set_title(f"neuron {int(nidx)} ($R^2{{=}}{r2_m[nidx]:.2f}$)", fontsize=8)
+        popt, r2fit = fit_vm2(tc_axis, tc[nidx])
+        a.plot(tc_axis, tc[nidx], "o", ms=2.5, color="0.35", label="data")
+        if popt is not None:                                # overlay the double-von-Mises fit
+            a.plot(fine, _von_mises2(fine, *popt), color="C3", lw=1.2, label="von Mises$_2$ fit")
+        a.set_title(f"neuron {int(nidx)} (tuning-fit $R^2{{=}}{r2fit:.2f}$)", fontsize=8)
+    ax2.ravel()[0].legend(fontsize=6, loc="upper right")
     for a in ax2[-1]:
         a.set_xlabel("direction (deg)"); a.set_xticks([0, 180, 360])
     for a in ax2[:, 0]:

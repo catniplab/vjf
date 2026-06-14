@@ -38,6 +38,15 @@ def set_style() -> None:
     plt.rcParams.update(RC)
 
 
+DIR_CMAP = "hsv"                 # cyclic colormap for drifting-grating direction (0..360 deg)
+
+
+def dir_color(deg):
+    """Consistent circular color for a drifting-grating direction (degrees). Use this
+    everywhere a figure encodes direction by color so the scheme is shared across figures."""
+    return plt.get_cmap(DIR_CMAP)((np.asarray(deg, dtype=float) % 360.0) / 360.0)
+
+
 def ema(x, tau: float) -> np.ndarray:
     """Causal exponential moving average, timescale ``tau`` samples (alpha = 1/tau)."""
     x = np.asarray(x, dtype=float)
