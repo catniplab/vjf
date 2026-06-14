@@ -6,6 +6,9 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{siunitx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{cleveref}
 \graphicspath{{figs/}}
 
 \title{Stabilizing online variational joint filtering on macaque V1:\\
@@ -15,6 +18,7 @@ a readout scale fix, flow stability, and the multi-condition encoder}
 
 \newcommand{\svjf}{sVJF}
 \newcommand{\Renc}{x_{\mathrm{enc}}}
+\newcommand{\E}{\mathbb{E}}
 
 \begin{document}
 \maketitle
@@ -75,21 +79,73 @@ well-tuned units, and split 40 train / 10 test trials per direction.
 
 \section{\svjf{} on streaming V1}
 \paragraph{Forward step and learning.}
-Each bin runs one ELBO filtering step: the recognition network encodes $y_t$ into a
-Gaussian posterior $q_t$; the RBF flow predicts a prior $p_t$ from the previous state; the
-affine Poisson decoder maps $q_t$ to a reconstruction $\lambda_t=\exp(C x_t + b)$.
-Parameters are learned by a hybrid scheme per step: an SGD step on the ELBO plus
-closed-form non-gradient updates of the likelihood noise and (for the RLS learners) the
-flow weights. The latent state is reset to the prior at each trial onset (per-trial
-reset); orientation is therefore not in the initial state and must be injected each bin by
-the encoder.
+Each bin maximizes one filtering-step ELBO,
+\begin{equation}
+  \mathcal{L}(\theta) = \underbrace{\E_{q(x_t)}\!\log p(y_t\mid x_t)}_{\text{reconstruction}}
+  + \underbrace{\E_{q(x_t)}\!\log p\big(x_t \mid \tilde x_{t-1},\theta\big)}_{\text{dynamics}}
+  + \underbrace{H\big(q(x_t)\big)}_{\text{entropy}},
+  \label{eq:elbo}
+\end{equation}
+where $q_t=q(x_t)=\mathcal N(\mu_t,\Sigma_t)$ is the recognition posterior, $\tilde x_t$ a
+reparameterized sample from it, $p(y_t\mid x_t)$ a Poisson likelihood with rate
+$\lambda_t=\exp(C x_t + b)$, and the dynamics term is Gaussian,
+$\log p(x_t\mid \tilde x_{t-1}) = \log\mathcal N\big(x_t;\, f(\tilde x_{t-1}),\, Q\big)$,
+with the RBF velocity flow $x_t = \tilde x_{t-1} + f(\tilde x_{t-1})$. Parameters are
+learned by a hybrid scheme per step: a stochastic-gradient step on \cref{eq:elbo} (which
+trains the recognition network, and the flow weights when the gradient flow learner is
+used) plus closed-form non-gradient updates of the likelihood noise and, for the RLS
+learners, the flow weights. The latent state is reset to the prior at each trial onset
+(per-trial reset); orientation is therefore not in the initial state and must be injected
+each bin by the encoder.
 
 \paragraph{Unknown readout (projection encoder).}
-The loading $(C,b)$ is estimated online by CCIPCA on a causal, link-matched feature
-$\tilde g(y)=\log(\nu_t + c)$, where $\nu_t$ is a leaky integrator of the counts. The
-recognition reads the subspace projection $\Renc = C^{+}(\tilde g(y)-b)$ rather than the
-raw spikes; $(C,b)$ is Procrustes-anchored into the decoder every $K$ steps. CCIPCA is
-decoupled from the ELBO gradient, which collapses under sparse low-rate Poisson.
+The loading $(C,b)$ is estimated online by candid covariance-free incremental PCA
+(CCIPCA) on a causal, link-matched feature $\tilde g(y)=\log(\nu_t + c)$, where $\nu_t$ is
+a leaky integrator of the counts and the running mean of $\tilde g$ is the bias $b$.
+CCIPCA maintains $m$ vectors $\{v_i\}$ that converge to $\lambda_i e_i$ (eigenvalue
+$\times$ eigenvector of the feature covariance $\Sigma_g=\E[(\tilde g-b)(\tilde g-b)^\trp]$);
+with $r^{(1)}_t=\tilde g(y_t)-b$ and rate $\eta_t=1/t$, for $i=1,\dots,m$,
+\begin{align}
+  v_i &\leftarrow (1-\eta_t)\,v_i + \eta_t\,\big(r^{(i)\trp}_t\hat v_i\big)\,r^{(i)}_t,
+     \qquad \hat v_i = v_i/\norm{v_i}, \label{eq:hebb}\\
+  r^{(i+1)}_t &= r^{(i)}_t - \big(r^{(i)\trp}_t\hat v_i\big)\,\hat v_i. \label{eq:deflate}
+\end{align}
+At convergence $\norm{v_i}=\lambda_i$, and the loading column is
+$c_i=\hat v_i\sqrt{\norm{v_i}}=e_i\sqrt{\lambda_i}$, which whitens the recognition input
+(\cref{sec:scalefix}). The recognition reads the subspace projection
+$\Renc = C^{+}(\tilde g(y)-b)$ rather than the raw spikes; $(C,b)$ is Procrustes-anchored
+into the decoder every $K$ steps. CCIPCA is decoupled from the ELBO gradient, which
+collapses under sparse low-rate Poisson. \emph{The warm start must seed $\{v_i\}$ at the
+same covariance scale ($\norm{v_i}=\lambda_i$) that \cref{eq:hebb} converges to}; seeding
+at scatter scale ($\norm{v_i}\approx T\lambda_i$) is the bug fixed in \cref{sec:scalefix}.
+
+\begin{algorithm}[t]
+\caption{\svjf{} on V1, one streaming pass (per-trial reset), with the fixed-scale CCIPCA
+  warm-start, the growing RBF flow, and the optional denoising noise. Differs from the
+  original \svjf{} loop \cite{zhao2020} only in the boxed lines.}
+\label{alg:svjf}
+\begin{algorithmic}[1]
+\Require trials $\{y_{1:T_k}\}_k$; warm-up trials $W$; refresh $K$; smoothing $\tau$ ($\alpha{=}1/\tau$); noise $(\sigma_0,P,\gamma,\sigma_{\mathrm{ref}})$
+\State init readout state $\nu,b,\{v_i\}$; posterior $q\gets\varnothing$; buffer $\mathcal B\gets[\,]$
+\Statex \textit{Warm-up (first $W$ trials, dynamics off): collect latent means, fit the readout}
+\For{each bin $y_t$ in the first $W$ trials}
+  \State $\nu\gets(1-\alpha)\nu+\alpha y_t$;\ \ $\tilde g\gets\log(\nu+c)$;\ \ update mean $b$
+  \State CCIPCA step on $\tilde g-b$ \Comment{\cref{eq:hebb,eq:deflate}}
+  \State $\mu_t,q\gets\textsc{VjfFilter}(y_t,\,C^{+}(\tilde g-b),\,q;\ \text{dynamics off})$; append $\mu_t$ to $\mathcal B$
+\EndFor
+\State \fbox{$v_i\gets \lambda_i\,e_i$ from the \emph{covariance} (not scatter) of $\mathcal B$'s feature window}\Comment{scale fix, \cref{sec:scalefix}}
+\State seed RBF centers by $k$-means on $\mathcal B$ (small width $\rho$); turn the dynamics on
+\Statex \textit{Online (remaining trials/epochs, dynamics on); reset $q\gets\varnothing$ each trial onset}
+\For{each bin $y_t$}
+  \State $\tilde g,\,\pi\gets$ feature and projection $C^{+}(\tilde g-b)$ of $y_t$
+  \State \fbox{$x^{\mathrm{dyn}}\gets \tilde x_{t-1} + \sigma(t)\,\xi,\ \xi\sim\mathcal N(0,I)$}\Comment{denoising input, \cref{eq:noise}}
+  \State $\mu_t,q\gets\textsc{VjfFilter}(y_t,\pi,q;\ \text{flow predicts from }x^{\mathrm{dyn}})$ \Comment{recognition + flow update}
+  \State \fbox{\textbf{if} novelty$(\tilde x_t)<\theta_{\mathrm{grow}}$: add an RBF center at $\tilde x_t$ with RAN weight init}\Comment{growing basis}
+  \State clamp $\log\Sigma_t\ge\log\Sigma_{\min}$; on divergence reset $q$ and repeat last mean
+  \If{$t\bmod K=0$ and not frozen} Procrustes-refresh $(C,b)$ into the decoder \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}
 
 \paragraph{Metrics.}
 \emph{Leave-one-neuron-out predictive log-likelihood} (PLL, bits/spike; \cite{vlgp}, Eq.~39):
@@ -188,13 +244,30 @@ tracking and wandering off (Fig.~\ref{fig:collapse}).
 \end{figure}
 
 \paragraph{Denoising noise restores a stable forecast.}
-We inject a small noise into the latent that feeds the dynamics term only -- training the
-flow to map off-cycle states back onto the trajectory -- on a decaying-raised-sinusoid
-schedule $\sigma(t)=\sigma_0\,\gamma^{t/P}\cdot\tfrac12(1-\cos 2\pi t/P)$ (period
-$P=1000$ steps), gated by the flow's fit so a still-underfitting flow is not perturbed.
-Every noise amplitude we tried eliminates the collapse: the free-run holds $R^2\approx
-0.5$--$0.6$ across all of training, versus the no-noise trench (Fig.~\ref{fig:flow}).
-The injection is default-off and leaves the baseline ELBO unchanged.
+We perturb only the latent that the dynamics term of \cref{eq:elbo} feeds to the flow,
+training it to map off-cycle states back onto the trajectory. The flow predicts from a
+noised previous sample $\tilde x_{t-1}+\sigma(t)\,\xi$, so the dynamics term becomes
+\begin{equation}
+  \E_{q(x_t)}\,\E_{\xi\sim\mathcal N(0,I)}
+  \;\log\mathcal N\big(x_t;\; f(\tilde x_{t-1}+\sigma(t)\,\xi),\; Q\big),
+  \label{eq:denoise}
+\end{equation}
+with a decaying-raised-sinusoid, fit-gated schedule
+\begin{equation}
+  \sigma(t) = \sigma_0\,
+  \underbrace{\gamma^{\,t/P}}_{\text{decay}}\;
+  \underbrace{\tfrac12\big(1-\cos\tfrac{2\pi t}{P}\big)}_{\text{raised sinusoid, period }P}\;
+  \underbrace{\exp\!\big(-\hat\rho_t/\sigma_{\mathrm{ref}}^2\big)}_{\text{fit gate}},
+  \label{eq:noise}
+\end{equation}
+where $\hat\rho_t$ is the running one-step dynamics residual variance (the state-noise
+estimate $Q$). The gate $\to 0$ while the flow underfits ($\hat\rho_t\gg\sigma_{\mathrm{ref}}^2$),
+so a flow that cannot yet predict the clean transition is not perturbed; as it fits, the
+gate opens. Reconstruction, recognition, and the closed-form readout/flow updates all use
+the clean $\tilde x_{t-1}$, so the perturbation is confined to \cref{eq:denoise}. Every
+noise amplitude we tried eliminates the collapse: the free-run holds $R^2\approx 0.5$--$0.6$
+across all of training, versus the no-noise trench (Fig.~\ref{fig:flow}). The injection is
+default-off ($\sigma_0{=}0$) and leaves the baseline ELBO unchanged.
 
 \begin{figure}[t]
   \centering

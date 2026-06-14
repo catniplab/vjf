@@ -69,8 +69,10 @@ def main(dyn_noise=0.0, dyn_noise_decay=1.0, tag=""):
     sfx = ("_" + tag) if tag else ""
     data_dir = os.path.join(os.path.dirname(FIGS), "data")     # stage to committed report-data path
     os.makedirs(data_dir, exist_ok=True)
+    scalar_keys = ["epoch", "fc", "pll", "vel_mag", "jac_radius", "jac_max",
+                   "w_norm", "latent_std", "n_basis"]           # drop the numpy paths/freerun
     with open(os.path.join(data_dir, f"collapse_probe{sfx}.json"), "w") as fh:
-        json.dump(s, fh, indent=2)
+        json.dump([{k: x[k] for k in scalar_keys if k in x} for x in s], fh, indent=2)
 
     panels = [("forecast R2", get("fc"), 0.0), ("velocity magnitude", get("vel_mag"), None),
               ("Jacobian spectral radius", get("jac_radius"), 1.0),
