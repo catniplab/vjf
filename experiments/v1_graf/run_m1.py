@@ -27,7 +27,8 @@ import torch
 from experiments.v1_graf.graf_loader import (
     STIM_MS, bin_spikes, kmeans_centers, load_array, well_tuned_mask)
 from experiments.v1_graf.eval import (
-    forecast_r2, leave_one_neuron_rates, orientation_decode_acc,
+    forecast_r2, forecast_reconstruction_deviance, forecast_skill_summary,
+    frozen_dynamics, leave_one_neuron_rates, orientation_decode_acc,
     predictive_ll_bits_per_spike, torus_embedding)
 from vjf.model import VJF
 from vjf.readout import OnlineReadout
@@ -61,19 +62,23 @@ def _provenance(cfg: dict) -> dict:
     }
 
 
-def _split_trials(dirs: np.ndarray, n_test: int, n_train: int, rng: np.random.Generator):
-    """Per-direction train/test split. Returns dicts {direction -> trial-index list}.
-
-    n_test test trials and up to n_train train trials are kept per direction;
-    None means "all the rest go to train" (FULL mode keeps all 50/direction)."""
-    train, test = {}, {}
+def _split_trials(dirs: np.ndarray, n_test: int, n_val: int, n_train: int,
+                  rng: np.random.Generator):
+    """Per-direction train/val/test split. Returns three dicts
+    {direction -> trial-index list}. The first ``n_test`` shuffled trials per direction
+    are test, the next ``n_val`` are validation (held out from training; used for
+    hyperparameter selection), and up to ``n_train`` of the rest are train (None means
+    all the rest). Test and val are NEVER trained on; the search selects on val and the
+    clean experiments report on test, so the two are kept disjoint and seed-fixed."""
+    train, val, test = {}, {}, {}
     for d in np.unique(dirs):
         idx = np.where(dirs == d)[0]
         rng.shuffle(idx)
         test[d] = idx[:n_test].tolist()
-        rest = idx[n_test:]
+        val[d] = idx[n_test:n_test + n_val].tolist()
+        rest = idx[n_test + n_val:]
         train[d] = rest.tolist() if n_train is None else rest[:n_train].tolist()
-    return train, test
+    return train, val, test
 
 
 @torch.no_grad()
@@ -88,19 +93,20 @@ def _infer_latent_paths(model, readout, trial_counts_list):
     leave_one_neuron_rates path."""
     nu_snapshot = readout.nu.copy()                              # freeze EMA entry state
     paths = []
-    for tc in trial_counts_list:
-        readout.nu = nu_snapshot.copy()                          # each trial sees same EMA
-        q = None
-        means = []
-        for t in range(tc.shape[0]):
-            y = tc[t]
-            g = readout.feature(y, update_mean=False)
-            x_enc = torch.as_tensor(readout.project(g))
-            qt, *_ = model.filter(y, None, q, sgd=False, update=False, verbose=False,
-                                  y_enc=x_enc)
-            q = qt
-            means.append(qt.mean.detach().cpu().numpy()[0])
-        paths.append(np.asarray(means))
+    with frozen_dynamics(model):
+        for tc in trial_counts_list:
+            readout.nu = nu_snapshot.copy()                      # each trial sees same EMA
+            q = None
+            means = []
+            for t in range(tc.shape[0]):
+                y = tc[t]
+                g = readout.feature(y, update_mean=False)
+                x_enc = torch.as_tensor(readout.project(g))
+                qt, *_ = model.filter(y, None, q, sgd=False, update=False, verbose=False,
+                                      y_enc=x_enc)
+                q = qt
+                means.append(qt.mean.detach().cpu().numpy()[0])
+            paths.append(np.asarray(means))
     readout.nu = nu_snapshot                                     # restore caller's EMA state
     return paths
 
@@ -110,7 +116,8 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
          grow_weight_init: str = "zero", dyn_noise: float = 0.0, dyn_noise_period: int = 1000,
          dyn_noise_decay: float = 1.0, dyn_noise_fit_ref: float = 0.0, column_norm: str = "eig",
          optimizer: str = "sgd", lr: float = 1e-4, rbf_base: int = 25, max_rbf: int = None,
-         width_scale: float = 1.0, refresh_k: int = 1000, seed: int = SEED) -> dict:
+         width_scale: float = 1.0, refresh_k: int = 1000, epochs: int = 1,
+         n_val: int = 0, eval_split: str = "test", seed: int = SEED) -> dict:
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
@@ -149,13 +156,17 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
         n_test, n_train = 10, 40
         n_rbf = 200
         hidden = [100, 100]
+    if quick:
+        n_val_eff = min(n_val, 1)
+    else:
+        n_val_eff = n_val
 
     dir_mask = np.isin(dirs_all, keep_dirs)
     counts = counts[dir_mask]
     dirs = dirs_all[dir_mask]
 
-    # 4. Train/test split per direction.
-    train_by_dir, test_by_dir = _split_trials(dirs, n_test, n_train, rng)
+    # 4. Train/val/test split per direction (val held out for hyperparameter selection).
+    train_by_dir, val_by_dir, test_by_dir = _split_trials(dirs, n_test, n_val_eff, n_train, rng)
 
     # 5. Coverage warm-up: the FIRST coverage_per_dir train trial(s) of EACH direction,
     #    placed FIRST in the trial list. warmup_trials = size of the coverage set.
@@ -166,12 +177,22 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
         coverage_idx += tr[:coverage_per_dir]
         rest_train_idx += tr[coverage_per_dir:]
     warmup_trials = len(coverage_idx)
-    train_idx = coverage_idx + rest_train_idx
-    test_idx = [i for d in keep_dirs for i in test_by_dir[d]]
+    # Randomize the (direction-interleaved) presentation order -- the rest must NOT be
+    # direction-blocked -- and replay it for `epochs` passes after the one-time coverage
+    # warm-up (per-trial reset throughout).
+    rng_order = np.random.default_rng(seed + 777)
+    replay = []
+    for _ in range(epochs):
+        r = list(rest_train_idx); rng_order.shuffle(r); replay += r
+    train_idx = coverage_idx + replay
+    # The selection (search) reads the val split; the clean experiments read test. The
+    # held-out set evaluated is `eval_*`; training only ever sees `train_idx`.
+    eval_by_dir = val_by_dir if eval_split == "val" else test_by_dir
+    eval_idx = [i for d in keep_dirs for i in eval_by_dir[d]]
 
     train_trials = [counts[i] for i in train_idx]
-    test_trials = [counts[i] for i in test_idx]
-    test_dirs = dirs[test_idx]
+    test_trials = [counts[i] for i in eval_idx]
+    test_dirs = dirs[eval_idx]
 
     # n_rbf must not exceed the coverage-buffer state count.
     n_cov_states = sum(counts[i].shape[0] for i in coverage_idx)
@@ -233,12 +254,30 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
     # n_splits by it so cross_val_score never asks for more folds than samples/class.
     labels = np.round(test_dirs).astype(int)
     smallest_class = int(np.unique(labels, return_counts=True)[1].min())
-    n_splits = max(2, min(5, smallest_class))
-    decode_acc = orientation_decode_acc(latent_per_trial, test_dirs,
-                                        n_splits=n_splits, seed=seed)
+    if len(np.unique(labels)) < 2 or smallest_class < 2:   # need >=2 classes, >=2/class to CV
+        decode_acc = float("nan")                           # (decode is reported, not a selection metric)
+    else:
+        n_splits = max(2, min(5, smallest_class))
+        decode_acc = orientation_decode_acc(latent_per_trial, test_dirs,
+                                            n_splits=n_splits, seed=seed)
     torus, torus_axis = torus_embedding(latent_per_trial, test_dirs)
 
-    #    9c. Forecast: free-run the flow over the first test trial's stimulus-window path.
+    #    9c. SELECTION METRIC: future forecasted reconstruction -- free-run the flow, decode,
+    #        and score against the FUTURE spikes (Poisson-deviance skill vs persistence + the
+    #        per-direction PSTH), aggregated over start phases x test trials x directions.
+    n_bin = counts.shape[1]
+    psth_by_dir = {float(d): np.stack([counts[i] for i in train_by_dir[d]], 0).mean(0)
+                   for d in keep_dirs}                          # (n_bin, N) counts/bin per direction
+    starts = list(range(n_stim_bins // 8, n_bin - 32, 8)) or [0]
+    devs = [forecast_reconstruction_deviance(model, ro, tc, psth_by_dir[float(d)], starts, (8, 16, 32))
+            for tc, d in zip(test_trials, test_dirs)]
+    fskill = forecast_skill_summary(devs)
+    # Reconstruction gate reference: PLL of the stimulus-locked (train) PSTH on the eval
+    # trials -- the achievable ceiling. A config is eligible iff its model PLL is within a
+    # margin of this (applied at merge time, so both are stored).
+    lam_psth = np.stack([psth_by_dir[float(d)] for d in test_dirs], 0)
+    pll_psth_ceiling = predictive_ll_bits_per_spike(test_counts, lam_psth, ybar)
+    # old latent-space affine R2 kept as a diagnostic only (gameable -- not for selection)
     rep_means = latent_paths[0][:n_stim_bins]
     k = min(50, len(rep_means) - 1)
     fc_r2 = forecast_r2(model, rep_means[0], rep_means[1:k + 1], k) if k > 0 else float("nan")
@@ -255,6 +294,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
            "dyn_noise_period": dyn_noise_period, "dyn_noise_decay": dyn_noise_decay,
            "dyn_noise_fit_ref": dyn_noise_fit_ref, "width_scale": width_scale,
            "column_norm": column_norm, "optimizer": optimizer, "lr": lr, "refresh_k": refresh_k,
+           "epochs": epochs, "n_val": n_val_eff, "eval_split": eval_split,
            "n_basis_final": int(model.transition.velocity.feature.n_basis), "seed": int(seed),
            "n_dir": int(len(keep_dirs)), "n_train_trials": len(train_trials),
            "n_test_trials": len(test_trials), "coverage_per_dir": coverage_per_dir,
@@ -263,10 +303,14 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
 
     out = {
         "pll_bits_per_spike": float(pll),
+        "pll_psth_ceiling": float(pll_psth_ceiling),           # reconstruction-gate reference
+        "eval_split": eval_split,
         "decode_acc": float(decode_acc),
         "median_ms_per_bin": median_ms,
         "p95_ms_per_bin": p95_ms,
-        "forecast_r2": float(fc_r2),
+        "forecast_r2": float(fc_r2),                           # latent-space diagnostic (gameable)
+        "forecast_skill": fskill,                              # SELECTION METRIC (forecasted reconstruction)
+        "fc_weighted_persist_skill": float(fskill["weighted_persist_skill"]),
         "n_neurons": int(n_kept),
         "latent_dim": int(latent_dim),
         "bin_ms": float(bin_ms),
@@ -297,6 +341,9 @@ if __name__ == "__main__":
     ap.add_argument("--dyn-noise-fit-ref", type=float, default=0.0)
     ap.add_argument("--max-rbf", type=int, default=None)
     ap.add_argument("--width-scale", type=float, default=1.0)
+    ap.add_argument("--epochs", type=int, default=1)
+    ap.add_argument("--n-val", type=int, default=0)
+    ap.add_argument("--eval-split", type=str, default="test", choices=["test", "val"])
     ap.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam"])
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--column-norm", type=str, default="eig", choices=["eig", "unit"])
@@ -307,15 +354,23 @@ if __name__ == "__main__":
                flow=args.flow, grow=args.grow, grow_weight_init=args.grow_weight_init,
                dyn_noise=args.dyn_noise, dyn_noise_decay=args.dyn_noise_decay,
                dyn_noise_fit_ref=args.dyn_noise_fit_ref, max_rbf=args.max_rbf,
-               width_scale=args.width_scale, optimizer=args.optimizer, lr=args.lr,
-               column_norm=args.column_norm)
+               width_scale=args.width_scale, epochs=args.epochs, n_val=args.n_val,
+               eval_split=args.eval_split, optimizer=args.optimizer,
+               lr=args.lr, column_norm=args.column_norm)
 
     print("=== sVJF M1 ===")
     print(f"  array_{args.array_num} @ {args.bin_ms} ms, L={args.latent_dim}, "
           f"N={out['n_neurons']} neurons")
-    print(f"  PLL          : {out['pll_bits_per_spike']:.4f} bits/spike")
+    print(f"  eval split   : {out['eval_split']}")
+    print(f"  PLL          : {out['pll_bits_per_spike']:.4f} bits/spike "
+          f"(PSTH ceiling {out['pll_psth_ceiling']:.4f})")
     print(f"  decode acc   : {out['decode_acc']:.3f}")
-    print(f"  forecast R^2 : {out['forecast_r2']:.3f}")
+    fs = out["forecast_skill"]["skill"]
+    print(f"  fc skill     : k8 {fs[8]['vs_persist']:+.3f}/{fs[8]['vs_psth']:+.3f}  "
+          f"k16 {fs[16]['vs_persist']:+.3f}/{fs[16]['vs_psth']:+.3f}  "
+          f"k32 {fs[32]['vs_persist']:+.3f}/{fs[32]['vs_psth']:+.3f}  (vs persist/psth)")
+    print(f"  fc weighted S: {out['fc_weighted_persist_skill']:+.4f}  (SELECTION metric)")
+    print(f"  forecast R^2 : {out['forecast_r2']:.3f}  (latent diag, gameable)")
     print(f"  timing       : median {out['median_ms_per_bin']:.3f} ms/bin, "
           f"p95 {out['p95_ms_per_bin']:.3f} ms/bin")
     print(f"  diverged     : {out['n_diverge']}")

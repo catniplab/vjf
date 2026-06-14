@@ -22,7 +22,8 @@ from experiments.v1_graf.graf_loader import load_array, bin_spikes, well_tuned_m
 from experiments.v1_graf.figstyle import set_style
 from experiments.v1_graf.run_m1 import _infer_latent_paths
 from experiments.v1_graf.eval import (
-    leave_one_neuron_rates, predictive_ll_bits_per_spike, forecast_r2)
+    leave_one_neuron_rates, predictive_ll_bits_per_spike, forecast_r2,
+    forecast_reconstruction_deviance, forecast_skill_summary)
 from vjf.model import VJF
 from vjf.readout import OnlineReadout
 from vjf.realtime import online_filter_trials
@@ -34,10 +35,12 @@ BIN_MS, T_MAX_MS, SEED = 10.0, 1400.0, 20260609
 WARMUP_TRIALS, N_RBF, HIDDEN = 8, 100, [64, 64]
 
 
-def prepare_single_dir_data(direction=None):
+def prepare_single_dir_data(direction=None, n_val=0):
     """Load array_5, keep well-tuned neurons, pick one direction (auto: strongest mean
-    response), split 40 train / 10 test trials, and compute the stimulus-locked PSTH
-    ceiling PLL. Shared by the driver and the scan."""
+    response), split 10 test / ``n_val`` val / rest train trials, and compute the
+    stimulus-locked PSTH (the forecast/ceiling baseline). The search selects on the val
+    split, the clean experiment reports on test; val and test are never trained on.
+    Shared by the driver and the scan."""
     rng = np.random.default_rng(SEED)
     arr = load_array(5)
     counts = bin_spikes(arr["spk_times"], bin_ms=BIN_MS)
@@ -54,15 +57,30 @@ def prepare_single_dir_data(direction=None):
         d_star = float(direction)
     idx = np.where(dirs == d_star)[0]
     rng.shuffle(idx)
-    test_idx, train_idx = idx[:10], idx[10:]
+    test_idx, val_idx, train_idx = idx[:10], idx[10:10 + n_val], idx[10 + n_val:]
     train_trials = [counts[i][:nt] for i in train_idx]
     test_trials = [counts[i][:nt] for i in test_idx]
+    val_trials = [counts[i][:nt] for i in val_idx]
     test_counts = np.stack(test_trials, 0)
+    val_counts = np.stack(val_trials, 0) if val_trials else np.empty((0, nt, N))
     ybar = float(test_counts.mean())
-    psth = np.stack([counts[i][:nt] for i in train_idx], 0).mean(0)        # (nt, N)
+    psth = np.stack([counts[i][:nt] for i in train_idx], 0).mean(0)        # (nt, N) train PSTH
     pll_psth = predictive_ll_bits_per_spike(test_counts, np.broadcast_to(psth, test_counts.shape), ybar)
     return dict(train_trials=train_trials, test_trials=test_trials, test_counts=test_counts,
-                ybar=ybar, N=N, d_star=d_star, pll_psth=float(pll_psth))
+                val_trials=val_trials, val_counts=val_counts,
+                ybar=ybar, N=N, d_star=d_star, pll_psth=float(pll_psth), psth_counts=psth)
+
+
+def _forecast_skill(model, ro, eval_trials, psth_counts):
+    """Gold-standard selection metric on the held-out (val/test) trials: future forecasted
+    reconstruction -- free-run the flow from many start phases, decode, and score the
+    forecast spikes by Poisson-deviance skill vs persistence + the stimulus-locked PSTH.
+    ``psth_counts`` is the single-direction train PSTH (nt, N)."""
+    n_bin = eval_trials[0].shape[0]
+    starts = list(range(n_bin // 8, n_bin - 32, 8)) or [0]
+    devs = [forecast_reconstruction_deviance(model, ro, tc, psth_counts, starts, (8, 16, 32))
+            for tc in eval_trials]
+    return forecast_skill_summary(devs)
 
 
 def _eval_model(model, ro, test_trials, test_counts, ybar):
@@ -84,9 +102,12 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
                 snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
                 dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0,
-                dyn_noise_fit_ref=0.0, probe_fn=None, return_model=False):
+                dyn_noise_fit_ref=0.0, probe_fn=None, return_model=False, psth_counts=None):
     torch.manual_seed(seed)
-    rep = train_trials * epochs
+    rng_order = np.random.default_rng(seed + 777)              # randomize replay order each epoch
+    rep = []
+    for _ in range(epochs):
+        rep += [train_trials[i] for i in rng_order.permutation(len(train_trials))]
     steps_per_epoch = len(train_trials) * train_trials[0].shape[0]
     cover_window = np.concatenate(train_trials[:WARMUP_TRIALS], 0)
     # Data-driven seeding + growth now work for the sgd flow too (VJF.filter re-points
@@ -147,6 +168,13 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
     out = dict(pll=float(pll), forecast_r2=float(fc), paths=paths, centers=centers,
                widths=widths, loss_trace=np.asarray(loss_trace), snapshots=snaps,
                n_basis=int(model.transition.velocity.feature.n_basis))
+    if psth_counts is not None:                               # SELECTION METRIC (gold standard)
+        fskill = _forecast_skill(model, ro, test_trials, psth_counts)
+        pll_ceiling = predictive_ll_bits_per_spike(
+            test_counts, np.broadcast_to(psth_counts, test_counts.shape), ybar)
+        out["forecast_skill"] = fskill
+        out["fc_weighted_persist_skill"] = float(fskill["weighted_persist_skill"])
+        out["pll_psth_ceiling"] = float(pll_ceiling)
     if return_model:                                          # for downstream forecasting/probes
         out["model"], out["ro"] = model, ro
     return out
