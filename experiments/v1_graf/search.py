@@ -70,6 +70,21 @@ def single_grid() -> list:
     return cfgs
 
 
+def single_grid_xl() -> list:
+    """Extended capacity-push single-dir grid (run after the base search). Higher latent
+    dim and a larger growing RBF basis (explicit ``max_rbf`` cap so it stays tractable --
+    the latent trajectory is a low-D cycle, so center count saturates), plus longer
+    training, all in the winning lr/denoising region from the base search. Tests whether
+    more capacity closes the PSTH-forecast gap or confirms a ceiling."""
+    cfgs = []
+    for g in _grid({"latent_dim": [4, 5, 6], "max_rbf": [1600, 2400],
+                    "epochs": [100, 200], "lr": [3e-4, 1e-3]}):
+        for sig0, decay, fit_ref in [(0.3, 0.97, 0.3), (0.2, 0.97, 0.0)]:
+            cfgs.append({**g, "rbf_base": 100, "dyn_noise": sig0,
+                         "dyn_noise_decay": decay, "dyn_noise_fit_ref": fit_ref})
+    return cfgs
+
+
 def multi_grid() -> list:
     """Multi-direction search grid (run at a fixed n_dir; finalists confirmed at the full
     direction set in Phase 2). Pruned after the single-dir search localizes lr/noise."""
@@ -90,9 +105,10 @@ def _run_single(cfg: dict, data: dict, quick: bool) -> dict:
         data["train_trials"], data["val_trials"], data["val_counts"], data["val_ybar"],
         epochs=epochs, latent_dim=cfg["latent_dim"], N=data["N"],
         grow=True, grow_weight_init="residual", flow="sgd", optimizer="adam",
-        lr=cfg["lr"], rbf_base=cfg["rbf_base"], dyn_noise=cfg["dyn_noise"],
-        dyn_noise_decay=cfg["dyn_noise_decay"], dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"],
-        psth_counts=data["psth_counts"], return_model=False)
+        lr=cfg["lr"], rbf_base=cfg.get("rbf_base", 50), max_rbf=cfg.get("max_rbf"),
+        dyn_noise=cfg["dyn_noise"], dyn_noise_decay=cfg["dyn_noise_decay"],
+        dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"], psth_counts=data["psth_counts"],
+        return_model=False)
     return {"pll": res["pll"], "pll_psth_ceiling": res["pll_psth_ceiling"],
             "weighted_persist_skill": res["fc_weighted_persist_skill"],
             "skill": res["forecast_skill"]["skill"], "forecast_r2_diag": res["forecast_r2"],
@@ -135,18 +151,22 @@ def _dump_atomic(path: str, obj) -> None:
     os.replace(tmp, path)
 
 
-def run_shard(space: str, shard: int, n_shards: int, quick: bool, n_dir: int) -> str:
+def run_shard(space: str, shard: int, n_shards: int, quick: bool, n_dir: int,
+              grid: str = "base") -> str:
     """Run this shard's slice of the grid; dump results atomically + incrementally."""
     if not (n_shards > 0 and 0 <= shard < n_shards):
         raise SystemExit(f"invalid shard params: shard={shard}, n_shards={n_shards} "
                          f"(need n_shards>0 and 0<=shard<n_shards)")
-    cfgs = single_grid() if space == "single" else multi_grid()
+    if space == "single":
+        cfgs = single_grid_xl() if grid == "xl" else single_grid()
+    else:
+        cfgs = multi_grid()
     mine = cfgs[shard::n_shards]
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out_path = os.path.join(RESULTS_DIR, f"search_{space}_shard{shard}.json")
-    meta = {"space": space, "shard": shard, "n_shards": n_shards, "grid_size": len(cfgs),
-            "n_assigned": len(mine), "n_dir": n_dir if space == "multi" else None,
-            "quick": quick}
+    meta = {"space": space, "shard": shard, "n_shards": n_shards, "grid": grid,
+            "grid_size": len(cfgs), "n_assigned": len(mine),
+            "n_dir": n_dir if space == "multi" else None, "quick": quick}
     print(f"[search] space={space} shard={shard}/{n_shards}: {len(mine)}/{len(cfgs)} configs"
           f"{' (QUICK)' if quick else ''}", flush=True)
 
@@ -291,11 +311,17 @@ if __name__ == "__main__":
     ap.add_argument("--n-shards", type=int, default=int(os.environ.get("SEARCH_NSHARDS", 1)))
     ap.add_argument("--n-dir", type=int, default=int(os.environ.get("SEARCH_NDIR", 8)),
                     help="multi-dir: directions used for the search grid")
+    ap.add_argument("--grid", type=str, default=os.environ.get("SEARCH_GRID", "base"),
+                    choices=["base", "xl"], help="single-dir grid: base or xl capacity-push")
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--merge", action="store_true")
+    ap.add_argument("--results-dir", type=str, default=None,
+                    help="override the results dir (for merging shard files pulled off VMs)")
     args = ap.parse_args()
 
+    if args.results_dir:                                        # functions read RESULTS_DIR at call time
+        RESULTS_DIR = args.results_dir
     if args.merge:
         merge(args.space)
     else:
-        run_shard(args.space, args.shard, args.n_shards, args.quick, args.n_dir)
+        run_shard(args.space, args.shard, args.n_shards, args.quick, args.n_dir, args.grid)
