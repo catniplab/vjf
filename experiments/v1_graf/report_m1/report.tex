@@ -77,6 +77,39 @@ same array analyzed by vLGP \cite{vlgp}, binned at \SI{10}{ms}. The grating temp
 orientation tuning (sum of two von Mises bumps) fits with $R^2\!\ge\!0.75$, leaving $N=74$
 well-tuned units, and split 40 train / 10 test trials per direction.
 
+\Cref{fig:data} shows the data for the strongest direction: a single-trial spike raster,
+the trial-averaged population rate -- which oscillates at the grating's \SI{6.25}{Hz} during
+the stimulus and decays after stimulus offset -- and the per-neuron PSTH. The units are
+sharply, bimodally orientation-tuned (two bumps $\sim\!180^\circ$ apart, with direction
+selectivity; \cref{fig:tuning}). This is a low-to-moderate SNR regime: a rank-$d$
+log-linear-Poisson fit to the stimulus-window PSTH gives an instantaneous Fisher-information
+SNR bound\footnote{\texttt{neuroFisherSNR} (\texttt{github.com/catniplab/neurofisherSNR}):
+how accurately the $d$-dim latent is estimable from the spikes of a $\lambda=\exp(Cx+b)$
+model.} of $\approx\!\SI{6.1}{dB}$ ($R^2\,0.75$) at $d{=}2$ and $\approx\!\SI{4.7}{dB}$
+($R^2\,0.66$) at $d{=}3$ -- comparable to the \SI{3}{dB} synthetic regime of the original
+\svjf{} study. Peak rates reach $\sim\!\SI{190}{Hz}$ (mean $\sim\!\SI{22}{Hz}$).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{data_overview.png}
+  \caption{Graf array 5, strongest direction ($225^\circ$, $N{=}74$ well-tuned units),
+    over one trial (stimulus window shaded). \textbf{Top:} single-trial raster (neurons
+    ordered by PSTH peak time). \textbf{Middle:} trial-averaged population rate -- the
+    \SI{6.25}{Hz} grating drive is visible during the stimulus and decays after offset.
+    \textbf{Bottom:} per-neuron trial-averaged PSTH. The rough Fisher-information SNR bound
+    is $\approx\!\SI{4.7}{dB}$ ($R^2\,0.66$, $d{=}3$).}
+  \label{fig:data}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{tuning_curves.png}
+  \caption{Orientation tuning (mean stimulus-window rate vs direction) for the six
+    best-fit well-tuned neurons. The bimodal profile (two bumps $\sim\!180^\circ$ apart)
+    is the orientation tuning with direction selectivity that the readout must separate.}
+  \label{fig:tuning}
+\end{figure}
+
 \section{\svjf{} on streaming V1}
 \paragraph{Forward step and learning.}
 Each bin maximizes one filtering-step ELBO,
