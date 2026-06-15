@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from experiments.v1_graf.figstyle import set_style
+from experiments.v1_graf.figstyle import set_style, FW
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "report_m1", "figs")
@@ -34,7 +34,7 @@ SKILL = [0.0093, 0.0143, 0.0166, 0.0183, 0.0021, -2.1854, -0.5977]  # S_persist 
 def main():
     set_style()
     os.makedirs(FIGS, exist_ok=True)
-    fig, (axA, axB) = plt.subplots(1, 2, figsize=(9.2, 3.7))
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(FW(1.0), 3.0))   # scale-1.0 at \textwidth
 
     # Panel A: bracket (stable regime lambda <= 1e-1; lambda>=1 destabilizes the SGD).
     keep = [i for i, l in enumerate(LAM) if l <= 0.1]
@@ -51,7 +51,7 @@ def main():
     axt.set_ylabel("forecast skill vs persistence", color="C2")
     axt.tick_params(axis="y", labelcolor="C2")
     axt.legend(fontsize=7, loc="lower right")
-    axA.set_title("Curvature penalty smooths the flow (skill flat for $\\lambda\\!\\approx\\!10^{-3}$--$10^{-2}$)")
+    # titles dropped: the caption carries both panels (paper-figures: on-figure titles optional)
 
     # Panel B: selected config on the reserved TEST set, skill vs horizon, both baselines.
     te = json.load(open(os.path.abspath(TESTEVAL)))["0.001"]
@@ -66,12 +66,9 @@ def main():
     axB.set_xlabel("forecast horizon $k$ (bins)")
     axB.set_ylabel("forecasted-reconstruction skill")
     axB.legend(fontsize=7)
-    axB.set_title(f"Selected model on test (L=4, $\\lambda$=$10^{{-3}}$): "
-                  f"beats persistence, loses to PSTH")
 
-    fig.tight_layout()
-    for ext in ("png", "pdf"):
-        fig.savefig(os.path.join(FIGS, f"regularization.{ext}"), dpi=150)
+    for ext in ("png", "pdf"):                                  # constrained_layout (RC); no tight_layout
+        fig.savefig(os.path.join(FIGS, f"regularization.{ext}"), dpi=200)
     plt.close(fig)
     print(f"saved -> {FIGS}/regularization.png")
     print(f"  selected on TEST: PLL {te['test_pll']:.3f} (ceil {te['pll_ceiling']:.3f}) "

@@ -29,6 +29,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (registers 3d projection)
 from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval, SEED
 from experiments.v1_graf.eval import (
     frozen_dynamics, forecast_reconstruction_deviance, forecast_skill_summary)
+from experiments.v1_graf.figstyle import set_style, FW
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "report_m1", "figs")
@@ -166,7 +167,10 @@ def main():
     pf = (xfilt - ctr) @ B.T                                    # single-trial filtered, (T,3)
     pc = (xfc - ctr) @ B.T                                      # free-run forecast, (T-T0,3)
     pbar = (xbar - ctr) @ B.T                                   # trial-average reference, (T,3)
+    np.savez(os.path.join(VID, "forecast_paths.npz"), pf=pf, pc=pc, pbar=pbar,
+             t0=T0, trial_i=best_i)                             # so the slice can be re-plotted w/o retraining
     render(pf, pc, pbar, T0, cfg, res, data, best_i, timing)
+    render_slices(pf, pc, pbar, T0, cfg, res, data, best_i)
 
     with open(os.path.join(VID, "forecast_3d_timing.json"), "w") as fh:
         json.dump({"config": cfg, "test_trial": best_i, "best_trial_S_persist": best_s,
@@ -238,6 +242,34 @@ def render(pf, pc, pbar, t0, cfg, res, data, trial_i, timing):
     ax.view_init(elev=24, azim=48)
     fig.savefig(os.path.join(VID, "forecast_3d.png"), dpi=150, facecolor=fig.get_facecolor())
     plt.close(fig)
+
+
+def render_slices(pf, pc, pbar, t0, cfg, res, data, trial_i):
+    """Time-slice view (clearer than the 3D projection of a contracting flow): each leading PC
+    over time -- the trial-average reference (gold), the single-trial filtered latent (teal), and
+    the free-run forecast (crimson) launched at t0. Shows the forecast tracking the cycle for
+    only briefly, then relaxing toward the mean."""
+    plt.style.use("default")                                    # render() left dark_background global
+    set_style()                                                 # back to the light report style
+    n = pf.shape[1]
+    teal, crim, gold = "#1b9e9a", "#d6336c", "#c8920a"
+    fig, axes = plt.subplots(n, 1, figsize=(FW(1.0), 1.15 * n + 0.5), sharex=True)  # scale-1.0 at \textwidth
+    t = np.arange(pf.shape[0])
+    tfc = np.arange(t0, t0 + pc.shape[0])
+    for d in range(n):
+        ax = axes[d]
+        ax.plot(t, pbar[:, d], color=gold, lw=2.3, alpha=0.9,
+                label="trial-average (high-SNR ref.)")
+        ax.plot(t, pf[:, d], color=teal, lw=1.2, alpha=0.95, label="filtered (single trial)")
+        ax.plot(tfc, pc[:, d], color=crim, lw=1.9, label="free-run forecast (no obs.)")
+        ax.axvline(t0, color="0.5", ls="--", lw=0.8)
+        ax.set_ylabel(f"PC{d + 1}")
+    axes[-1].set_xlabel("time (10 ms bins;  dashed = forecast start, end of cycle 1)")
+    axes[0].legend(fontsize=6.5, loc="upper right", ncol=1, framealpha=0.9)
+    for ext in ("png", "pdf"):                                  # constrained_layout (RC); no tight_layout
+        fig.savefig(os.path.join(FIGS, f"forecast_time.{ext}"), dpi=200)
+    plt.close(fig)
+    print(f"[video] time-slices -> {FIGS}/forecast_time.png")
 
 
 if __name__ == "__main__":

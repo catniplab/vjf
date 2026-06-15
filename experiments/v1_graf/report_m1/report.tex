@@ -311,7 +311,7 @@ roughness (mean second difference) drops $\sim$\num{8}-fold, with the forecast s
 through $\lambda\!\sim\!10^{-3}$ before over-regularization flattens the field toward
 persistence (\cref{fig:reg}A); $\lambda\!\gtrsim\!1$ destabilizes the gradient step. At the
 selected $\lambda{=}10^{-3}$ the held-out free-run is a smooth trajectory that tracks the
-trial-averaged cycle for the first part of the horizon and then relaxes inward
+cycle only briefly before relaxing toward the mean
 (\cref{fig:freerun}), in contrast to the jagged collapse without the penalty. The penalty does
 \emph{not} change the forecast skill, however: on the test trials the smoothed flow
 ($S\approx{+}0.015$) and the unregularized flow ($S\approx{+}0.019$) are within noise of each
@@ -337,15 +337,15 @@ does not beat the trial average.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.82\textwidth]{forecast_3d.png}
+  \includegraphics[width=\textwidth]{forecast_time.png}
   \caption{Held-out free-run forecast of the regularized model ($L{=}4$, \num{1600} RBF,
-    $\lambda{=}10^{-3}$), latent projected to its first three PCs (a frame from the rotating
-    video). \textbf{Gold:} the trial-averaged latent -- the high-SNR reference cycle.
-    \textbf{Teal:} the single-trial filtered latent (with spikes). \textbf{Crimson:} the
-    autonomous free-run launched at the end of the first cycle (star), with \emph{no}
-    observations after $t_0$. The curvature penalty yields a smooth free-run that tracks the
-    cycle initially and then relaxes inward (a smooth contracting flow) -- not the
-    high-frequency collapse of the unregularized field.}
+    $\lambda{=}10^{-3}$) over time, each leading PC on one test trial. \textbf{Gold:} the
+    trial-averaged latent -- the high-SNR reference cycle. \textbf{Teal:} the single-trial
+    filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run launched at the
+    end of the first cycle (dashed line), with \emph{no} observations after $t_0$. The smoothed
+    free-run tracks the cycle only briefly, then relaxes toward the mean (a smooth contracting
+    flow) -- not the high-frequency collapse of the unregularized field, but it does not sustain
+    the oscillation either, consistent with its loss to the PSTH.}
   \label{fig:freerun}
 \end{figure}
 
