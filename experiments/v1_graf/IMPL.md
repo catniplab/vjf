@@ -106,3 +106,62 @@ stages, and the dynamics are exonerated:
   So the refresh is double-edged (improves C -> PLL; inflates -> forecast erosion). The lever is
   freeze/ANNEAL AFTER C converges (freeze-after-S), NOT from the start -- needs a small freeze-after
   mechanism in OnlineReadout/driver (not yet built). That is the recommended next step.
+
+### UPDATE 2026-06-14 -- forecasting-criterion hyperparameter search (single dir 225)
+
+Switched the model-selection criterion to the gold standard: **future forecasted reconstruction** --
+free-run the flow from a time t0 in a held-out trial (no obs after t0), decode, and score the
+forecast against the FUTURE spikes by **Poisson-deviance skill** vs two baselines (persistence;
+the stimulus-locked PSTH), gated by a decent filtered leave-one-neuron PLL. Selection is on a
+VALIDATION split (30 train / 10 val / 10 test reserved), randomized interleaved replay over epochs,
+weighted S = 0.5*s8 + 0.3*s16 + 0.2*s32 (k=8/16/32 bins = half/one/two grating cycles). Selection
+ranks by persistence-skill; PSTH skill is reported as a phase-aware near-oracle REFERENCE. Code:
+`search.py` (sharded over 8 parallel /gcp_run VMs), eval in `eval.py`
+(`forecast_reconstruction_deviance` + `forecast_skill_summary`). The old latent-space affine
+`forecast_r2` is kept as a (gameable) diagnostic only.
+
+Result (selection on val):
+- ALL configs reconstruct well: filtered leave-one-neuron PLL meets/exceeds the PSTH ceiling (best
+  ~0.716 vs ceiling 0.683). WITH observations the model is at/above the trial mean.
+- Free-run forecast beats persistence MARGINALLY and loses to the PSTH at every horizon:
+  base (72 cfg) best S_persist +0.030 / S_psth -0.029 (L=4, 1600 ctr, E=100); xl capacity-push
+  best so far S_persist +0.036 / S_psth -0.037 (L=5, 2400 ctr, E=100).
+- Capacity is NOT the bottleneck (ceiling reached): L=6 and E=200 do NOT help -- near-zero/worse
+  than L=4/5 at E=100. The +0.03..+0.036 persistence gain plateaus and the PSTH gap does not close.
+  For stimulus-locked gratings the PSTH is a phase-aware near-oracle, and the autonomous flow does
+  not propagate trial-specific structure beyond it.
+
+Wall clock (like the M1 report; per-config wall is recorded as `elapsed_s` in each shard JSON):
+- BASE 72 configs, 8x e2-standard-2 (europe-west1-b): per-config min 385s / median 955s (~16 min) /
+  max 2112s (~35 min); ~21.5 VM-h total; ~2.7 h wall-clock across the 8 VMs (launched 11:55, merged
+  ~14:55, 2026-06-14).
+- XL 48 configs (L in {4,5,6}, RBF cap {1600,2400}, E in {100,200}): per-config median ~2118s
+  (~35 min), max ~4047s (~67 min, the L=6/E=200 configs); ~6 h wall-clock (launched 16:41). The
+  heaviest L=6/max2400/E200 configs cost ~65-80 min EACH.
+- Cost driver: the leave-one-neuron PLL eval (74 neurons x 10 val trials x 140 bins, independent of
+  epochs) PLUS L>=5 / E>=100 training; a GPU does not help (per-bin CPU online loop). NOTE for
+  multi-dir: per-config cost grows steeply with L and basis size -- budget accordingly.
+- Operational note: the 8-VM fleet driver hung on the launch-ssh for 4/8 shards (the
+  `nohup & disown` ssh channel did not close); compute was unaffected (search ran detached) and was
+  recovered by `gcp_runs/graf_xl_recover.sh` (poll -> pull -> teardown -> merge). Fix for next time:
+  detach the remote launch with `setsid`/`ssh -n` so the channel closes cleanly.
+
+### UPDATE 2026-06-15 -- curvature smoothness penalty on the SGD flow (NEW equation term, Memming-approved)
+
+The best forecast config free-runs as shrinkage-to-center + high-frequency chaos (3D video):
+the SGD/Adam flow's one-step map is UNDER-REGULARIZED (no penalty on the flow weights; the RLS
+path has `rls_ridge`, the SGD path had no analog), and `dyn_noise`'s contraction objective
+over-collapses the cycle. Fix (Memming chose R2 + backing off denoising):
+
+**Velocity field (SGD flow):** `v(x) = sum_j phi_j(x) W_{j,:}`, `phi_j(x) = exp(-||x-c_j||^2 / (2 w_j^2))`,
+`w_j = exp(logwidth_j)` (vjf/functional.py:rbf, vjf/module.py LinearRegression, bayes=False).
+
+**R2 curvature penalty (added to the SGD-flow ELBO loss):**
+`d^2 phi_j/dx dx^T = phi_j [ (x-c_j)(x-c_j)^T / w_j^4 - I / w_j^2 ]`, so
+`H_a(x) = d^2 v_a/dx dx^T = sum_j W_{j,a} phi_j(x) [ (x-c_j)(x-c_j)^T / w_j^4 - I / w_j^2 ]`, and
+`R2(x) = sum_a ||H_a(x)||_F^2`. Loss: `L = L_ELBO + lambda_smooth * mean_t R2(x_t)`, evaluated at
+the filtered mean each SGD step; `lambda_smooth = 0` recovers the original VJF. Penalizes only
+NON-LINEAR curvature, so an affine/rotational field (the limit cycle) is unpenalized while the
+high-frequency wiggle is killed. The `gaussian_loss`/ELBO terms are UNCHANGED -- this only adds a
+regularizer term. SGD/Adam flow only (the RLS path keeps `rls_ridge`). Paired with reduced
+`dyn_noise` (remove the over-contraction). Re-search over `lambda_smooth` follows.

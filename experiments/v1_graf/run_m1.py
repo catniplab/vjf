@@ -114,7 +114,8 @@ def _infer_latent_paths(model, readout, trial_counts_list):
 def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
          quick: bool = False, n_dir: int = None, flow: str = "srrls", grow: bool = False,
          grow_weight_init: str = "zero", dyn_noise: float = 0.0, dyn_noise_period: int = 1000,
-         dyn_noise_decay: float = 1.0, dyn_noise_fit_ref: float = 0.0, column_norm: str = "eig",
+         dyn_noise_decay: float = 1.0, dyn_noise_fit_ref: float = 0.0, smooth_lambda: float = 0.0,
+         column_norm: str = "eig",
          optimizer: str = "sgd", lr: float = 1e-4, rbf_base: int = 25, max_rbf: int = None,
          width_scale: float = 1.0, refresh_k: int = 1000, epochs: int = 1,
          n_val: int = 0, eval_split: str = "test", seed: int = SEED) -> dict:
@@ -220,6 +221,7 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
     model.dyn_noise_period = dyn_noise_period
     model.dyn_noise_decay = dyn_noise_decay
     model.dyn_noise_fit_ref = dyn_noise_fit_ref            # gate noise by flow fit (0 = off)
+    model.smooth_lambda = smooth_lambda                    # R2 curvature penalty (0 = off)
 
     # 7. Readout warm-start from the concatenated coverage window -> decoder (C, b).
     ro = OnlineReadout(n_kept, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
@@ -292,7 +294,8 @@ def main(*, array_num: int = 5, bin_ms: float = 10.0, latent_dim: int = 3,
            "hidden_sizes": hidden, "flow": flow, "grow": grow,
            "grow_weight_init": grow_weight_init, "dyn_noise": dyn_noise,
            "dyn_noise_period": dyn_noise_period, "dyn_noise_decay": dyn_noise_decay,
-           "dyn_noise_fit_ref": dyn_noise_fit_ref, "width_scale": width_scale,
+           "dyn_noise_fit_ref": dyn_noise_fit_ref, "smooth_lambda": smooth_lambda,
+           "width_scale": width_scale,
            "column_norm": column_norm, "optimizer": optimizer, "lr": lr, "refresh_k": refresh_k,
            "epochs": epochs, "n_val": n_val_eff, "eval_split": eval_split,
            "n_basis_final": int(model.transition.velocity.feature.n_basis), "seed": int(seed),
@@ -339,6 +342,7 @@ if __name__ == "__main__":
     ap.add_argument("--dyn-noise", type=float, default=0.0)
     ap.add_argument("--dyn-noise-decay", type=float, default=1.0)
     ap.add_argument("--dyn-noise-fit-ref", type=float, default=0.0)
+    ap.add_argument("--smooth-lambda", type=float, default=0.0)
     ap.add_argument("--max-rbf", type=int, default=None)
     ap.add_argument("--width-scale", type=float, default=1.0)
     ap.add_argument("--epochs", type=int, default=1)
@@ -353,7 +357,8 @@ if __name__ == "__main__":
                latent_dim=args.latent_dim, quick=args.quick, n_dir=args.n_dir,
                flow=args.flow, grow=args.grow, grow_weight_init=args.grow_weight_init,
                dyn_noise=args.dyn_noise, dyn_noise_decay=args.dyn_noise_decay,
-               dyn_noise_fit_ref=args.dyn_noise_fit_ref, max_rbf=args.max_rbf,
+               dyn_noise_fit_ref=args.dyn_noise_fit_ref, smooth_lambda=args.smooth_lambda,
+               max_rbf=args.max_rbf,
                width_scale=args.width_scale, epochs=args.epochs, n_val=args.n_val,
                eval_split=args.eval_split, optimizer=args.optimizer,
                lr=args.lr, column_norm=args.column_norm)

@@ -99,6 +99,10 @@ class VJF(Module):
         # flow that cannot yet predict the clean transition. 0 = no gating (off).
         self.dyn_noise_fit_ref = 0.0
         self._dyn_step = 0            # schedule step counter
+        # R2 curvature regularizer on the SGD-flow one-step map (0 = original ELBO, off).
+        # Adds lambda_smooth * mean_t ||d^2 v/dx dx^T||_F^2 to the SGD-flow loss; see
+        # RBFDS.curvature_penalty + IMPL.md (2026-06-15). sgd flow only.
+        self.smooth_lambda = 0.0
 
     def prior(self, y: Tensor) -> Gaussian:
         assert y.ndim == 2
@@ -281,6 +285,11 @@ class VJF(Module):
         else:
             loss = output
         if sgd:
+            # R2 curvature penalty on the SGD-flow field, added only on the learning step
+            # (not during frozen eval, to avoid its per-bin cost) and only when active.
+            if (not warm_up and self.smooth_lambda > 0
+                    and self.transition.flow_learner == 'sgd'):
+                loss = loss + self.smooth_lambda * self.transition.curvature_penalty(xs)
             try:
                 self.optimizer.zero_grad()
                 loss.backward()  # accumulate grad if not trained
@@ -563,3 +572,30 @@ class RBFDS(Module):
 
     def loss(self, pt: Tensor, qt: Tensor) -> Tensor:
         return gaussian_loss(pt, qt, self.logvar)
+
+    def curvature_penalty(self, x: Tensor) -> Tensor:
+        """R2 smoothness regularizer: mean squared curvature ||d^2 v / dx dx^T||_F^2 of the
+        SGD-flow velocity field at the states x (B, d), in closed form for the Gaussian RBF.
+        For phi_j(x) = exp(-||x-c_j||^2 / (2 w_j^2)):
+            d^2 phi_j/dx dx^T = phi_j [ (x-c_j)(x-c_j)^T / w_j^4 - I / w_j^2 ]
+            H_a(x) = d^2 v_a/dx dx^T = sum_j W_{j,a} d^2 phi_j/dx dx^T
+            R2(x) = sum_a ||H_a(x)||_F^2
+        Penalizes only nonlinear curvature, so an affine/rotational field (a limit cycle) is
+        unpenalized while high-frequency wiggle is suppressed. Added to the SGD-flow ELBO loss
+        as lambda_smooth * mean_t R2(x_t) (see VJF.filter, IMPL.md 2026-06-15). x is detached:
+        the penalty shapes the field (gradient -> flow weights), not the state. sgd flow only
+        (udim=0: the RBF input is x). The ELBO terms themselves are unchanged."""
+        feat = self.velocity.feature
+        c = feat.centroid                                       # (M, d)
+        x = torch.atleast_2d(x).detach()                        # (B, d)
+        if c.shape[1] != x.shape[-1]:                           # RBF built over [x,u]; penalty is state-only
+            raise NotImplementedError("curvature_penalty requires udim=0 (RBF input == state x)")
+        w2 = feat.logwidth.exp().pow(2)                         # (M,)
+        W = self.velocity.w_mean                                # (M, d_out)
+        phi = feat(x)                                           # (B, M)
+        diff = x[:, None, :] - c[None, :, :]                    # (B, M, d)
+        eye = torch.eye(c.shape[1], dtype=x.dtype, device=x.device)
+        d2phi = (diff[..., :, None] * diff[..., None, :] / w2[None, :, None, None].pow(2)
+                 - eye[None, None] / w2[None, :, None, None]) * phi[..., None, None]  # (B,M,d,d)
+        H = torch.einsum('ja,bjpq->bapq', W, d2phi)             # (B, d_out, d, d)
+        return H.pow(2).sum(dim=(1, 2, 3)).mean()

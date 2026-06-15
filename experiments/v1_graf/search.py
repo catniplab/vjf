@@ -85,6 +85,26 @@ def single_grid_xl() -> list:
     return cfgs
 
 
+def single_grid_reg() -> list:
+    """Regularized search: the R2 curvature penalty (lambda_smooth) + backed-off denoising,
+    in the xl winner capacity region (L in {4,5}, 1600 centers, E=100, lr=1e-3). Tests whether
+    penalizing field curvature turns the jagged shrinkage-flow into a smooth limit cycle. The
+    lambda sweep brackets a wide log range; dyn_noise is off or gentle (R2 replaces its
+    smoothing role without the contraction)."""
+    # lambda range from the local bracket (lambda_bracket.py, E=30): the sweet spot is
+    # ~1e-3..1e-2 (curvature 112->1.4, jaggedness 0.098->0.012, skill peaks); 1e-1
+    # over-regularizes (field too flat -> persistence) and lambda>=1 destabilizes the SGD
+    # (curvature explodes). So sweep the usable range, refined near the peak; drop 1,10.
+    cfgs = []
+    for L in [4, 5]:
+        for lam in [0.0, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]:
+            for dn in [0.0, 0.1]:
+                cfgs.append({"latent_dim": L, "max_rbf": 1600, "epochs": 100, "lr": 1e-3,
+                             "rbf_base": 100, "dyn_noise": dn, "dyn_noise_decay": 1.0,
+                             "dyn_noise_fit_ref": 0.0, "smooth_lambda": lam})
+    return cfgs
+
+
 def multi_grid() -> list:
     """Multi-direction search grid (run at a fixed n_dir; finalists confirmed at the full
     direction set in Phase 2). Pruned after the single-dir search localizes lr/noise."""
@@ -107,8 +127,8 @@ def _run_single(cfg: dict, data: dict, quick: bool) -> dict:
         grow=True, grow_weight_init="residual", flow="sgd", optimizer="adam",
         lr=cfg["lr"], rbf_base=cfg.get("rbf_base", 50), max_rbf=cfg.get("max_rbf"),
         dyn_noise=cfg["dyn_noise"], dyn_noise_decay=cfg["dyn_noise_decay"],
-        dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"], psth_counts=data["psth_counts"],
-        return_model=False)
+        dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"], smooth_lambda=cfg.get("smooth_lambda", 0.0),
+        psth_counts=data["psth_counts"], return_model=False)
     return {"pll": res["pll"], "pll_psth_ceiling": res["pll_psth_ceiling"],
             "weighted_persist_skill": res["fc_weighted_persist_skill"],
             "skill": res["forecast_skill"]["skill"], "forecast_r2_diag": res["forecast_r2"],
@@ -122,6 +142,7 @@ def _run_multi(cfg: dict, n_dir: int, quick: bool) -> dict:
                grow_weight_init="residual", optimizer="adam", lr=cfg["lr"],
                rbf_base=cfg["rbf_base"], epochs=cfg["epochs"], dyn_noise=cfg["dyn_noise"],
                dyn_noise_decay=cfg["dyn_noise_decay"], dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"],
+               smooth_lambda=cfg.get("smooth_lambda", 0.0),
                n_val=10, eval_split="val", quick=quick)
     return {"pll": out["pll_bits_per_spike"], "pll_psth_ceiling": out["pll_psth_ceiling"],
             "weighted_persist_skill": out["fc_weighted_persist_skill"],
@@ -158,7 +179,7 @@ def run_shard(space: str, shard: int, n_shards: int, quick: bool, n_dir: int,
         raise SystemExit(f"invalid shard params: shard={shard}, n_shards={n_shards} "
                          f"(need n_shards>0 and 0<=shard<n_shards)")
     if space == "single":
-        cfgs = single_grid_xl() if grid == "xl" else single_grid()
+        cfgs = {"xl": single_grid_xl, "reg": single_grid_reg, "base": single_grid}[grid]()
     else:
         cfgs = multi_grid()
     mine = cfgs[shard::n_shards]
@@ -323,7 +344,8 @@ if __name__ == "__main__":
     ap.add_argument("--n-dir", type=int, default=int(os.environ.get("SEARCH_NDIR", 8)),
                     help="multi-dir: directions used for the search grid")
     ap.add_argument("--grid", type=str, default=os.environ.get("SEARCH_GRID", "base"),
-                    choices=["base", "xl"], help="single-dir grid: base or xl capacity-push")
+                    choices=["base", "xl", "reg"],
+                    help="single-dir grid: base, xl capacity-push, or reg (curvature-regularized)")
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--merge", action="store_true")
     ap.add_argument("--results-dir", type=str, default=None,

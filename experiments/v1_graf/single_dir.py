@@ -102,7 +102,8 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
                 snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
                 dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0,
-                dyn_noise_fit_ref=0.0, probe_fn=None, return_model=False, psth_counts=None):
+                dyn_noise_fit_ref=0.0, smooth_lambda=0.0, probe_fn=None, return_model=False,
+                psth_counts=None):
     torch.manual_seed(seed)
     rng_order = np.random.default_rng(seed + 777)              # randomize replay order each epoch
     rep = []
@@ -136,6 +137,7 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
     model.dyn_noise_period = dyn_noise_period
     model.dyn_noise_decay = dyn_noise_decay
     model.dyn_noise_fit_ref = dyn_noise_fit_ref            # gate noise by flow fit (0 = off)
+    model.smooth_lambda = smooth_lambda                    # R2 curvature penalty (0 = off)
     ro = OnlineReadout(N, latent_dim, smooth_tau=8.0, refresh_K=refresh_k, link="log",
                        column_norm=column_norm)
     Cw, bw = ro.warm_start(cover_window)
@@ -229,7 +231,7 @@ def _plot_snapshots(snaps, d_star, pll_psth, latent_dim, flow, suffix=""):
 def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
          grow=False, grow_thresh=0.5, max_rbf=None, grow_min_gap=None, refresh_k=500, tag="",
          column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls", snapshots=False,
-         optimizer="sgd", lr=1e-4, grow_weight_init="zero"):
+         optimizer="sgd", lr=1e-4, grow_weight_init="zero", smooth_lambda=0.0):
     os.makedirs(FIGS, exist_ok=True); os.makedirs(RESULTS, exist_ok=True)
     set_style()
     torch.set_default_dtype(torch.float32)
@@ -243,7 +245,7 @@ def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
                "n_test": len(test_trials), "latent_dim": latent_dim, "grow": grow,
                "grow_thresh": grow_thresh, "max_rbf": max_rbf, "refresh_k": refresh_k,
                "column_norm": column_norm, "flow": flow, "optimizer": optimizer, "lr": lr,
-               "grow_weight_init": grow_weight_init,
+               "grow_weight_init": grow_weight_init, "smooth_lambda": smooth_lambda,
                "pll_psth_ceiling": float(pll_psth), "epochs": {}}
     sfx = ("_" + tag) if tag else ("_grow" if grow else "")
 
@@ -255,7 +257,7 @@ def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
                           grow_min_gap=grow_min_gap, refresh_k=refresh_k, column_norm=column_norm,
                           rbf_base=rbf_base, width_scale=width_scale, flow=flow,
                           snapshot_epochs=snap_eps, optimizer=optimizer, lr=lr,
-                          grow_weight_init=grow_weight_init)
+                          grow_weight_init=grow_weight_init, smooth_lambda=smooth_lambda)
         _plot_snapshots(res["snapshots"], d_star, pll_psth, latent_dim, flow, suffix=sfx)
         for s in res["snapshots"]:
             print(f"  ep {s['epoch']:5.1f}: PLL={s['pll']:+.3f}  forecast R2={s['fc']:+.3f}  "
@@ -269,7 +271,8 @@ def main(epochs_list=(5, 20, 50), latent_dim=2, direction=None,
                           grow=grow, grow_thresh=grow_thresh, max_rbf=max_rbf,
                           grow_min_gap=grow_min_gap, refresh_k=refresh_k, column_norm=column_norm,
                           rbf_base=rbf_base, width_scale=width_scale, flow=flow,
-                          optimizer=optimizer, lr=lr, grow_weight_init=grow_weight_init)
+                          optimizer=optimizer, lr=lr, grow_weight_init=grow_weight_init,
+                          smooth_lambda=smooth_lambda)
         _plot_latent(res, E, d_star, res["pll"], res["forecast_r2"], pll_psth, suffix=sfx)
         summary["epochs"][str(E)] = {"pll": res["pll"], "forecast_r2": res["forecast_r2"],
                                      "n_basis": res["n_basis"]}
@@ -316,10 +319,11 @@ if __name__ == "__main__":
     ap.add_argument("--optimizer", type=str, default="sgd", choices=["sgd", "adam"])
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--grow-weight-init", type=str, default="zero", choices=["zero", "residual"])
+    ap.add_argument("--smooth-lambda", type=float, default=0.0)
     args = ap.parse_args()
     main(epochs_list=tuple(args.epochs), latent_dim=args.latent_dim, direction=args.direction,
          grow=args.grow, grow_thresh=args.grow_thresh, max_rbf=args.max_rbf,
          grow_min_gap=args.grow_min_gap, refresh_k=args.refresh_k, tag=args.tag,
          column_norm=args.column_norm, rbf_base=args.rbf_base, width_scale=args.width_scale,
          flow=args.flow, snapshots=args.snapshots, optimizer=args.optimizer, lr=args.lr,
-         grow_weight_init=args.grow_weight_init)
+         grow_weight_init=args.grow_weight_init, smooth_lambda=args.smooth_lambda)
