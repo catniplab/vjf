@@ -86,7 +86,7 @@ class OnlineReadout:
         self.alpha = 1.0 / smooth_tau
         self.c, self.K, self.link = log_c, refresh_K, link
         # 'eig': columns scaled by sqrt(eigenvalue) -> unit-variance latent (original).
-        # 'unit': unit-norm columns -> the scale gauge lives in the latent, not C; this
+        # 'unit': unit-norm columns -> the scale freedom lives in the latent, not C; this
         # removes the per-refresh sqrt(eigenvalue) rescaling that ratchets the latent scale.
         self.column_norm = column_norm
         self.nu = np.zeros(n_obs)            # causal EMA state
@@ -111,7 +111,7 @@ class OnlineReadout:
     def _scaled_C(self) -> np.ndarray:
         """Loading from the current PCA vectors. 'eig' folds sqrt(eigenvalue) into the
         columns (unit-variance latent); 'unit' returns unit-norm columns (the scale
-        gauge then lives in the latent, avoiding the per-refresh rescaling)."""
+        freedom then lives in the latent, avoiding the per-refresh rescaling)."""
         cols = []
         for v in self.vecs:
             nv = np.linalg.norm(v) + 1e-12

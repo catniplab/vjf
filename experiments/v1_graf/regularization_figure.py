@@ -2,9 +2,9 @@
 
 Panel A: the curvature-penalty bracket (lambda_bracket.py, dir 225, L=4, E=30) -- as
 lambda rises, the velocity-field curvature and the free-run jaggedness collapse while the
-forecast skill holds/peaks, then large lambda over-regularizes. Shows the penalty smooths
+forecast accuracy holds/peaks, then large lambda over-regularizes. Shows the penalty smooths
 the one-step map.
-Panel B: the regularized best config's forecast skill vs horizon (half/one/two cycles)
+Panel B: the regularized best config's forecast accuracy vs horizon (half/one/two cycles)
 against BOTH baselines -- it beats persistence but loses to the stimulus-locked PSTH at
 every horizon (the ceiling that capacity and smoothing do not close).
 """
@@ -46,9 +46,9 @@ def main():
     axA.set_ylabel("field curvature / jaggedness")
     axA.legend(fontsize=7, loc="upper right")
     axt = axA.twinx()
-    axt.plot(x, [SKILL[i] for i in keep], "^--", color="C2", label="forecast skill vs persist")
+    axt.plot(x, [SKILL[i] for i in keep], "^--", color="C2", label="forecast accuracy vs persist")
     axt.axhline(0, ls=":", color="0.5", lw=0.7)
-    axt.set_ylabel("forecast skill vs persistence", color="C2")
+    axt.set_ylabel("forecast accuracy vs persistence", color="C2")
     axt.tick_params(axis="y", labelcolor="C2")
     axt.legend(fontsize=7, loc="lower right")
     # titles dropped: the caption carries both panels (paper-figures: on-figure titles optional)
@@ -64,7 +64,7 @@ def main():
     axB.axhline(0, color="k", lw=0.8)
     axB.set_xticks(xb); axB.set_xticklabels(["8 (½ cyc)", "16 (1 cyc)", "32 (2 cyc)"])
     axB.set_xlabel("forecast horizon $k$ (bins)")
-    axB.set_ylabel("forecasted-reconstruction skill")
+    axB.set_ylabel("forecast accuracy (vs baseline)")
     axB.legend(fontsize=7)
 
     for ext in ("png", "pdf"):                                  # constrained_layout (RC); no tight_layout

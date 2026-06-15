@@ -19,7 +19,6 @@ a forecast-reconstruction criterion and a curvature-regularized flow}
 \newcommand{\svjf}{sVJF}
 \newcommand{\Renc}{x_{\mathrm{enc}}}
 \newcommand{\E}{\mathbb{E}}
-\newcommand{\skl}{\mathrm{skill}}
 
 \begin{document}
 \maketitle
@@ -36,15 +35,15 @@ likelihood on held-out trials meets or slightly exceeds the stimulus-locked PSTH
 held-out neurons as well as trial-averaging. We then ask whether the learned dynamics
 \emph{forecast}: from a time $t_0$ in a held-out trial we free-run the flow with no
 observations after $t_0$, decode it to a predicted firing rate, and score that forecast
-against the held-out future spikes by a Poisson-deviance \emph{forecasted-reconstruction
-skill}, versus two baselines -- persistence and the stimulus-locked PSTH -- over half, one,
+against the held-out future spikes by a Poisson-deviance \emph{forecast accuracy} relative to
+two baselines -- persistence and the stimulus-locked PSTH -- over half, one,
 and two grating cycles. Searching $\sim$\num{150} configurations of latent dimension, basis
 size, and training length, the autonomous free-run beats persistence only marginally and
 \emph{loses to the PSTH at every horizon}; more capacity does not help. Inspecting the
 free-run revealed an under-regularized one-step map -- shrinkage toward the origin plus
 high-frequency chaos. We add a closed-form curvature penalty on the velocity field, which
 turns the jagged free-run into a smooth trajectory (an $\sim$\num{8}-fold drop in trajectory
-roughness) while leaving the (small) forecast skill and the PSTH gap unchanged. The penalty
+roughness) while leaving the (small) forecast accuracy and the PSTH gap unchanged. The penalty
 thus cleanly separates a fixable, over-fit flow from a property of this stimulus-locked data:
 no configuration we searched produces an autonomous free-run that beats trial-averaging. The
 loop runs in real time (\SI{0.3}{ms}/bin).
@@ -108,7 +107,7 @@ the autonomous flow is meant to capture.
     stimulus-window rate vs direction; red: the sum-of-two-von-Mises fit). The per-panel
     $R^2$ is the \emph{tuning-fit} $R^2$ that defines the well-tuned criterion
     ($R^2\!\ge\!0.75$), distinct from the predictive log-likelihood (PLL,
-    \cref{sec:criterion}) or the forecast skill reported later.}
+    \cref{sec:criterion}) or the forecast accuracy reported later.}
   \label{fig:tuning}
 \end{figure}
 
@@ -231,10 +230,11 @@ per-bin rate, and score that forecast against the future spike counts by the Poi
 where $\lambda$ is the forecast's expected count per \SI{10}{ms} bin, $n$ the observed count,
 $n\log(n/\lambda)\!:=\!0$ at $n{=}0$, and the sum runs over neurons, the $k$ forecast bins, the
 start phases, and the held-out trials, for $k=8,16,32$ (half, one, two grating cycles). We
-report the \emph{forecasted-reconstruction skill} $\skl_k=1-D_{\mathrm{model}}(k)/D_{\mathrm{base}}(k)$
+report the \emph{forecast accuracy} $a_k=1-D_{\mathrm{model}}(k)/D_{\mathrm{base}}(k)$
 relative to two baselines: \emph{persistence} (hold the model's $t_0$ rate) and the
-stimulus-locked \emph{PSTH} (the train trial-average at each absolute bin); the pre-declared
-selection score is $S=0.5\,\skl_8+0.3\,\skl_{16}+0.2\,\skl_{32}$ versus persistence, gated by a
+stimulus-locked \emph{PSTH} (the train trial-average at each absolute bin); $a_k{=}1$ is an
+exact forecast, $0$ ties the baseline, and $a_k{<}0$ is worse than it. The pre-declared
+selection score is $S=0.5\,a_8+0.3\,a_{16}+0.2\,a_{32}$ versus persistence, gated by a
 filtered PLL within a margin of the PSTH ceiling. Scoring the decoded rate against the observed
 future spikes -- not a latent-space $R^2$ -- removes the affine-overfit loophole of
 self-referential latent metrics. We additionally report the filtered \emph{leave-one-neuron}
@@ -242,6 +242,32 @@ PLL (bits/spike; \cite{vlgp}): for each held-out neuron, filter the trial from t
 neurons' projection and score its predicted rate against the counts, relative to a
 homogeneous-Poisson baseline (0 = mean-rate). The \emph{PSTH ceiling} is the same PLL with the
 stimulus-locked trial-averaged rate as predictor.
+
+\paragraph{Ordering the latent factors for display.}
+The VJF latent is identifiable only up to an invertible linear transform: $(x_t,C)\mapsto(Mx_t,
+CM^{-1})$ leaves the decoded log-rate $\eta_t=Cx_t+b$ unchanged, so the individual factor axes
+are not unique and a PCA of the latent itself (which ignores $C$) is not the natural display
+basis. We order the factors instead by the variance they explain in the \emph{decoded
+log-rate}. Let $\tilde X$ be the centered latent path over a trial (rows $(x_t-\bar x)^\trp$,
+$\bar x$ the trial-averaged latent), so the centered decoded log-rate is $\tilde H=\tilde X
+C^\trp$. With its singular value decomposition $\tilde H=U\Sigma V_L^\trp$, where
+$V_L=[r_1,\dots,r_L]$ are the leading $L$ right singular vectors ($\mathrm{rank}\,\tilde
+H\le L$), define
+\begin{equation}
+  W = C^\trp V_L,\quad\text{columns } w_i=C^\trp r_i, \qquad z_t = W^\trp(x_t-\bar x),
+  \label{eq:rot}
+\end{equation}
+so the scores are exactly the decoded-log-rate principal-component time courses,
+$Z=\tilde X W = \tilde H V_L = U\Sigma$, and factor $i$ ($z_{t,i}=w_i^\trp(x_t-\bar x)$)
+explains the $i$-th largest share $\Sigma_{ii}^2/\sum_j\Sigma_{jj}^2$ of the decoded-log-rate
+variance ($Z^\trp Z=\Sigma^2$ on the reference path). $W$ is a decoder-induced linear
+projection -- the decoded-log-rate PC-score map -- \emph{not} an orthogonal rotation
+($W^\trp W\ne I$ in general). Because $C$ here has eig-normalized columns
+($C=U_g\Lambda_g^{1/2}$, the scale-fixed CCIPCA loading), the latent is approximately whitened,
+so $W$ is close to a reordering and rescaling of the existing factors rather than a substantive
+recombination. The same $W,\bar x$ are applied to the single-trial filtered latent and the
+free-run forecast (\cref{fig:freerun}); the ordering is decoder-aware, not a PCA of the latent
+itself.
 
 \begin{figure}[t]
   \centering
@@ -271,8 +297,8 @@ $\sim\!2^L$), training length ($E\in\{20,\dots,200\}$), learning rate and denois
 selected model's free-run on the test trials beats persistence only marginally
 ($S\approx{+}0.015$: it reduces the forecast Poisson deviance by $\sim$\num{1}--\SI{2}{\percent}
 relative to holding the $t_0$ rate) and \emph{loses to the stimulus-locked PSTH at every
-horizon} ($\skl_k$ vs.\ PSTH $\approx{-}0.03$ to ${-}0.04$; \cref{fig:reg}B). Within this search, capacity
-is not the limiting factor: the best validation skill is flat across $L{=}3$--$5$ and
+horizon} ($a_k$ vs.\ PSTH $\approx{-}0.03$ to ${-}0.04$; \cref{fig:reg}B). Within this search, capacity
+is not the limiting factor: the best validation forecast accuracy is flat across $L{=}3$--$5$ and
 \emph{drops} at $L{=}6$, and does not improve past $E{=}100$ (\cref{tab:capacity}); the largest
 models score near zero vs persistence. For a stimulus-locked grating the PSTH is a phase-aware,
 near-oracle
@@ -284,7 +310,7 @@ at least within this search.
 
 \begin{table}[t]
   \centering
-  \caption{Capacity does not lift the forecast. Best validation forecasted-reconstruction skill
+  \caption{Capacity does not lift the forecast. Best validation forecast accuracy
     $S$ vs persistence in the single-direction search, by latent dimension $L$: small and flat
     across $L{=}3$--$5$, then \emph{lower} at $L{=}6$. By training length the best $S$ is
     $+0.024/+0.018/+0.036/+0.033$ at $E=20/50/100/200$ -- no gain past $E{=}100$. Within this
@@ -307,13 +333,13 @@ autonomous trajectory shrinks toward the origin while jittering at high frequenc
 gradient-trained flow with a large basis fits per-bin spike noise into the velocity field).
 The curvature penalty of \cref{eq:curv} addresses this directly. As $\lambda$ increases, the
 velocity field's mean curvature falls two orders of magnitude and the free-run trajectory
-roughness (mean second difference) drops $\sim$\num{8}-fold, with the forecast skill holding
+roughness (mean second difference) drops $\sim$\num{8}-fold, with the forecast accuracy holding
 through $\lambda\!\sim\!10^{-3}$ before over-regularization flattens the field toward
 persistence (\cref{fig:reg}A); $\lambda\!\gtrsim\!1$ destabilizes the gradient step. At the
 selected $\lambda{=}10^{-3}$ the held-out free-run is a smooth trajectory that tracks the
 cycle only briefly before relaxing toward the mean
 (\cref{fig:freerun}), in contrast to the jagged collapse without the penalty. The penalty does
-\emph{not} change the forecast skill, however: on the test trials the smoothed flow
+\emph{not} change the forecast accuracy, however: on the test trials the smoothed flow
 ($S\approx{+}0.015$) and the unregularized flow ($S\approx{+}0.019$) are within noise of each
 other, and both lose to the PSTH. Its value is therefore a smooth, interpretable free-run
 -- not better forecasting. The penalty thus separates two distinct issues: a messy, over-fit
@@ -325,11 +351,11 @@ does not beat the trial average.
   \includegraphics[width=\textwidth]{regularization.png}
   \caption{\textbf{A:} the curvature penalty smooths the one-step map (dir \ang{225}, $L{=}4$,
     \num{1600} centers; validation). As $\lambda$ rises the field curvature $R_2$ (red) and the
-    free-run trajectory roughness (blue) collapse, while the forecast skill vs persistence
+    free-run trajectory roughness (blue) collapse, while the forecast accuracy vs persistence
     (green, right axis) holds flat across $\lambda\!\approx\!10^{-3}$--$10^{-2}$ then drops;
     $\lambda\!\ge\!1$ (off-axis) destabilizes the gradient step. We select $\lambda{=}10^{-3}$
     by the validation search. \textbf{B:} the selected model's
-    forecasted-reconstruction skill \emph{on the test trials} by horizon (half/one/two cycles):
+    forecast accuracy \emph{on the test trials} by horizon (half/one/two cycles):
     it beats persistence (green) but loses to the stimulus-locked, phase-aware PSTH (red) at
     every horizon -- the gap that neither capacity nor smoothing closed in our search.}
   \label{fig:reg}
@@ -339,7 +365,8 @@ does not beat the trial average.
   \centering
   \includegraphics[width=\textwidth]{forecast_time.png}
   \caption{Held-out free-run forecast of the regularized model ($L{=}4$, \num{1600} RBF,
-    $\lambda{=}10^{-3}$) over time, each leading PC on one test trial. \textbf{Gold:} the
+    $\lambda{=}10^{-3}$) over time, each VJF factor on one test trial, ordered by the
+    decoded-log-rate variance it explains (\cref{eq:rot}; \% in each panel). \textbf{Gold:} the
     trial-averaged latent -- the high-SNR reference cycle. \textbf{Teal:} the single-trial
     filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run launched at the
     end of the first cycle (dashed line), with \emph{no} observations after $t_0$. The smoothed
