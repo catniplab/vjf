@@ -102,7 +102,8 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
                 column_norm="eig", rbf_base=25, width_scale=0.5, flow="srrls",
                 snapshot_epochs=(), optimizer="sgd", lr=1e-4, grow_weight_init="zero", seed=SEED,
                 dyn_noise=0.0, dyn_noise_period=1000, dyn_noise_decay=1.0,
-                dyn_noise_fit_ref=0.0, smooth_lambda=0.0, probe_fn=None, return_model=False,
+                dyn_noise_fit_ref=0.0, smooth_lambda=0.0, rollout=False, rollout_k=12,
+                rollout_epochs=25, rollout_lr=5e-4, probe_fn=None, return_model=False,
                 psth_counts=None):
     torch.manual_seed(seed)
     rng_order = np.random.default_rng(seed + 777)              # randomize replay order each epoch
@@ -164,6 +165,9 @@ def _train_eval(train_trials, test_trials, test_counts, ybar, epochs, latent_dim
             if probe_fn is not None:                              # extra mechanistic diagnostics
                 snap.update(probe_fn(m2, paths_s, fr_s))
             snaps.append(snap)
+    if rollout:                                               # multi-step free-run training (rollout.py)
+        from experiments.v1_graf.rollout import rollout_finetune
+        rollout_finetune(model, ro, train_trials, k=rollout_k, epochs=rollout_epochs, lr=rollout_lr)
     pll, fc, paths, _ = _eval_model(model, ro, test_trials, test_counts, ybar)
     centers = model.transition.velocity.feature.centroid.detach().cpu().numpy()
     widths = np.exp(model.transition.velocity.feature.logwidth.detach().cpu().numpy())

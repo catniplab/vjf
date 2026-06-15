@@ -105,6 +105,22 @@ def single_grid_reg() -> list:
     return cfgs
 
 
+def single_grid_roll() -> list:
+    """Rollout re-search: multi-step rollout flow fine-tuning ON (rollout.py), sweeping latent
+    dim, curvature penalty, and rollout depth k / length, in the winner capacity region. Tests
+    the best forecast-accuracy config once the free-run is trained directly."""
+    cfgs = []
+    for L in [3, 4, 5]:
+        for lam in [0.0, 1e-4, 1e-3]:
+            for rk in [8, 16]:
+                for re_ in [25, 50]:
+                    cfgs.append({"latent_dim": L, "max_rbf": 1600, "epochs": 100, "lr": 1e-3,
+                                 "rbf_base": 100, "dyn_noise": 0.0, "dyn_noise_decay": 1.0,
+                                 "dyn_noise_fit_ref": 0.0, "smooth_lambda": lam,
+                                 "rollout": True, "rollout_k": rk, "rollout_epochs": re_})
+    return cfgs
+
+
 def multi_grid() -> list:
     """Multi-direction search grid (run at a fixed n_dir; finalists confirmed at the full
     direction set in Phase 2). Pruned after the single-dir search localizes lr/noise."""
@@ -128,6 +144,8 @@ def _run_single(cfg: dict, data: dict, quick: bool) -> dict:
         lr=cfg["lr"], rbf_base=cfg.get("rbf_base", 50), max_rbf=cfg.get("max_rbf"),
         dyn_noise=cfg["dyn_noise"], dyn_noise_decay=cfg["dyn_noise_decay"],
         dyn_noise_fit_ref=cfg["dyn_noise_fit_ref"], smooth_lambda=cfg.get("smooth_lambda", 0.0),
+        rollout=cfg.get("rollout", False), rollout_k=cfg.get("rollout_k", 12),
+        rollout_epochs=cfg.get("rollout_epochs", 25), rollout_lr=cfg.get("rollout_lr", 5e-4),
         psth_counts=data["psth_counts"], return_model=False)
     return {"pll": res["pll"], "pll_psth_ceiling": res["pll_psth_ceiling"],
             "weighted_persist_skill": res["fc_weighted_persist_skill"],
@@ -179,7 +197,8 @@ def run_shard(space: str, shard: int, n_shards: int, quick: bool, n_dir: int,
         raise SystemExit(f"invalid shard params: shard={shard}, n_shards={n_shards} "
                          f"(need n_shards>0 and 0<=shard<n_shards)")
     if space == "single":
-        cfgs = {"xl": single_grid_xl, "reg": single_grid_reg, "base": single_grid}[grid]()
+        cfgs = {"xl": single_grid_xl, "reg": single_grid_reg, "roll": single_grid_roll,
+                "base": single_grid}[grid]()
     else:
         cfgs = multi_grid()
     mine = cfgs[shard::n_shards]
@@ -344,8 +363,8 @@ if __name__ == "__main__":
     ap.add_argument("--n-dir", type=int, default=int(os.environ.get("SEARCH_NDIR", 8)),
                     help="multi-dir: directions used for the search grid")
     ap.add_argument("--grid", type=str, default=os.environ.get("SEARCH_GRID", "base"),
-                    choices=["base", "xl", "reg"],
-                    help="single-dir grid: base, xl capacity-push, or reg (curvature-regularized)")
+                    choices=["base", "xl", "reg", "roll"],
+                    help="single-dir grid: base / xl (capacity) / reg (curvature) / roll (rollout flow training)")
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--merge", action="store_true")
     ap.add_argument("--results-dir", type=str, default=None,

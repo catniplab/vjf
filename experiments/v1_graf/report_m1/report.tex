@@ -184,6 +184,24 @@ filtered mean each step. The weight $\lambda$ (distinct from the Poisson rate $\
 the CCIPCA eigenvalues $\lambda^{\mathrm g}_i$) controls smoothness; $\lambda{=}0$ recovers the
 original ELBO, and the reconstruction, recognition, and closed-form updates are untouched.
 
+\paragraph{Multi-step rollout training of the flow.}
+The one-step ELBO dynamics term trains $f$ to predict the next \emph{observation-corrected}
+state; a contracting field minimizes it while its autonomous free-run decays, so the free-run
+is underfit. After the online pass we therefore fine-tune the flow weights $W$ on a multi-step
+rollout that trains the free-run directly. From each start $t$ in the steady-state window (bin
+$\ge t_0$, past the onset transient) we free-run the flow with no observations,
+$\hat x^{0}=\mu_t$, $\hat x^{j}=\hat x^{j-1}+f(\hat x^{j-1})$, and match the filtered means:
+\begin{equation}
+  \mathcal{L}_{\text{roll}} = \frac{1}{k}\sum_{t}\sum_{j=1}^{k}\big\lVert \hat x^{j}-\mu_{t+j}\big\rVert^2,
+  \label{eq:roll}
+\end{equation}
+descended with respect to $W$ only -- the $\mu_{t+j}$ are detached targets, the RBF centers and
+widths, the decoder, and the readout are frozen, and the gradient is clipped through the
+$k$-step recurrence. This is non-causal training on the buffered filtered trajectory; inference
+stays causal and per-bin. $\mathcal{L}_{\text{roll}}$ optimizes the free-run directly, recovering
+the attracting limit cycle that one-step training misses, and lets the curvature penalty
+$\lambda$ come down (the rollout regularizes at the trajectory level).
+
 \paragraph{Train/validation/test split and replay training.}
 The stream opens with a coverage warm-up (dynamics off) over which the readout is fit and the
 latent means buffered; the RBF flow is then initialized once and turned on. The 30 train
