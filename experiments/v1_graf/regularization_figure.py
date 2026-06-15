@@ -20,8 +20,9 @@ from experiments.v1_graf.figstyle import set_style
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "report_m1", "figs")
-BEST = os.path.join(HERE, "..", "..", "gcp_runs",
-                    "graf-search-single-reg-20260615-093426", "results", "best_single.json")
+# Panel B uses the reserved-TEST evaluation of the selected config (test_eval.py), NOT the
+# validation/selection record -- the held-out numbers reported in the paper.
+TESTEVAL = os.path.join(HERE, "report_m1", "videos", "test_eval.json")
 
 # lambda_bracket.py result (dir 225, L=4, 1600 ctr, E=30, denoising off).
 LAM = [0.0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]
@@ -50,13 +51,13 @@ def main():
     axt.set_ylabel("forecast skill vs persistence", color="C2")
     axt.tick_params(axis="y", labelcolor="C2")
     axt.legend(fontsize=7, loc="lower right")
-    axA.set_title("Curvature penalty smooths the flow (sweet spot $\\lambda\\!\\sim\\!10^{-3}$)")
+    axA.set_title("Curvature penalty smooths the flow (skill flat for $\\lambda\\!\\approx\\!10^{-3}$--$10^{-2}$)")
 
-    # Panel B: regularized best, skill vs horizon, both baselines.
-    b = json.load(open(os.path.abspath(BEST)))["best"]
+    # Panel B: selected config on the reserved TEST set, skill vs horizon, both baselines.
+    te = json.load(open(os.path.abspath(TESTEVAL)))["0.001"]
     ks = [8, 16, 32]
-    vp = [b[f"skill{k}_persist"] for k in ks]
-    vq = [b[f"skill{k}_psth"] for k in ks]
+    vp = [te["skill_persist"][str(k)] for k in ks]
+    vq = [te["skill_psth"][str(k)] for k in ks]
     xb = np.arange(len(ks))
     axB.bar(xb - 0.18, vp, 0.36, color="C2", label="vs persistence")
     axB.bar(xb + 0.18, vq, 0.36, color="C3", label="vs PSTH (near-oracle)")
@@ -65,16 +66,16 @@ def main():
     axB.set_xlabel("forecast horizon $k$ (bins)")
     axB.set_ylabel("forecasted-reconstruction skill")
     axB.legend(fontsize=7)
-    axB.set_title(f"Regularized best (L={b['config']['latent_dim']}, "
-                  f"$\\lambda$={b['config']['smooth_lambda']:g}): beats persistence, not PSTH")
+    axB.set_title(f"Selected model on test (L=4, $\\lambda$=$10^{{-3}}$): "
+                  f"beats persistence, loses to PSTH")
 
     fig.tight_layout()
     for ext in ("png", "pdf"):
         fig.savefig(os.path.join(FIGS, f"regularization.{ext}"), dpi=150)
     plt.close(fig)
     print(f"saved -> {FIGS}/regularization.png")
-    print(f"  best: L={b['config']['latent_dim']} lambda={b['config']['smooth_lambda']:g} "
-          f"S_persist={b['weighted_persist_skill']:+.4f}")
+    print(f"  selected on TEST: PLL {te['test_pll']:.3f} (ceil {te['pll_ceiling']:.3f}) "
+          f"S_persist {te['S_persist']:+.4f}")
     print(f"  vs persist k8/16/32: {vp[0]:+.3f}/{vp[1]:+.3f}/{vp[2]:+.3f}")
     print(f"  vs psth    k8/16/32: {vq[0]:+.3f}/{vq[1]:+.3f}/{vq[2]:+.3f}")
 
