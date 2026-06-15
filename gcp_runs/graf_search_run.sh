@@ -50,9 +50,11 @@ log "installing uv + deps (torch wheel is large; this takes a few min)..."
 gcloud compute ssh $(common) "$VM" --command='set -e; curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1; export PATH="$HOME/.local/bin:$PATH"; cd ~/experiment; uv venv .venv >/dev/null 2>&1; uv pip install --python .venv/bin/python -e . >/dev/null 2>&1; uv pip install --python .venv/bin/python scikit-learn matplotlib >/dev/null 2>&1; echo INSTALL_OK' >>"$LOG" 2>&1
 grep -q INSTALL_OK "$LOG" || { log "INSTALL FAILED (see $LOG); tearing down"; gcloud compute instances delete "$VM" $(common) -q >/dev/null 2>&1; exit 1; }
 
-# 5. launch detached
+# 5. launch detached. setsid fully detaches the process into a new session so the ssh
+#    channel closes cleanly (a plain `nohup ... & disown` left the channel open and hung the
+#    local orchestrator for some shards). -n: ssh does not read local stdin.
 log "launching: search --space $SPACE --shard $SHARD --n-shards $NSH --grid $GRID $QFLAG"
-gcloud compute ssh $(common) "$VM" --command="cd ~/experiment && export PATH=\"\$HOME/.local/bin:\$PATH\" && source .venv/bin/activate && nohup env PYTHONPATH=. python -m experiments.v1_graf.search --space $SPACE --shard $SHARD --n-shards $NSH --grid $GRID $QFLAG >run.log 2>&1 </dev/null & disown; sleep 2; echo LAUNCHED" >>"$LOG" 2>&1
+gcloud compute ssh $(common) --ssh-flag=-n "$VM" --command="cd ~/experiment && export PATH=\"\$HOME/.local/bin:\$PATH\" && source .venv/bin/activate && setsid env PYTHONPATH=. python -m experiments.v1_graf.search --space $SPACE --shard $SHARD --n-shards $NSH --grid $GRID $QFLAG >run.log 2>&1 </dev/null & sleep 2; echo LAUNCHED" >>"$LOG" 2>&1
 
 # 6. poll to completion ('[e]xperiments...' bracket-trick so pgrep never matches its own shell)
 RESJSON="search_${SPACE}_shard${SHARD}.json"

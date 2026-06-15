@@ -303,8 +303,8 @@ def merge(space: str) -> str:
         lines.append(f"> WARNING: {w}\n")
     for fn, err in bad_files:
         lines.append(f"> WARNING: unreadable shard {fn}: {err}\n")
-    lines += ["| rank | S_persist | S_psth(ref) | persist k8/k16/k32 | psth k8/k16/k32 | PLL/ceil | gate | L | E | lr | dyn_noise | n_basis |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines += ["| rank | S_persist | S_psth(ref) | persist k8/k16/k32 | psth k8/k16/k32 | PLL/ceil | gate | L | E | lr | dyn_noise | lambda | n_basis |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for i, r in enumerate(ranked_all[:25]):
         c = r["config"]
         dn = f"{c['dyn_noise']}/{c['dyn_noise_decay']}/{c['dyn_noise_fit_ref']}"
@@ -315,7 +315,7 @@ def merge(space: str) -> str:
             f"{sp[0]:+.3f}/{sp[1]:+.3f}/{sp[2]:+.3f} | {sq[0]:+.3f}/{sq[1]:+.3f}/{sq[2]:+.3f} | "
             f"{r.get('pll', float('nan')):.3f}/{r.get('pll_psth_ceiling', float('nan')):.3f} | "
             f"{'Y' if r['gate_pass'] else 'n'} | {c['latent_dim']} | "
-            f"{c['epochs']} | {c['lr']:g} | {dn} | {r.get('n_basis', '?')} |")
+            f"{c['epochs']} | {c['lr']:g} | {dn} | {c.get('smooth_lambda', 0):g} | {r.get('n_basis', '?')} |")
     if failed:
         lines.append(f"\n{len(failed)} failed configs:")
         for r in failed:

@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "report_m1", "figs")
 VID = os.path.join(HERE, "report_m1", "videos")
 BEST_JSON = os.path.join(HERE, "..", "..", "gcp_runs",
-                         "graf-search-single-xl-20260614-164113", "results", "best_single.json")
+                         "graf-search-single-reg-20260615-093426", "results", "best_single.json")
 BINS_PER_CYCLE = 16                       # 16 bins/cycle (10 ms bins)
 T0 = BINS_PER_CYCLE                        # forecast launches after the first cycle
 
