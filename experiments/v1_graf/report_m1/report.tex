@@ -11,8 +11,8 @@
 \usepackage{cleveref}
 \graphicspath{{figs/}}
 
-\title{Stabilizing online variational joint filtering on macaque V1:\\
-a readout scale fix, flow stability, and the multi-condition encoder}
+\title{Online variational joint filtering of macaque V1 single-trial dynamics:\\
+a forecast-reconstruction criterion and a curvature-regularized flow}
 \author{CatNip Lab}
 \date{\today}
 
@@ -24,85 +24,78 @@ a readout scale fix, flow stability, and the multi-condition encoder}
 \maketitle
 
 \begin{abstract}
-We apply stable Variational Joint Filtering (\svjf{}) -- an online, single-pass
-variational state-space learner with an \emph{unknown} readout -- to a streaming
-macaque V1 dataset (Graf et al.\ 2011) of drifting gratings. A first end-to-end run on
-all 72 grating directions failed: the leave-one-neuron predictive likelihood fell below a
-homogeneous-Poisson baseline and single-trial orientation decoding sat at chance, a
-\emph{multi-condition encoder collapse}. Diagnosing this exposed a separate, quantitative
-bug in the online readout: the CCIPCA warm-start seeded its principal vectors at
-\emph{scatter} scale ($\sim\!T\lambda$) while the streaming update converges to
-\emph{covariance} scale ($\lambda$), so the loading shrank by $\sim\!\sqrt{T}$ over
-training and the latent inflated. A one-line fix (divide the warm-start scatter by the
-sample count) pins the encoder-input variance and, on a single direction, yields a
-predictive likelihood at $\sim\!90\%$ of the stimulus-locked PSTH ceiling with a live
-free-run forecast. We then show that the closed-form square-root RLS flow over-fits the
-filtered transitions and produces a \emph{divergent} free-run within a few replay epochs,
-whereas a gradient-trained (SGD/Adam) flow stays stable; that the learned cycle is not a
-genuine attractor (pointwise Jacobian spectral radius $>1$ everywhere), which makes the
-free-run fragile; and that injecting a small, fit-gated, decaying-raised-sinusoid noise
-into the dynamics term restores a stable forecast across all of training. Finally,
-re-running the full multi-direction task with the scale fix substantially rescues the
-encoder collapse -- orientation decoding reaches $\sim\!14\times$ chance at 72 directions
--- but the flow-stabilization machinery that helps single directions \emph{trades off}
-against condition separation. We conclude that latent-scale control is the recurring
-lever for \svjf{} on real, low-rate Poisson data, and that the multi-condition encoder is
-only partially solved.
+We learn single-trial latent dynamics from streaming macaque V1 responses to a drifting
+grating with stable Variational Joint Filtering (\svjf{}): an online, single-pass
+state-space learner with an \emph{unknown} readout, estimated jointly by a scale-fixed
+candid covariance-free incremental PCA (CCIPCA) and a projection encoder. On a single
+grating direction (\ang{225}, $N{=}74$ well-tuned units, \SI{10}{ms} bins) the filtered,
+leave-one-neuron predictive likelihood meets or slightly exceeds the stimulus-locked PSTH
+ceiling -- \emph{with} observations, \svjf{} reconstructs held-out neurons as well as
+trial-averaging. We then ask the harder question of whether the learned dynamics
+\emph{forecast}: we free-run the flow from a time $t_0$ in a held-out trial (no
+observations after $t_0$), decode it to a predicted firing rate, and score that forecast
+against the held-out future spikes by a Poisson-deviance skill, versus two baselines --
+persistence and the stimulus-locked PSTH -- over half, one, and two grating cycles. A
+hyperparameter search over latent dimension, basis size, and training length shows the
+autonomous free-run beats persistence only marginally and \emph{loses to the PSTH at every
+horizon}; adding capacity does not help (a ceiling, not under-fitting). Inspecting the
+free-run revealed an under-regularized one-step map -- shrinkage toward the origin plus
+high-frequency chaos. We add a closed-form curvature penalty on the velocity field, which
+turns the jagged free-run into a smooth limit cycle (an \num{8}-fold drop in trajectory
+roughness) and improves held-out generalization, but does \emph{not} close the PSTH gap.
+The penalty thus cleanly separates two effects: a messy, over-fit flow (fixable) from a
+genuine property of stimulus-locked data -- that an autonomous free-run cannot beat
+trial-averaging. The loop runs in real time (\SI{0.3}{ms}/bin).
 \end{abstract}
 
 \section{Introduction}
 \svjf{} learns latent dynamics and a linear-Gaussian/Poisson readout jointly from a single
-streaming pass over observations \cite{zhao2020}. The ``stable'' additions relevant here
-are (i) a square-root (Potter) RLS dynamics learner, (ii) a warm-started, two-timescale
-online readout estimated by candid covariance-free incremental PCA (CCIPCA), and (iii) a
+streaming pass over observations \cite{zhao2020}. The additions used here are (i) a
+warm-started online readout estimated by CCIPCA at the correct (covariance) scale, (ii) a
 projection encoder that feeds the recognition network a subspace projection of the
-observation rather than the raw spikes. All three are backward-compatible; the defaults
-reproduce the original VJF.
+observation rather than the raw spikes, and (iii) a growing radial-basis-function (RBF)
+velocity flow; all are backward-compatible and default to the original VJF.
 
-The question we ask is whether \svjf{} can, online and with an unknown readout, recover
-interpretable single-trial dynamics from \emph{real} macaque V1 responses to drifting
-gratings -- and, in particular, whether one shared autonomous latent flow plus a learned
-readout can separate the 72 stimulus conditions. This report documents (a) the failure of
-the first full-task run and its diagnosis, (b) a quantitative readout bug uncovered in the
-process and its fix, (c) the dynamics-stability work needed to obtain a usable single-trial
-forecast, and (d) what does and does not transfer to the multi-condition setting.
+We study one drifting-grating direction in depth and ask a deliberately strict question:
+not merely whether \svjf{} reconstructs the spikes online, but whether its learned
+\emph{autonomous dynamics forecast} -- whether the free-running flow, decoded, predicts the
+\emph{future} spikes better than trivial baselines. We make that question the sole
+model-selection criterion (\cref{sec:criterion}), search for the best model under it, and
+report what the dynamics can and cannot do.
 
 \section{Dataset and task}
 We use the Graf et al.\ \cite{graf2011} anesthetized-macaque Utah-array recordings:
-72 equally spaced drifting-grating directions ($5^\circ$ spacing) $\times$ 50 trials
-$=3600$ trials, each \SI{2560}{ms} (first \SI{1280}{ms} the drifting grating, then blank).
-We use \texttt{array\_5}, the highest mean-rate array (\SI{10.4}{Hz}, 148 single units), the
-same array analyzed by vLGP \cite{vlgp}, binned at \SI{10}{ms}. The grating temporal frequency is
-\SI{6.25}{Hz}, so the response period is \SI{160}{ms} $=16$ bins. We keep neurons whose
-orientation tuning (sum of two von Mises bumps) fits with $R^2\!\ge\!0.75$, leaving $N=74$
-well-tuned units, and split 40 train / 10 test trials per direction.
+72 equally spaced drifting-grating directions (\ang{5} spacing) $\times$ 50 trials, each
+\SI{2560}{ms} (first \SI{1280}{ms} the drifting grating, then blank). We use
+\texttt{array\_5}, the highest mean-rate array (\SI{10.4}{Hz}, 148 single units), the same
+array analyzed by vLGP \cite{vlgp}, binned at \SI{10}{ms}. The grating temporal frequency is
+\SI{6.25}{Hz}, so the response period is \SI{160}{ms} $=16$ bins. As a fixed preprocessing
+step we keep neurons whose orientation tuning (sum of two von Mises bumps) fits with
+$R^2\!\ge\!0.75$, leaving $N=74$ well-tuned units, and study the strongest-response
+direction (\ang{225}). Its 50 trials are split, once and seed-fixed, into 30 train / 10
+validation / 10 test; the search selects on validation and the test trials are reserved for
+the figures here.
 
-\Cref{fig:data} shows the data for the strongest direction: a single-trial spike raster,
-the trial-averaged population rate -- which oscillates at the grating's \SI{6.25}{Hz} during
-the stimulus and decays after stimulus offset -- and the per-neuron PSTH. The units are
-sharply, bimodally orientation-tuned (two bumps $\sim\!180^\circ$ apart, with direction
-selectivity; \cref{fig:tuning}). This is a low-to-moderate SNR regime: a rank-$d$
-log-linear-Poisson fit to the stimulus-window PSTH gives an instantaneous Fisher-information
-SNR bound\footnote{\texttt{neuroFisherSNR} (\texttt{github.com/catniplab/neurofisherSNR}):
-how accurately the $d$-dim latent is estimable from the spikes of a $\lambda=\exp(Cx+b)$
-model.} of $\approx\!\SI{6.1}{dB}$ ($R^2\,0.75$) at $d{=}2$ and $\approx\!\SI{4.7}{dB}$
-($R^2\,0.66$) at $d{=}3$ -- comparable to the \SI{3}{dB} synthetic regime of the original
-\svjf{} study. Peak rates reach $\sim\!\SI{190}{Hz}$ (mean $\sim\!\SI{22}{Hz}$). Over the
-stimulus window the population traces a low-dimensional cyclic trajectory -- a noisy limit
-cycle in the leading PCA plane of the link-matched log-rate feature, oscillating at the
-grating frequency, with different directions tracing distinct loops (\cref{fig:pca}; the
-first three PCs explain $\approx\!50\%$ of the variance). This is the recurring structure
-the autonomous flow is meant to capture and the encoder to separate by direction.
+\Cref{fig:data} shows the data: a single-trial raster, the trial-averaged population rate
+(which oscillates at the grating's \SI{6.25}{Hz} during the stimulus and decays after
+offset), and the per-neuron PSTH. The units are sharply, bimodally orientation-tuned
+(\cref{fig:tuning}). This is a low-to-moderate SNR regime: a rank-$d$ log-linear-Poisson fit
+to the stimulus-window PSTH gives an instantaneous Fisher-information SNR
+bound\footnote{\texttt{neuroFisherSNR} (\texttt{github.com/catniplab/neurofisherSNR}): how
+accurately the $d$-dim latent is estimable from the spikes of a $\lambda=\exp(Cx+b)$ model.}
+of $\approx\!\SI{4.7}{dB}$ ($R^2\,0.66$) at $d{=}3$ -- comparable to the \SI{3}{dB} synthetic
+regime of the original \svjf{} study. Over the stimulus window the population traces a
+low-dimensional, noisy limit cycle at the grating frequency (\cref{fig:pca}); this cyclic
+structure is what the autonomous flow is meant to capture.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{data_overview.png}
-  \caption{Graf array 5, strongest direction ($225^\circ$, $N{=}74$ well-tuned units),
-    over one trial (stimulus window shaded). \textbf{Top:} single-trial raster (neurons
-    ordered by PSTH peak time). \textbf{Middle:} trial-averaged population rate -- the
-    \SI{6.25}{Hz} grating drive is visible during the stimulus and decays after offset.
-    \textbf{Bottom:} per-neuron trial-averaged PSTH. The rough Fisher-information SNR bound
-    is $\approx\!\SI{4.7}{dB}$ ($R^2\,0.66$, $d{=}3$).}
+  \caption{Graf array 5, direction \ang{225} ($N{=}74$ well-tuned units), over one trial
+    (stimulus window shaded). \textbf{Top:} single-trial raster (neurons ordered by PSTH
+    peak time). \textbf{Middle:} trial-averaged population rate -- the \SI{6.25}{Hz} grating
+    drive during the stimulus, decaying after offset. \textbf{Bottom:} per-neuron
+    trial-averaged PSTH. Fisher-information SNR bound $\approx\!\SI{4.7}{dB}$ at $d{=}3$.}
   \label{fig:data}
 \end{figure}
 
@@ -111,11 +104,8 @@ the autonomous flow is meant to capture and the encoder to separate by direction
   \includegraphics[width=\textwidth]{tuning_curves.png}
   \caption{Orientation tuning for the six best-fit well-tuned neurons (gray: mean
     stimulus-window rate vs direction; red: the sum-of-two-von-Mises fit). The per-panel
-    $R^2$ is the \emph{tuning-fit} $R^2$ -- the goodness of the double-von-Mises fit to the
-    direction-tuning curve, which defines the well-tuned criterion ($R^2\!\ge\!0.75$) -- and
-    is distinct from the predictive (PLL) or free-run forecast $R^2$ reported elsewhere.
-    The bimodal profile (two bumps $\sim\!180^\circ$ apart, with direction selectivity) is
-    the structure the readout must separate.}
+    $R^2$ is the \emph{tuning-fit} $R^2$ that defines the well-tuned criterion
+    ($R^2\!\ge\!0.75$), distinct from the predictive (PLL) or forecast skill reported later.}
   \label{fig:tuning}
 \end{figure}
 
@@ -124,14 +114,13 @@ the autonomous flow is meant to capture and the encoder to separate by direction
   \includegraphics[width=\textwidth]{pca_traj.png}
   \caption{PCA of the population log-rate feature over the stimulus window (fit on the
     per-direction trial averages). \textbf{Left:} the PC1--PC2 trajectory for the strongest
-    direction (colored by time within the trial) -- a noisy limit cycle. \textbf{Middle:}
-    the three PC scores over time, oscillating at the grating frequency. \textbf{Right:}
-    per-direction trajectories (six directions, consistent circular color scheme): distinct
-    loops carry the orientation information.}
+    direction (colored by time) -- a noisy limit cycle. \textbf{Middle:} the three PC scores
+    over time, oscillating at the grating frequency. \textbf{Right:} per-direction
+    trajectories (circular color scheme): distinct loops carry the orientation information.}
   \label{fig:pca}
 \end{figure}
 
-\section{\svjf{} on streaming V1}
+\section{Method}
 \paragraph{Forward step and learning.}
 Each bin maximizes one filtering-step ELBO,
 \begin{equation}
@@ -140,289 +129,208 @@ Each bin maximizes one filtering-step ELBO,
   + \underbrace{H\big(q(x_t)\big)}_{\text{entropy}},
   \label{eq:elbo}
 \end{equation}
-where $q_t=q(x_t)=\mathcal N(\mu_t,\Sigma_t)$ is the recognition posterior, $\tilde x_t$ a
-reparameterized sample from it, $p(y_t\mid x_t)$ a Poisson likelihood with rate
-$\lambda_t=\exp(C x_t + b)$, and the dynamics term is Gaussian,
-$\log p(x_t\mid \tilde x_{t-1}) = \log\mathcal N\big(x_t;\, f(\tilde x_{t-1}),\, Q\big)$,
-with the RBF velocity flow $x_t = \tilde x_{t-1} + f(\tilde x_{t-1})$. Parameters are
-learned by a hybrid scheme per step: a stochastic-gradient step on \cref{eq:elbo} (which
-trains the recognition network, and the flow weights when the gradient flow learner is
-used) plus closed-form non-gradient updates of the likelihood noise and, for the RLS
-learners, the flow weights. The latent state is reset to the prior at each trial onset
-(per-trial reset); orientation is therefore not in the initial state and must be injected
-each bin by the encoder.
+where $q_t=\mathcal N(\mu_t,\Sigma_t)$ is the recognition posterior, $\tilde x_t$ a
+reparameterized sample, $p(y_t\mid x_t)$ a Poisson likelihood with rate
+$\lambda_t=\exp(Cx_t+b)$, and the dynamics term is Gaussian about the RBF velocity flow
+$x_t=\tilde x_{t-1}+f(\tilde x_{t-1})$. Parameters are learned by a hybrid per-step scheme:
+a stochastic-gradient (Adam) step on \cref{eq:elbo} (recognition and the flow weights) plus
+closed-form non-gradient updates of the likelihood noise. The latent is reset to the prior
+at each trial onset (per-trial reset).
 
-\paragraph{Unknown readout (projection encoder).}
-The loading $(C,b)$ is estimated online by candid covariance-free incremental PCA
-(CCIPCA) on a causal, link-matched feature $\tilde g(y)=\log(\nu_t + c)$, where $\nu_t$ is
-a leaky integrator of the counts and the running mean of $\tilde g$ is the bias $b$.
-CCIPCA maintains $m$ vectors $\{v_i\}$ that converge to $\lambda_i e_i$ (eigenvalue
-$\times$ eigenvector of the feature covariance $\Sigma_g=\E[(\tilde g-b)(\tilde g-b)^\trp]$);
-with $r^{(1)}_t=\tilde g(y_t)-b$ and rate $\eta_t=1/t$, for $i=1,\dots,m$,
-\begin{align}
-  v_i &\leftarrow (1-\eta_t)\,v_i + \eta_t\,\big(r^{(i)\trp}_t\hat v_i\big)\,r^{(i)}_t,
-     \qquad \hat v_i = v_i/\norm{v_i}, \label{eq:hebb}\\
-  r^{(i+1)}_t &= r^{(i)}_t - \big(r^{(i)\trp}_t\hat v_i\big)\,\hat v_i. \label{eq:deflate}
-\end{align}
-At convergence $\norm{v_i}=\lambda_i$, and the loading column is
-$c_i=\hat v_i\sqrt{\norm{v_i}}=e_i\sqrt{\lambda_i}$, which whitens the recognition input
-(\cref{sec:scalefix}). The recognition reads the subspace projection
-$\Renc = C^{+}(\tilde g(y)-b)$ rather than the raw spikes; $(C,b)$ is Procrustes-anchored
-into the decoder every $K$ steps. CCIPCA is decoupled from the ELBO gradient, which
-collapses under sparse low-rate Poisson. \emph{The warm start must seed $\{v_i\}$ at the
-same covariance scale ($\norm{v_i}=\lambda_i$) that \cref{eq:hebb} converges to}; seeding
-at scatter scale ($\norm{v_i}\approx T\lambda_i$) is the bug fixed in \cref{sec:scalefix}.
+\paragraph{Unknown readout (scale-fixed CCIPCA + projection encoder).}
+The loading $(C,b)$ is estimated online by CCIPCA on a causal, link-matched feature
+$\tilde g(y)=\log(\nu_t+c)$, where $\nu_t$ is a leaky integrator of the counts and the
+running mean of $\tilde g$ is $b$. CCIPCA maintains $m$ vectors $\{v_i\}$ converging to
+$\lambda_i e_i$ (eigenvalue $\times$ eigenvector of $\Sigma_g=\E[(\tilde g-b)(\tilde
+g-b)^\trp]$); the loading column $c_i=\hat v_i\sqrt{\norm{v_i}}=e_i\sqrt{\lambda_i}$ whitens
+the recognition input, $\cov(\Renc)=\Lambda^{-1/2}U^\trp\Sigma_g U\Lambda^{-1/2}=\identity$.
+The warm start must seed $\{v_i\}$ at the same \emph{covariance} scale ($\norm{v_i}=\lambda_i$)
+the streaming update converges to; seeding at \emph{scatter} scale ($\norm{v_i}\approx
+T\lambda_i$) makes the loading shrink by $\sim\!\sqrt T$ over training and the latent inflate.
+Dividing the warm-start scatter by the sample count pins the loading and $\cov(\Renc)$ across
+all of training (\cref{fig:scalefix}). The recognition reads $\Renc=C^{+}(\tilde g(y)-b)$;
+$(C,b)$ is Procrustes-anchored into the decoder every $K$ steps.
+
+\paragraph{Growing RBF flow and a curvature regularizer.}
+\label{sec:curv}
+The velocity is $f(x)=\sum_j \phi_j(x)\,W_{j,:}$ with Gaussian RBFs
+$\phi_j(x)=\exp(-\norm{x-c_j}^2/2w_j^2)$; the basis is seeded by $k$-means on the warm-up
+buffer and grown by novelty (a new center, resource-allocating weight init, where coverage
+falls below threshold). Trained by gradient alone, this one-step map is under-regularized:
+its free-run shrinks toward the origin with high-frequency chaos (\cref{sec:reg}). We add a
+closed-form penalty on the field \emph{curvature}, which suppresses high-frequency wiggle
+while leaving an affine/rotational field (a limit cycle) unpenalized. With
+$\partial^2\phi_j/\partial x\partial x^\trp=\phi_j\big[(x-c_j)(x-c_j)^\trp/w_j^4 -
+I/w_j^2\big]$,
+\begin{equation}
+  H_a(x)=\frac{\partial^2 f_a}{\partial x\,\partial x^\trp}
+        =\sum_j W_{j,a}\,\phi_j(x)\Big[\tfrac{(x-c_j)(x-c_j)^\trp}{w_j^4}-\tfrac{I}{w_j^2}\Big],
+  \qquad
+  R_2(x)=\sum_a \norm{H_a(x)}_F^2,
+  \label{eq:curv}
+\end{equation}
+and the gradient flow minimizes $\mathcal{L}+\lambda\,\E_t R_2(x_t)$, evaluated at the
+filtered mean each step. $\lambda{=}0$ recovers the original ELBO; the reconstruction,
+recognition, and closed-form updates are untouched.
+
+\paragraph{Train/validation/test split and multi-epoch online training.}
+The stream opens with a coverage warm-up (dynamics off) over which the readout is fit and
+the latent means buffered; the RBF flow is then initialized once and turned on. The 30 train
+trials are replayed for $E$ epochs in a randomized order, with the posterior reset at each
+trial onset, so the readout and flow keep adapting while no information leaks across trials.
+Each epoch is one strictly causal per-sample pass (no minibatching). Evaluation freezes the
+model and runs the held-out trials.
 
 \begin{algorithm}[t]
-\caption{\svjf{} on V1, one streaming pass (per-trial reset), with the fixed-scale CCIPCA
-  warm-start, the growing RBF flow, and the optional denoising noise. Differs from the
-  original \svjf{} loop \cite{zhao2020} only in the boxed lines.}
+\caption{\svjf{} on V1, one streaming pass (per-trial reset), with the scale-fixed CCIPCA
+  warm-start, the growing RBF flow, and the curvature penalty. Differs from the original
+  \svjf{} loop \cite{zhao2020} only in the boxed lines.}
 \label{alg:svjf}
 \begin{algorithmic}[1]
-\Require trials $\{y_{1:T_k}\}_k$; warm-up trials $W$; refresh $K$; smoothing $\tau$ ($\alpha{=}1/\tau$); noise $(\sigma_0,P,\gamma,\sigma_{\mathrm{ref}})$
+\Require trials; warm-up trials $W$; refresh $K$; smoothing $\tau$; curvature weight $\lambda$
 \State init readout state $\nu,b,\{v_i\}$; posterior $q\gets\varnothing$; buffer $\mathcal B\gets[\,]$
-\Statex \textit{Warm-up (first $W$ trials, dynamics off): collect latent means, fit the readout}
+\Statex \textit{Warm-up (first $W$ trials, dynamics off): fit the readout, buffer latent means}
 \For{each bin $y_t$ in the first $W$ trials}
-  \State $\nu\gets(1-\alpha)\nu+\alpha y_t$;\ \ $\tilde g\gets\log(\nu+c)$;\ \ update mean $b$
-  \State CCIPCA step on $\tilde g-b$ \Comment{\cref{eq:hebb,eq:deflate}}
-  \State $\mu_t,q\gets\textsc{VjfFilter}(y_t,\,C^{+}(\tilde g-b),\,q;\ \text{dynamics off})$; append $\mu_t$ to $\mathcal B$
+  \State update $\nu,b$; CCIPCA step on $\tilde g-b$;\ \ filter $y_t$ (dynamics off); append $\mu_t$ to $\mathcal B$
 \EndFor
-\State \fbox{$v_i\gets \lambda_i\,e_i$ from the \emph{covariance} (not scatter) of $\mathcal B$'s feature window}\Comment{scale fix, \cref{sec:scalefix}}
-\State seed RBF centers by $k$-means on $\mathcal B$ (small width $\rho$); turn the dynamics on
-\Statex \textit{Online (remaining trials/epochs, dynamics on); reset $q\gets\varnothing$ each trial onset}
+\State \fbox{$v_i\gets \lambda_i e_i$ from the \emph{covariance} (not scatter) of $\mathcal B$}\Comment{scale fix}
+\State seed RBF centers by $k$-means on $\mathcal B$; turn the dynamics on
+\Statex \textit{Online (train trials $\times E$ epochs, randomized; reset $q$ each trial onset)}
 \For{each bin $y_t$}
-  \State $\tilde g,\,\pi\gets$ feature and projection $C^{+}(\tilde g-b)$ of $y_t$
-  \State \fbox{$x^{\mathrm{dyn}}\gets \tilde x_{t-1} + \sigma(t)\,\xi,\ \xi\sim\mathcal N(0,I)$}\Comment{denoising input, \cref{eq:noise}}
-  \State $\mu_t,q\gets\textsc{VjfFilter}(y_t,\pi,q;\ \text{flow predicts from }x^{\mathrm{dyn}})$ \Comment{recognition + flow update}
-  \State \fbox{\textbf{if} novelty$(\tilde x_t)<\theta_{\mathrm{grow}}$: add an RBF center at $\tilde x_t$ with RAN weight init}\Comment{growing basis}
-  \State clamp $\log\Sigma_t\ge\log\Sigma_{\min}$; on divergence reset $q$ and repeat last mean
-  \If{$t\bmod K=0$ and not frozen} Procrustes-refresh $(C,b)$ into the decoder \EndIf
+  \State $\mu_t,q\gets\textsc{VjfFilter}(y_t,\,C^{+}(\tilde g-b),\,q)$ \Comment{recognition + flow}
+  \State \fbox{gradient step on $\mathcal L+\lambda\,R_2(\mu_t)$}\Comment{curvature penalty, \cref{eq:curv}}
+  \State \fbox{\textbf{if} novelty$(\tilde x_t)<\theta_{\mathrm{grow}}$: add an RBF center (RAN weight init)}\Comment{growing basis}
+  \If{$t\bmod K=0$} Procrustes-refresh $(C,b)$ into the decoder \EndIf
 \EndFor
 \end{algorithmic}
 \end{algorithm}
 
-\paragraph{Metrics.}
-\emph{Leave-one-neuron-out predictive log-likelihood} (PLL, bits/spike; \cite{vlgp}, Eq.~39):
-for each held-out neuron $n$, filter the trial from the \emph{other} neurons' projection
-and score $\lambda_{:,n}$ against counts, relative to a homogeneous-Poisson baseline
-$\bar y$; $0$ equals the mean-rate baseline. \emph{Orientation decode accuracy}:
-cross-validated multinomial logistic regression of the 72-way label from the per-trial
-latent summary (chance $1/72=0.014$). \emph{Free-run forecast $R^2$}: affine-aligned $R^2$
-of a $k$-step free run of the learned flow against the inferred latent path. The
-\emph{PSTH ceiling} is the leave-one-neuron PLL of a stimulus-locked trial-averaged
-predictor.
-
-\section{The first run failed: a multi-condition encoder collapse}
-The full 72-direction run (L=3, $N=74$, one shared autonomous flow) was a clean NO-GO:
-PLL $=-3.50$ bits/spike (worse than baseline), single-trial decode $=0.014$ (chance), even
-though the autonomous flow learned a cycle (forecast $R^2=0.31$) and the loop ran in real
-time (\SI{2.72}{ms}/bin, zero divergences). A decode cascade localized where orientation is
-lost: it is strongly present in the raw counts ($0.34$) and the log-rate feature ($0.30$),
-already reduced by the best rank-3 subspace ($0.23$), halved again at the encoder
-\emph{input} $\Renc$ ($0.13$; the online CCIPCA subspace sat $46.5^\circ$ off the ideal
-PCA-3 subspace), and finally collapses to chance at the recognition \emph{output}. A
-no-dynamics control decoded no better, exonerating the flow: the failure is a Poisson
-\emph{encoder} collapse, compounded by a suboptimal readout subspace.
-
-\section{A quantitative readout bug: the CCIPCA scale fix}
-\label{sec:scalefix}
-Diagnosing the readout exposed a scale inconsistency in the online estimator. The streaming
-CCIPCA update is a running mean whose fixed point is $\|v_i\| \to \lambda_i$, the variance
-along principal component $i$; with $C=U\Lambda^{1/2}$ the pseudo-inverse whitens the
-encoder input,
-\begin{equation}
-\cov(\Renc) = \Lambda^{-1/2}U^\trp\,\Sigma_g\,U\Lambda^{-1/2} = \identity,
-\qquad \Sigma_g = U\Lambda U^\trp .
-\end{equation}
-But the warm start seeded the vectors from the \emph{scatter} matrix
-($\|v_i\| \approx T\lambda_i$, $T$ the warm-up window), a factor $T$ too large. Over
-training $\|v\|$ migrates from $T\lambda$ down toward $\lambda$; since the number of stream
-steps is $\ll T^2$, it never arrives. As $\|v\|$ shrinks, $C$ shrinks ($\propto\sqrt{\|v\|}$),
-$C^{+}$ grows, and the latent inflates to keep $Cx$ matching the data: a latent-scale
-inflation in which the running spread grows $0.07\to0.35$ over 50 epochs and the
-nearest-RBF-center distance grows $\sim\!27\times$. The fix is one line:
-divide the warm-start scatter by the sample count so the seed matches the streaming fixed
-point. On stationary data the loading norm and $\cov(\Renc)$ are then pinned across all of
-training (Fig.~\ref{fig:scalefix}); with the bug they drift by an order of magnitude.
+\paragraph{The forecast-reconstruction criterion.}
+\label{sec:criterion}
+The sole model-selection metric is \emph{future forecasted reconstruction}. From many start
+phases $t_0$ in a held-out trial we free-run the flow with no observations after $t_0$,
+decode it to a rate, and score the forecast against the future spike counts by the Poisson
+deviance $D=2\sum[n\log(n/\lambda)-(n-\lambda)]$ over $k=8,16,32$ bins (half, one, two
+grating cycles). We report the skill $\mathrm{skill}_k=1-D_{\mathrm{model}}(k)/D_{\mathrm{base}}(k)$
+relative to two baselines: \emph{persistence} (hold the model's $t_0$ rate) and the
+stimulus-locked \emph{PSTH} (the train trial-average at each absolute bin); the pre-declared
+selection score is $S=0.5\,\mathrm{skill}_8+0.3\,\mathrm{skill}_{16}+0.2\,\mathrm{skill}_{32}$
+versus persistence, gated by a decent filtered reconstruction. Scoring the decoded rate
+against the observed future spikes -- not a latent-space $R^2$ -- removes the affine-overfit
+loophole of self-referential latent metrics. We additionally report the filtered
+\emph{leave-one-neuron} predictive log-likelihood (PLL, bits/spike; \cite{vlgp}) against the
+PSTH-ceiling PLL, and per-bin wall-clock.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.8\textwidth]{scale_fix.png}
   \caption{The CCIPCA warm-start scale fix on stationary Gaussian data (true variances
-    $\lambda=[4,1]$). \textbf{Left:} the leading PCA-vector norm $\|v_1\|$. The scatter
-    seed (red) starts $\sim\!T$ too large and drifts down for the entire run; the
-    covariance seed (blue) sits at the true $\lambda_1$. \textbf{Right:} the encoder-input
-    variance $\cov(\Renc)$ migrates from $1/T$ toward 1 under the bug (red) but is pinned at
-    $1$ by the fix (blue). The drifting loading is what inflates the \svjf{} latent.}
+    $\lambda=[4,1]$). \textbf{Left:} the leading PCA-vector norm $\norm{v_1}$. The scatter
+    seed (red) starts $\sim\!T$ too large and drifts down for the entire run; the covariance
+    seed (blue) sits at the true $\lambda_1$. \textbf{Right:} the encoder-input variance
+    $\cov(\Renc)$ is pinned at $1$ by the fix (blue) but migrates under the bug (red). The
+    drifting loading is what inflates the \svjf{} latent.}
   \label{fig:scalefix}
 \end{figure}
 
-\section{Single-direction dynamics: flow stability and denoising}
-With the scale fix in place we validate the machinery on a single direction
-($225^\circ$, strongest response), replaying its 40 train trials over $E$ epochs with
-per-trial reset and evaluating leave-one-neuron PLL and the free-run forecast on 10
-held-out trials. PLL reaches $\sim\!0.66$ bits/spike, about $90\%$ of the PSTH ceiling
-($0.73$); the model captures stimulus-locked structure though it does not yet beat the
-trial-averaged predictor.
+\section{Results}
+\paragraph{Reconstruction reaches the PSTH ceiling.}
+With observations, \svjf{} reconstructs held-out neurons as well as trial-averaging: the
+filtered leave-one-neuron PLL on the held-out trials is \num{0.67}--\num{0.72} bits/spike,
+at or slightly above the stimulus-locked PSTH ceiling (\num{0.64}--\num{0.68}, depending on
+the split). Reconstruction is therefore not the bottleneck, and every searched configuration
+clears the reconstruction gate. The question is whether the \emph{dynamics} add anything
+beyond this.
 
-\paragraph{The RLS flow over-fits into a divergent free-run.}
-The square-root RLS flow attains an excellent forecast within one epoch
-($R^2\!\approx\!0.8$) but, under replay, over-solves the (observation-corrected) filtered
-transitions and the autonomous free-run \emph{diverges permanently} by epoch 8. A
-gradient-trained (SGD/Adam) flow does not wreck the warm-started field this way: its
-free-run stays alive (if erratic) across all 50 epochs. We therefore adopt the SGD/Adam
-flow for this regime. We further give the growing basis a non-zero,
-resource-allocating weight init (the new center takes the current flow error at its
-location), since SGD cannot fill a zero-weight grown center fast enough.
+\paragraph{The autonomous free-run beats persistence but not the PSTH; capacity does not
+help.} Selecting on the forecast-reconstruction score over a search of latent dimension
+($L\in\{3,4,5,6\}$), RBF budget (up to \num{3200} centers, growing as $\sim\!2^L$), training
+length ($E\in\{20,\dots,200\}$), learning rate and denoising, the best free-run beats
+persistence only marginally ($S\approx{+}0.03$: it reduces the forecast Poisson deviance by
+$\sim\!3\%$ relative to holding the $t_0$ rate) and \emph{loses to the stimulus-locked PSTH
+at every horizon} ($\mathrm{skill}_k$ vs.\ PSTH $\approx{-}0.03$ to ${-}0.04$;
+\cref{fig:reg}B). Crucially, this is a ceiling and not under-fitting: raising the latent
+dimension to $L{=}6$, the basis to thousands of centers, or training to 200 epochs does
+\emph{not} improve the forecast (the largest models score near zero), and the per-horizon
+profile is flat across half, one, and two cycles. For a stimulus-locked grating the PSTH is a
+phase-aware, near-oracle predictor of a held-out trial -- it ``knows'' the rate at every
+future bin -- whereas the autonomous flow must propagate the phase from $t_0$ through its
+learned field and accumulates error. That \emph{filtered} reconstruction matches the PSTH
+while the \emph{forecast} does not precisely measures the forecastable structure the
+autonomous dynamics fail to carry.
 
-\paragraph{The cycle is not an attractor, so the free-run is fragile.}
-Instrumenting the gradient flow shows the forecast does not converge: it peaks early
-($\sim\!0.7$), collapses mid-training, and partially recovers. None of the gross signals
-(velocity magnitude, weight norm, latent spread) changes at the collapse; the diagnostic
-is the flow-map Jacobian spectral radius, which is $>1$ \emph{everywhere}
-(1.0--1.5, peaks up to 5), including when the forecast is good. The learned ``cycle'' is
-locally expansive and has no stable attracting orbit; the free-run tracks the data only
-while the field transiently aligns, so small gradient-driven changes flip it between
-tracking and wandering off (Fig.~\ref{fig:collapse}).
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\textwidth]{collapse_probe.png}
-  \caption{Why the free-run is fragile (one \texttt{adam/grow} L=4 run, dense checkpoints).
-    The forecast peaks, collapses mid-training, and partially recovers (top-left), yet none
-    of the gross signals -- velocity magnitude, flow-weight norm, latent spread -- changes
-    at the collapse. The diagnostic is the flow-map Jacobian spectral radius (top-right),
-    which is $>1$ (dotted line) \emph{everywhere}, including when the forecast is good: the
-    learned cycle is locally expansive, not an attractor, so the free-run is a knife-edge.}
-  \label{fig:collapse}
-\end{figure}
-
-\paragraph{Denoising noise restores a stable forecast.}
-We perturb only the latent that the dynamics term of \cref{eq:elbo} feeds to the flow,
-training it to map off-cycle states back onto the trajectory. The flow predicts from a
-noised previous sample $\tilde x_{t-1}+\sigma(t)\,\xi$, so the dynamics term becomes
-\begin{equation}
-  \E_{q(x_t)}\,\E_{\xi\sim\mathcal N(0,I)}
-  \;\log\mathcal N\big(x_t;\; f(\tilde x_{t-1}+\sigma(t)\,\xi),\; Q\big),
-  \label{eq:denoise}
-\end{equation}
-with a decaying-raised-sinusoid, fit-gated schedule
-\begin{equation}
-  \sigma(t) = \sigma_0\,
-  \underbrace{\gamma^{\,t/P}}_{\text{decay}}\;
-  \underbrace{\tfrac12\big(1-\cos\tfrac{2\pi t}{P}\big)}_{\text{raised sinusoid, period }P}\;
-  \underbrace{\exp\!\big(-\hat\rho_t/\sigma_{\mathrm{ref}}^2\big)}_{\text{fit gate}},
-  \label{eq:noise}
-\end{equation}
-where $\hat\rho_t$ is the running one-step dynamics residual variance (the state-noise
-estimate $Q$). The gate $\to 0$ while the flow underfits ($\hat\rho_t\gg\sigma_{\mathrm{ref}}^2$),
-so a flow that cannot yet predict the clean transition is not perturbed; as it fits, the
-gate opens. Reconstruction, recognition, and the closed-form readout/flow updates all use
-the clean $\tilde x_{t-1}$, so the perturbation is confined to \cref{eq:denoise}. Every
-noise amplitude we tried eliminates the collapse: the free-run holds $R^2\approx 0.5$--$0.6$
-across all of training, versus the no-noise trench (Fig.~\ref{fig:flow}). The injection is
-default-off ($\sigma_0{=}0$) and leaves the baseline ELBO unchanged.
-
-\paragraph{Forecast horizon.}
-Launching the stabilized flow as a free run from successive phases of a held-out trial's
-inferred cycle, the prediction follows the latent for roughly a cycle before the still
-imperfect flow's error accumulates and it relaxes toward a slow drift
-(\cref{fig:forecast}); the horizon is similar across start phases, consistent with the
-modest whole-trial forecast $R^2\approx0.4$.
+\paragraph{A curvature penalty turns a jagged flow into a smooth cycle.}
+\label{sec:reg}
+Inspecting the best free-run exposed an under-regularized one-step map: the autonomous
+trajectory shrinks toward the origin while jittering at high frequency (the gradient-trained
+flow with a large basis memorizes per-bin spike noise into the velocity field). The
+curvature penalty of \cref{eq:curv} fixes this directly. As $\lambda$ increases, the velocity
+field's mean curvature falls two orders of magnitude and the free-run trajectory roughness
+(mean second difference) drops $\sim$\num{8}-fold, while the forecast skill holds or slightly
+rises through $\lambda\!\sim\!10^{-3}$ before over-regularization flattens the field toward
+persistence (\cref{fig:reg}A); $\lambda\!\gtrsim\!1$ destabilizes the gradient step. At the
+selected $\lambda{=}10^{-3}$ the held-out free-run is a smooth trajectory that tracks the
+trial-averaged cycle for the first part of the horizon and then relaxes inward
+(\cref{fig:freerun}), in contrast to the jagged collapse without the penalty. The penalty
+also improves test-set generalization (the held-out forecast skill rises relative to the
+unregularized model). It does \emph{not}, however, close the PSTH gap: the smoothed free-run
+still loses to trial-averaging. The penalty thus disentangles two distinct issues -- a messy,
+over-fit flow (which it fixes, yielding interpretable dynamics) from a genuine property of
+stimulus-locked data, that an autonomous free-run cannot beat the trial average.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\textwidth]{forecast_slices.png}
-  \caption{Free-run forecasts (solid, colored by start time) launched at six successive
-    cycle phases of a held-out trial, over the inferred latent path (dashed gray), per
-    latent dimension. Each forecast tracks the latent briefly, then relaxes as error
-    accumulates -- the limited but non-trivial predictive horizon of the learned flow.}
-  \label{fig:forecast}
+  \includegraphics[width=\textwidth]{regularization.png}
+  \caption{\textbf{A:} the curvature penalty smooths the one-step map (dir \ang{225}, $L{=}4$,
+    \num{1600} centers). As $\lambda$ rises the field curvature $R_2$ (red) and the free-run
+    trajectory roughness (blue) collapse, while the forecast skill vs persistence (green,
+    right axis) holds then peaks near $\lambda\!\sim\!10^{-3}$; $\lambda\!\ge\!1$ (off-axis)
+    destabilizes the SGD. \textbf{B:} the regularized best model's forecasted-reconstruction
+    skill by horizon (half/one/two cycles): it beats persistence (green) but loses to the
+    stimulus-locked, phase-aware PSTH (red) at every horizon -- the ceiling that neither
+    capacity nor smoothing closes.}
+  \label{fig:reg}
 \end{figure}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\textwidth]{noise_sweep.png}
-  \caption{Free-run forecast $R^2$ over training for the SGD growing-basis flow at L=4.
-    Without noise (blue) the forecast collapses to $0$ for epochs 12--40; every
-    decaying-raised-sinusoid noise variant holds a stable $0.5$--$0.65$ across all epochs.
-    The denoising noise turns a non-attracting, knife-edge flow into a stable one.}
-  \label{fig:flow}
+  \includegraphics[width=0.82\textwidth]{forecast_3d.png}
+  \caption{Held-out free-run forecast of the regularized model ($L{=}4$, \num{1600} RBF,
+    $\lambda{=}10^{-3}$), latent projected to its first three PCs (a frame from the rotating
+    video). \textbf{Gold:} the trial-averaged latent -- the high-SNR reference cycle.
+    \textbf{Teal:} the single-trial filtered latent (with spikes). \textbf{Crimson:} the
+    autonomous free-run launched at the end of the first cycle (star), with \emph{no}
+    observations after $t_0$. The curvature penalty yields a smooth free-run that tracks the
+    cycle initially and then relaxes inward (a smooth contracting flow) -- not the
+    high-frequency collapse of the unregularized field.}
+  \label{fig:freerun}
 \end{figure}
 
-\section{Multi-direction: the encoder rescue and a stabilization trade-off}
-Re-running the full multi-condition task (arms differing only in the readout/flow stack;
-one shared autonomous flow, per-trial reset) shows that the scale fix substantially
-rescues the original encoder collapse. With the scale-fixed original flow
-(\texttt{srrls\_base}), orientation decoding is well above chance and its chance-ratio
-\emph{grows} with the number of directions, reaching $13.8\times$ chance at 72 directions
-(decode $0.19$ vs chance $0.014$); the encoder no longer collapses (Table~\ref{tab:multidir},
-Fig.~\ref{fig:multidir}).
-
-The dynamics-stabilization machinery that was essential for the single direction does not
-overturn this. We compare \texttt{srrls\_base} against the previous full stack
-(\texttt{sgd\_grow\_noise}: SGD growing flow $+$ denoising noise) and a refined stack
-(\texttt{sgd\_grow\_refined}: a larger, smaller-width basis with harder-annealed, fit-gated
-noise). The refinements help the dynamics arm -- they fill the basis as intended (the grown
-basis reaches its full $400$ centers at 8--24 directions, versus the previous run, which
-under-grew to $78$--$118$), and they raise decode from $3.5\times$ to $4.6\times$ chance
-and PLL from $0.857$ to $0.869$ -- but \texttt{srrls\_base} remains the strongest arm for
-both condition separation ($8.0\times$ chance) and reconstruction (PLL $0.903$). The
-dynamics arms win only the (single-trial, noisy) forecast. The trade-off therefore
-persists across the refinement: a single shared autonomous flow asked both to stabilize a
-cycle and to preserve the direction information the encoder injects does the former at the
-expense of the latter. \emph{The scale fix is the multi-condition lever; the dynamics
-stabilization is a single-direction tool that competes with condition separation here.}
-
-\begin{table}[t]
-  \centering
-  \caption{Multi-direction arms (L=3, mean over direction counts and seeds). Decode is
-    reported as a multiple of chance ($1/n_{\mathrm{dir}}$). Best per column in bold;
-    \texttt{srrls\_base} is the scale fix alone, the other two add the dynamics stack.}
-  \label{tab:multidir}
-  \begin{tabular}{lccc}
-    \toprule
-    arm & decode ($\times$chance) & PLL (bits/spk) & forecast $R^2$ \\
-    \midrule
-    \texttt{srrls\_base} (scale fix only) & \textbf{8.0} & \textbf{0.903} & 0.147 \\
-    \texttt{sgd\_grow\_noise} (full stack) & 3.5 & 0.857 & \textbf{0.415} \\
-    \texttt{sgd\_grow\_refined} (refined)  & 4.6 & 0.869 & 0.389 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\textwidth]{scan_multidir_summary.png}
-  \caption{Multi-direction scan (L=3, mean over seeds) vs direction count, for the scale
-    fix alone (\texttt{srrls\_base}), the full dynamics stack (\texttt{sgd\_grow\_noise}),
-    and the refined stack (\texttt{sgd\_grow\_refined}). \textbf{Left:} decode accuracy
-    relative to chance ($1/n_{\mathrm{dir}}$) rises with direction count and is strongest
-    for \texttt{srrls\_base}; the refined stack improves on the original dynamics arm but
-    does not catch it. \textbf{Middle:} leave-one-neuron PLL. \textbf{Right:} single-trial
-    free-run forecast (noisy), where the dynamics arms lead. The dynamics stabilization
-    helps the forecast but trades off decode/PLL.}
-  \label{fig:multidir}
-\end{figure}
+\paragraph{Real-time.}
+The per-bin cost of the online learning step is \SI{0.3}{ms} (frozen inference
+\SI{0.1}{ms}), measured on an M-series CPU at \num{1600} RBF centers -- about \num{30}$\times$
+inside the \SI{10}{ms} bin, so the basis size is not a real-time constraint. The per-timestep
+loop is CPU-bound; a GPU does not help.
 
 \section{Discussion}
-The recurring lever across both regimes is \emph{latent-scale control}. In the single
-direction the readout refresh inflates the latent; the root cause was a CCIPCA warm-start
-that seeded the wrong scale, and fixing it pins the encoder input. In the full task the
-encoder collapses, and the same scale fix substantially recovers orientation information.
-The dynamics, by contrast, are a secondary and double-edged factor: the RLS flow
-over-fits into divergence and even the gradient flow learns a non-attracting cycle, which
-a small fit-gated denoising noise stabilizes -- but that stabilization trades off against
-multi-condition separation, suggesting one shared autonomous flow is the wrong inductive
-bias for many conditions.
+On a single grating direction, \svjf{} learns online -- with an unknown readout -- to
+reconstruct held-out V1 neurons at the stimulus-locked PSTH ceiling. Its autonomous
+dynamics, however, do not \emph{forecast} the future spikes better than that trial average:
+under a strict forecasted-reconstruction criterion the free-run beats only the weak
+persistence baseline and loses to the PSTH, and adding latent dimension, basis size, or
+training length does not change this. We trace the visibly pathological free-run -- shrinkage
+plus high-frequency chaos -- to an under-regularized one-step map, and a closed-form
+curvature penalty restores a smooth limit-cycle free-run that generalizes better; but the
+smoothed flow still does not beat trial-averaging. The clean reading is that for
+stimulus-locked grating data the PSTH is a near-oracle and the achievable single-trial
+\emph{forecast} gain is small, separate from whether the flow is well-behaved.
 
-\paragraph{Limitations and next steps.} The single-direction PLL sits just below the PSTH
-ceiling: \svjf{} captures stimulus-locked structure but does not yet add single-trial
-predictive power, which likely needs encoder/readout work (the online subspace is still
-$\sim\!46^\circ$ off the ideal). Multi-condition decoding, while well above chance, is
-modest in absolute terms. The single-trial forecast metric is noisy. The most promising
-structural change -- deliberately out of scope here -- is to give the flow the stimulus as
-an input so direction-specific dynamics need not compete with a shared cycle.
+\paragraph{Limitations and next steps.} The criterion is the strictest reasonable one for an
+autonomous model and may understate the value of \svjf{} for tasks with genuine trial-to-trial
+dynamics rather than a repeated stimulus drive. The most promising structural change -- out of
+scope here -- is to give the flow the stimulus as an input, so direction- and
+phase-specific dynamics need not be reproduced by a free-running autonomous cycle; this also
+sets up the multi-direction case, which we study separately.
 
 \begin{thebibliography}{9}
 \bibitem[Zhao \& Park(2020)]{zhao2020} Y.~Zhao and I.~M.~Park.
