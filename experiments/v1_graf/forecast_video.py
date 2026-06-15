@@ -244,7 +244,7 @@ def render(pf, pc, pbar, t0, cfg, res, data, trial_i, timing):
     plt.close(fig)
 
 
-def render_slices(pf, pc, pbar, fve, t0, cfg, res, data, trial_i):
+def render_slices(pf, pc, pbar, fve, t0, cfg, res, data, trial_i, name="forecast_time"):
     """Time-slice view (clearer than the 3D projection of a contracting flow): each VJF factor
     over time, ordered by decoded-log-rate variance explained (eq. rot). Trial-average reference
     (gold), single-trial filtered latent (teal), free-run forecast (crimson) launched at t0;
@@ -267,9 +267,9 @@ def render_slices(pf, pc, pbar, fve, t0, cfg, res, data, trial_i):
     axes[-1].set_xlabel("time (10 ms bins;  dashed = forecast start, end of cycle 2)")
     axes[0].legend(fontsize=6.5, loc="upper right", ncol=1, framealpha=0.9)
     for ext in ("png", "pdf"):                                  # constrained_layout (RC); no tight_layout
-        fig.savefig(os.path.join(FIGS, f"forecast_time.{ext}"), dpi=200)
+        fig.savefig(os.path.join(FIGS, f"{name}.{ext}"), dpi=200)
     plt.close(fig)
-    print(f"[video] time-slices -> {FIGS}/forecast_time.png")
+    print(f"[video] time-slices -> {FIGS}/{name}.png")
 
 
 if __name__ == "__main__":
