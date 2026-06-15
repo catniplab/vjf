@@ -38,7 +38,7 @@ VID = os.path.join(HERE, "report_m1", "videos")
 BEST_JSON = os.path.join(HERE, "..", "..", "gcp_runs",
                          "graf-search-single-reg-20260615-093426", "results", "best_single.json")
 BINS_PER_CYCLE = 16                       # 16 bins/cycle (10 ms bins)
-T0 = BINS_PER_CYCLE                        # forecast launches after the first cycle
+T0 = 2 * BINS_PER_CYCLE                     # forecast launches after two cycles (past the onset transient)
 
 # Config presets. "metricbest" = the search winner (largest basis; overfits the flow into a
 # jagged free-run). "l3"/"l4" = lower-capacity configs whose free-run is a clean limit cycle
@@ -228,7 +228,7 @@ def render(pf, pc, pbar, t0, cfg, res, data, trial_i, timing):
             f"sVJF free-run forecast  -  dir 225, L={cfg['latent_dim']}, {res['n_basis']} RBF\n"
             f"gold = trial-average (high-SNR reference)   teal = single-trial filtered   "
             f"crimson = free-run forecast\n"
-            f"star = forecast start (1 cycle)   t = {cyc:0.2f} cycles   |   test trial #{trial_i}   |   "
+            f"star = forecast start (2 cycles)   t = {cyc:0.2f} cycles   |   test trial #{trial_i}   |   "
             f"PLL {res['pll']:.2f} (ceil {data['pll_psth']:.2f})",
             fontsize=8.5, color="0.92")
         return []
@@ -264,7 +264,7 @@ def render_slices(pf, pc, pbar, fve, t0, cfg, res, data, trial_i):
         ax.plot(tfc, pc[:, d], color=crim, lw=1.9, label="free-run forecast (no obs.)")
         ax.axvline(t0, color="0.5", ls="--", lw=0.8)
         ax.set_ylabel(f"factor {d + 1}\n({100 * fve[d]:.0f}% dec.var)")
-    axes[-1].set_xlabel("time (10 ms bins;  dashed = forecast start, end of cycle 1)")
+    axes[-1].set_xlabel("time (10 ms bins;  dashed = forecast start, end of cycle 2)")
     axes[0].legend(fontsize=6.5, loc="upper right", ncol=1, framealpha=0.9)
     for ext in ("png", "pdf"):                                  # constrained_layout (RC); no tight_layout
         fig.savefig(os.path.join(FIGS, f"forecast_time.{ext}"), dpi=200)

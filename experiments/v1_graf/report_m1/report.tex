@@ -246,9 +246,9 @@ stimulus-locked trial-averaged rate as predictor.
 \paragraph{Ordering the latent factors for display.}
 The VJF latent is identifiable only up to an invertible linear transform: $(x_t,C)\mapsto(Mx_t,
 CM^{-1})$ leaves the decoded log-rate $\eta_t=Cx_t+b$ unchanged, so the individual factor axes
-are not unique and a PCA of the latent itself (which ignores $C$) is not the natural display
-basis. We order the factors instead by the variance they explain in the \emph{decoded
-log-rate}. Let $\tilde X$ be the centered latent path over a trial (rows $(x_t-\bar x)^\trp$,
+are not unique. We order the factors by the variance they explain in the \emph{decoded
+log-rate} -- the neural-data signal, whose scale (unlike the latent's) is fixed by the readout.
+Let $\tilde X$ be the centered latent path over a trial (rows $(x_t-\bar x)^\trp$,
 $\bar x$ the trial-averaged latent), so the centered decoded log-rate is $\tilde H=\tilde X
 C^\trp$. With its singular value decomposition $\tilde H=U\Sigma V_L^\trp$, where
 $V_L=[r_1,\dots,r_L]$ are the leading $L$ right singular vectors ($\mathrm{rank}\,\tilde
@@ -266,8 +266,7 @@ projection -- the decoded-log-rate PC-score map -- \emph{not} an orthogonal rota
 ($C=U_g\Lambda_g^{1/2}$, the scale-fixed CCIPCA loading), the latent is approximately whitened,
 so $W$ is close to a reordering and rescaling of the existing factors rather than a substantive
 recombination. The same $W,\bar x$ are applied to the single-trial filtered latent and the
-free-run forecast (\cref{fig:freerun}); the ordering is decoder-aware, not a PCA of the latent
-itself.
+free-run forecast (\cref{fig:freerun}).
 
 \begin{figure}[t]
   \centering
@@ -369,7 +368,8 @@ does not beat the trial average.
     decoded-log-rate variance it explains (\cref{eq:rot}; \% in each panel). \textbf{Gold:} the
     trial-averaged latent -- the high-SNR reference cycle. \textbf{Teal:} the single-trial
     filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run launched at the
-    end of the first cycle (dashed line), with \emph{no} observations after $t_0$. The smoothed
+    end of the second cycle (dashed line; past the onset transient), with \emph{no} observations
+    after $t_0$. The smoothed
     free-run tracks the cycle only briefly, then relaxes toward the mean (a smooth contracting
     flow) -- not the high-frequency collapse of the unregularized field, but it does not sustain
     the oscillation either, consistent with its loss to the PSTH.}
