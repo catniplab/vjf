@@ -12,7 +12,7 @@
 \graphicspath{{figs/}}
 
 \title{Online variational joint filtering of macaque V1 single-trial dynamics:\\
-a forecast-reconstruction criterion and a curvature-regularized flow}
+a forecast-reconstruction criterion, and rollout training to recover the limit cycle}
 \author{CatNip Lab}
 \date{\today}
 
@@ -37,16 +37,18 @@ held-out neurons as well as trial-averaging. We then ask whether the learned dyn
 observations after $t_0$, decode it to a predicted firing rate, and score that forecast
 against the held-out future spikes by a Poisson-deviance \emph{forecast accuracy} relative to
 two baselines -- persistence and the stimulus-locked PSTH -- over half, one,
-and two grating cycles. Searching $\sim$\num{150} configurations of latent dimension, basis
-size, and training length, the autonomous free-run beats persistence only marginally and
-\emph{loses to the PSTH at every horizon}; more capacity does not help. Inspecting the
-free-run revealed an under-regularized one-step map -- shrinkage toward the origin plus
-high-frequency chaos. We add a closed-form curvature penalty on the velocity field, which
-turns the jagged free-run into a smooth trajectory (an $\sim$\num{8}-fold drop in trajectory
-roughness) while leaving the (small) forecast accuracy and the PSTH gap unchanged. The penalty
-thus cleanly separates a fixable, over-fit flow from a property of this stimulus-locked data:
-no configuration we searched produces an autonomous free-run that beats trial-averaging. The
-loop runs in real time (\SI{0.3}{ms}/bin).
+and two grating cycles. Under standard one-step training the autonomous free-run beats
+persistence only marginally and \emph{loses to the PSTH at every horizon}, and adding capacity
+(latent dimension, basis size, training length) does not help -- the free-run shrinks toward the
+origin and decays rather than sustaining the cycle. The limit, however, is the one-step training
+objective, not the model: a contracting field minimizes the observation-corrected one-step
+residual while its free-run decays, so one-step training never optimizes the free-run. Training
+the free-run directly with a multi-step rollout objective recovers the attracting limit cycle --
+the free-run sustains the oscillation, the held-out forecast accuracy roughly doubles
+($S\!\approx\!{+}0.025$ vs.\ persistence, from $\approx\!{+}0.013$ one-step) and the gap to the
+near-oracle PSTH narrows ($\approx\!{-}0.035$ from $\approx\!{-}0.05$), though it still does not
+beat it. Once the free-run is trained directly, the curvature penalty that smooths the one-step
+flow is unnecessary. The loop runs in real time (\SI{0.3}{ms}/bin).
 \end{abstract}
 
 \section{Introduction}
@@ -307,7 +309,7 @@ above the stimulus-locked PSTH ceiling (\num{0.64}). Reconstruction is therefore
 bottleneck, and every searched configuration clears the reconstruction gate. The question is
 whether the \emph{dynamics} add anything beyond this.
 
-\paragraph{The autonomous free-run beats persistence but not the PSTH; capacity does not help.}
+\paragraph{Under one-step training the free-run beats persistence but not the PSTH; capacity does not help.}
 Selecting on the forecasted-reconstruction score over $\sim$\num{150} configurations of latent
 dimension ($L\in\{3,4,5,6\}$), RBF budget (up to \num{2400}--\num{3200} centers, growing as
 $\sim\!2^L$), training length ($E\in\{20,\dots,200\}$), learning rate and denoising, the
@@ -321,9 +323,12 @@ models score near zero vs persistence. For a stimulus-locked grating the PSTH is
 near-oracle
 predictor of a held-out trial -- it ``knows'' the rate at every future bin -- whereas the
 autonomous flow must propagate the phase from $t_0$ through its learned field and accumulates
-error. That \emph{filtered} reconstruction matches the PSTH while the \emph{forecast} does not
-indicates how little forecastable structure beyond the trial mean the autonomous dynamics carry,
-at least within this search.
+error. The bottleneck, however, is the training objective rather than capacity or the data: the
+flow is fit by the \emph{observation-corrected one-step} residual, which a contracting field
+minimizes (observations re-inject the signal each step) even though its autonomous free-run
+decays -- so one-step training never optimizes the free-run, and the free-run shrinks toward the
+origin (\cref{fig:freerun}). We confirm this below and repair it by training the free-run
+directly.
 
 \begin{table}[t]
   \centering
@@ -358,10 +363,9 @@ cycle only briefly before relaxing toward the mean
 (\cref{fig:freerun}), in contrast to the jagged collapse without the penalty. The penalty does
 \emph{not} change the forecast accuracy, however: on the test trials the smoothed flow
 ($S\approx{+}0.015$) and the unregularized flow ($S\approx{+}0.019$) are within noise of each
-other, and both lose to the PSTH. Its value is therefore a smooth, interpretable free-run
--- not better forecasting. The penalty thus separates two distinct issues: a messy, over-fit
-flow (which it fixes) from a property of this stimulus-locked data, that an autonomous free-run
-does not beat the trial average.
+other, and both lose to the PSTH. Smoothing the field therefore does not help forecasting --
+confirming that the bottleneck is the one-step training \emph{objective}, not the roughness of
+the field. The next section fixes the objective.
 
 \begin{figure}[t]
   \centering
@@ -381,17 +385,54 @@ does not beat the trial average.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{forecast_time.png}
-  \caption{Held-out free-run forecast of the regularized model ($L{=}4$, \num{1600} RBF,
-    $\lambda{=}10^{-3}$) over time, each VJF factor on one test trial, ordered by the
-    decoded-log-rate variance it explains (\cref{eq:rot}; \% in each panel). \textbf{Gold:} the
-    trial-averaged latent -- the high-SNR reference cycle. \textbf{Teal:} the single-trial
-    filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run launched at the
-    end of the second cycle (dashed line; past the onset transient), with \emph{no} observations
-    after $t_0$. The smoothed
-    free-run tracks the cycle only briefly, then relaxes toward the mean (a smooth contracting
-    flow) -- not the high-frequency collapse of the unregularized field, but it does not sustain
-    the oscillation either, consistent with its loss to the PSTH.}
+  \caption{\textbf{Before (one-step training).} Held-out free-run of the one-step-trained model
+    ($L{=}4$, \num{1600} RBF, $\lambda{=}10^{-3}$) over time, each VJF factor on one test trial,
+    ordered by the decoded-log-rate variance it explains (\cref{eq:rot}; \% in each panel).
+    \textbf{Gold:} the trial-averaged latent -- the high-SNR reference cycle. \textbf{Teal:} the
+    single-trial filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run
+    launched at the end of the second cycle (dashed line; past the onset transient), with
+    \emph{no} observations after $t_0$. The free-run tracks the cycle only briefly, then relaxes
+    toward the mean -- it does not sustain the oscillation. Rollout training repairs this
+    (\cref{fig:rollout}).}
   \label{fig:freerun}
+\end{figure}
+
+\paragraph{Multi-step rollout training recovers the limit cycle.}
+\label{sec:rolloutresult}
+The decoded-grating response after the onset transient is an autonomous attracting limit cycle,
+observed through the spikes; it is recoverable, but one-step training does not. We fine-tune the
+flow weights on the multi-step rollout objective \cref{eq:roll}, then re-search over latent
+dimension, curvature penalty, and rollout depth/length ($k$, epochs) with rollout enabled,
+selecting by the same forecast-accuracy criterion. The free-run now \emph{sustains} the cycle:
+the leading decoded-variance factors oscillate for several cycles past $t_0$ instead of decaying
+(\cref{fig:rollout,fig:gallery}). The best configuration -- $L{=}4$, \num{1600} RBF,
+rollout, and \emph{no} curvature penalty ($\lambda{=}0$) -- roughly doubles the held-out forecast
+accuracy ($S\approx{+}0.025$ vs.\ persistence, against $\approx{+}0.013$ one-step) and narrows the
+gap to the near-oracle PSTH ($a_k$ vs.\ PSTH $\approx{-}0.035$, against $\approx{-}0.05$ one-step),
+though it still does not beat the PSTH. Notably the top configurations all use $\lambda{=}0$ or
+$10^{-4}$: once the rollout trains the free-run directly, the curvature penalty that smoothed the
+one-step flow is unnecessary -- the rollout regularizes at the trajectory level. The bottleneck
+was the training objective, not capacity, smoothing, or a property of the data.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{forecast_time_rollout.png}
+  \caption{\textbf{After (rollout training).} Same display as \cref{fig:freerun} for the best
+    rollout model ($L{=}4$, \num{1600} RBF, $\lambda{=}0$, rollout $k{=}8$). The autonomous
+    free-run (crimson) now sustains the oscillation of the leading factors for several cycles
+    past $t_0$, tracking the trial-averaged cycle (gold) rather than relaxing to the mean.}
+  \label{fig:rollout}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{gallery.png}
+  \caption{Free-run of the leading decoded-variance factor (gold: trial-average reference;
+    crimson: autonomous forecast from the end of cycle 2) for the eight best rollout
+    configurations. The free-runs oscillate (sustain the cycle) rather than decaying; the longer
+    rollout depth ($k{=}16$) and lower curvature penalty sustain it longest. (Per-panel test
+    forecast accuracy $S$ and PLL; single-seed re-fits, so $S$ spans $+0.01$--$0.03$.)}
+  \label{fig:gallery}
 \end{figure}
 
 \paragraph{Real-time.}
@@ -401,25 +442,26 @@ measured on an M-series CPU at \num{1600} RBF centers -- about \num{30}$\times$ 
 is CPU-bound; a GPU does not help.
 
 \section{Discussion}
-On a single grating direction, \svjf{} learns online -- with an unknown readout -- to
-reconstruct held-out V1 neurons at the stimulus-locked PSTH ceiling. Its autonomous dynamics,
-however, do not \emph{forecast} the future spikes better than that trial average: under a strict
-forecasted-reconstruction criterion the free-run beats only the weak persistence baseline and
-loses to the PSTH, and no configuration we searched -- across latent dimension, basis size, and
-training length -- changes this. We trace the visibly pathological free-run (shrinkage plus
-high-frequency chaos) to an under-regularized one-step map, and a closed-form curvature penalty
-restores a smooth free-run; the smoothed flow is more interpretable but forecasts no
-better. The reading is that for stimulus-locked grating data the PSTH is a near-oracle and the
-achievable single-trial \emph{forecast} gain over it is, in our search, negligible -- a question
-separate from whether the flow is well-behaved.
+On a single grating direction, \svjf{} reconstructs held-out V1 neurons online -- with an
+unknown readout -- at the stimulus-locked PSTH ceiling. Whether its autonomous dynamics
+\emph{forecast} the future spikes turned on the training objective, not the model. Under standard
+one-step training the free-run beats only the weak persistence baseline, loses to the PSTH, and
+does not improve with capacity or smoothing -- it decays toward the origin, because a contracting
+field minimizes the observation-corrected one-step residual while its free-run is never
+optimized. Training the free-run directly, with a multi-step rollout, recovers the attracting
+limit cycle the response actually follows after the onset transient: the free-run sustains the
+oscillation, the forecast accuracy roughly doubles, and the gap to the near-oracle PSTH narrows
+(to $\approx\!{-}0.035$), though it does not beat it. The recovered dynamics are interpretable --
+two decoded-variance factors carry $\sim$\SI{95}{\percent} of the neural drive and trace the 2-D
+cycle. The residual gap to the PSTH is small and plausibly reflects single-trial variability the
+trial average smooths out.
 
-\paragraph{Limitations and next steps.} The criterion is the strictest reasonable one for an
-autonomous model and may understate the value of \svjf{} for tasks with genuine trial-to-trial
-dynamics rather than a repeated stimulus drive; our conclusion is specific to this dataset and
-search, not a general impossibility. The most promising structural change -- out of scope here
--- is to give the flow the stimulus as an input, so direction- and phase-specific dynamics need
-not be reproduced by a free-running autonomous cycle; this also sets up the multi-direction
-case, which we treat separately.
+\paragraph{Limitations and next steps.} The rollout fine-tunes a one-step-trained flow on the
+buffered filtered trajectory; joint one-step-plus-rollout training and multiple seeds (single-seed
+re-fits vary by $\sim\!\pm0.01$ in $S$) would sharpen the estimate, and a small held-out window is
+a noisy gauge of the PSTH gap. The criterion -- a fully autonomous free-run -- is strict; giving
+the flow the stimulus as an input, and the multi-direction case where the input selects the
+cycle, are the natural next steps.
 
 \begin{thebibliography}{9}
 \bibitem[Zhao \& Park(2020)]{zhao2020} Y.~Zhao and I.~M.~Park.

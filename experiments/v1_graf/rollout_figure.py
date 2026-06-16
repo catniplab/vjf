@@ -12,7 +12,8 @@ import torch
 from experiments.v1_graf.single_dir import prepare_single_dir_data, _train_eval
 from experiments.v1_graf.forecast_video import filtered_path, render_slices, T0
 from experiments.v1_graf.factor_order import decoded_variance_basis, project
-from experiments.v1_graf.rollout_test import rollout_finetune, test_accuracy
+from experiments.v1_graf.rollout import rollout_finetune
+from experiments.v1_graf.rollout_test import test_accuracy
 from experiments.v1_graf.eval import forecast_reconstruction_deviance, forecast_skill_summary
 
 
@@ -30,11 +31,11 @@ def main():
     res = _train_eval(data["train_trials"], test, data["test_counts"], ybar, epochs=100,
                       latent_dim=4, N=data["N"], grow=True, grow_weight_init="residual",
                       flow="sgd", optimizer="adam", lr=1e-3, rbf_base=100, max_rbf=1600,
-                      dyn_noise=0.0, smooth_lambda=1e-4, psth_counts=psth, return_model=True)
+                      dyn_noise=0.0, smooth_lambda=0.0, psth_counts=psth, return_model=True)
     model, ro = res["model"], res["ro"]
     print(f"test PLL {res['pll']:.3f} (ceil {data['pll_psth']:.3f}), n_basis {res['n_basis']}")
     _line("BEFORE", *test_accuracy(model, ro, test, psth))
-    rollout_finetune(model, ro, data["train_trials"])
+    rollout_finetune(model, ro, data["train_trials"], k=8)      # best config: L4, lambda=0, k=8
     _line("AFTER ", *test_accuracy(model, ro, test, psth))
 
     # after-rollout free-run slice on the best test trial (factor-ordered, eq:rot)
