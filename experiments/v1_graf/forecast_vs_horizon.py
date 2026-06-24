@@ -1,18 +1,16 @@
-"""Forecast accuracy vs. horizon: does the limit cycle overtake the focus at long horizons?
+"""Forecast accuracy vs. horizon (single-seed, exploratory).
 
-The selection score S weights only k=8/16/32 (<=2 cycles), where a contracting focus wins by
-regression-to-the-mean. But the trials give ~6.75 usable cycles after t0. This scores held-out
-free-run forecast accuracy (deviance reduction vs persistence AND vs the near-oracle PSTH) at
-k = 8..96 bins (0.5..6 cycles) for four flows spanning the spectrum:
+SUPERSEDED for the report by rollout_study.py, which runs this multi-seed (mean +/- s.d.) and is
+the canonical generator of report_m1/figs/forecast_vs_horizon.png. This script writes a separate
+*_singleseed.png and is kept only as the quick single-fit probe that first tested the (refuted)
+hypothesis that a sustained-cycle flow would overtake a contractive one at long horizons -- it
+does not; see rollout_study.py and the report.
 
-  before      one-step (limit cycle, overshoots)
-  filtered    curriculum rollout, single-trial targets (best short-horizon S)
-  trialavg    curriculum rollout, trial-average target (a stable FOCUS, collapses)
-  cycle k160  periodic-target long-horizon rollout (a calibrated LIMIT CYCLE, ring = data orbit)
-
-Hypothesis: focus leads at short k, the limit cycle overtakes it as k grows (the focus decays
-off the data orbit; the cycle stays on it). If so, forecasting and limit-cycle recovery are the
-same criterion, scored at the horizon the data permits. Run: uv run python -m experiments.v1_graf.forecast_vs_horizon
+Scores single-fit held-out forecast accuracy (deviance reduction vs persistence AND vs the
+near-oracle PSTH) at k = 8..96 bins (0.5..6 cycles) for four flows -- one-step, single-trial
+rollout, trial-average rollout, and periodic long-horizon rollout. The contractive single-trial
+rollout leads at every horizon; the sustaining flows do not overtake it.
+Run: uv run python -m experiments.v1_graf.forecast_vs_horizon
 """
 from __future__ import annotations
 import copy
@@ -88,7 +86,7 @@ def main():
         a.set_ylabel(f"forecast accuracy vs {base}")
     ax[0].legend(fontsize=6, loc="best")
     ax[0].set_title("vs persistence", fontsize=8); ax[1].set_title("vs PSTH (near-oracle)", fontsize=8)
-    fig.savefig(os.path.join(FIGS, "forecast_vs_horizon.png"), dpi=200)
+    fig.savefig(os.path.join(FIGS, "forecast_vs_horizon_singleseed.png"), dpi=200)
     plt.close(fig)
     print(f"\n-> {FIGS}/forecast_vs_horizon.png", flush=True)
 

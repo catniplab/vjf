@@ -110,12 +110,12 @@ def main():
         tail = np.array(tail_amp)
         ring = float(np.median(tail))
         collapsed = bool(tail.std() / (ring + 1e-9) < 0.15)       # all ICs -> one common amplitude
-        if ring < 0.15 * data_amp:
-            verdict = "point attractor (focus)"
+        if rho <= 1.0 or ring < 0.15 * data_amp:                  # stable center => point attractor
+            verdict = "focus"
         elif collapsed:
-            verdict = "LIMIT CYCLE"
+            verdict = "limit cycle"
         else:
-            verdict = "marginal / unclear"
+            verdict = "marginal"
         recs.append(dict(cfg=cfg, dW=dW, eig=eig, rho=rho, init_amp=np.array(init_amp),
                          tail_amp=tail, ring=ring, ring_data=ring / data_amp, S=s_metric, verdict=verdict))
         print(f"  {cfg['name']:15s} dW {dW:.3f} | center spectral radius {rho:.4f} "
