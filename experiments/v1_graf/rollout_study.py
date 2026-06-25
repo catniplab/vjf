@@ -117,6 +117,12 @@ def main():
             runs[lab].append(r)
             print(f"  {lab:24s} S {r['S']:+.4f} | vsPSTH k8 {r['vq'][8]:+.3f} k96 {r['vq'][96]:+.3f} "
                   f"| ring {r['ring_data']:.2f}x | rho {r['rho']:.3f} | {r['verdict']}", flush=True)
+        # checkpoint the raw results after EACH seed, so a fleet VM killed before finishing all
+        # seeds still yields the completed ones (merged locally across the fleet).
+        json.dump({"direction": DIRECTION, "seeds_done": SEEDS[:len(plls)], "pll": plls,
+                   "raw": {k: runs[k] for k in runs}}, open(OUT, "w"), indent=2,
+                  default=lambda o: o.tolist() if hasattr(o, "tolist") else o)
+        print(f"  [checkpoint] {len(plls)}/{len(SEEDS)} seeds -> {OUT}", flush=True)
 
     # aggregate mean +/- std
     def ms(vals):
