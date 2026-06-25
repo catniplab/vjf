@@ -1,5 +1,5 @@
 \documentclass{article}
-\usepackage[preprint,nobib]{catniplab}
+\usepackage[preprint]{catniplab}
 \usepackage{amsmath,amssymb,mathtools}
 \input{math_preamble}
 
@@ -10,6 +10,7 @@
 \usepackage{algpseudocode}
 \usepackage{cleveref}
 \graphicspath{{figs/}}
+\addbibresource{report.bib}
 
 \title{Online variational joint filtering of macaque V1 single-trial dynamics:\\
 a sustained autonomous oscillation, and the limits of single-trial forecasting}
@@ -57,7 +58,7 @@ trials. The loop runs in real time (\SI{0.3}{ms}/bin).
 
 \section{Introduction}
 \svjf{} learns latent dynamics and a linear-Gaussian/Poisson readout jointly from a streaming
-sequence of observations \cite{zhao2020}. The additions used here are (i) a warm-started
+sequence of observations \cite{Zhao2017c}. The additions used here are (i) a warm-started
 online readout estimated by CCIPCA at the correct (covariance) scale, (ii) a projection
 encoder that feeds the recognition network a subspace projection of the observation rather
 than the raw spikes, and (iii) a growing radial-basis-function (RBF) velocity flow; all are
@@ -74,11 +75,11 @@ directly (a dynamical-systems analysis of the fitted flow), then report what for
 cannot do.
 
 \section{Dataset and task}
-We use the Graf et al.\ \cite{graf2011} anesthetized-macaque Utah-array recordings:
+We use the Graf et al.\ \cite{Graf2011-si} anesthetized-macaque Utah-array recordings:
 72 equally spaced drifting-grating directions (\ang{5} spacing) $\times$ 50 trials, each
 \SI{2560}{ms} (first \SI{1280}{ms} the drifting grating, then blank). We use
 \texttt{array\_5}, the highest mean-rate array (\SI{10.4}{Hz}, 148 single units), the same
-array analyzed by vLGP \cite{vlgp}, binned at \SI{10}{ms}; we analyze the first \SI{1400}{ms} of
+array analyzed by vLGP \cite{Zhao2016a}, binned at \SI{10}{ms}; we analyze the first \SI{1400}{ms} of
 each trial ($140$ bins -- the \SI{1280}{ms} stimulus window plus a short tail). The grating
 temporal frequency is \SI{6.25}{Hz}, so the response period is \SI{160}{ms} $=16$ bins. As a fixed preprocessing
 step we keep neurons whose orientation tuning (sum of two von Mises bumps) fits with
@@ -284,7 +285,7 @@ admit the longest horizon, so every $a_k$ is scored on a common set of starts (a
 this common subset, not the full selection grid). Scoring the decoded rate against the
 observed future spikes -- not a latent-space $R^2$ -- removes the affine-overfit loophole of
 self-referential latent metrics. We also report the filtered \emph{leave-one-neuron} PLL
-(bits/spike; \cite{vlgp}): for each held-out neuron, filter the trial from the other neurons'
+(bits/spike; \cite{Zhao2016a}): for each held-out neuron, filter the trial from the other neurons'
 projection and score its predicted rate against the counts, relative to a homogeneous-Poisson
 baseline (0 = mean-rate). The \emph{PSTH ceiling} is the same PLL with the stimulus-locked
 trial-averaged rate as predictor.
@@ -521,15 +522,6 @@ criterion -- a fully autonomous free-run scored per-bin against single trials --
 construction; giving the flow the stimulus as an input, and the multi-direction case where the
 input selects the cycle, are the natural next steps.
 
-\begin{thebibliography}{9}
-\bibitem[Zhao \& Park(2020)]{zhao2020} Y.~Zhao and I.~M.~Park.
-  Variational online learning of neural dynamics. \emph{Front. Comput. Neurosci.}, 2020.
-\bibitem[Zhao \& Park(2017)]{vlgp} Y.~Zhao and I.~M.~Park.
-  Variational latent Gaussian process for recovering single-trial dynamics from population
-  spike trains. \emph{Neural Computation}, 29(5):1293--1316, 2017.
-\bibitem[Graf et al.(2011)]{graf2011} A.~B.~A.~Graf, A.~Kohn, M.~Jazayeri, J.~A.~Movshon.
-  Decoding the activity of neuronal populations in macaque primary visual cortex.
-  \emph{Nat. Neurosci.}, 14(2):239--245, 2011.
-\end{thebibliography}
+\printbibliography
 
 \end{document}

@@ -1,0 +1,92 @@
+% Local references for the V1 Graf sVJF report.
+% Lab self-citations from catniplab.bib (canonical keys); dataset from paperpile.bib.
+
+@Article{Zhao2017c,
+  title         = {Variational online learning of neural dynamics},
+  author        = "Zhao, Yuan and Park, Il Memming",
+  abstract      = "State space models provide an interpretable framework for
+                   complex time series by combining an intuitive dynamical
+                   system model with a probabilistic observation model. We
+                   developed a flexible online learning framework for latent
+                   nonlinear state dynamics and filtered latent states. Our
+                   method utilizes the stochastic gradient variational Bayes
+                   method to jointly optimize the parameters of the nonlinear
+                   dynamics, observation model, and the black-box recognition
+                   model. Unlike previous approaches, our framework can
+                   incorporate non-trivial observation noise models and has
+                   potential of inferring in real-time. We test our method on
+                   point process and Gaussian observations driven by continuous
+                   attractor dynamics and nonstationary systems, demonstrating
+                   its ability to recover the phase portrait, filtered
+                   trajectory, and produce long-term predictions for online
+                   machine learning.",
+  year          =  2020,
+  month         = oct,
+  archivePrefix = "arXiv",
+  primaryClass  = "stat.ML",
+  eprint        = "1707.09049",
+  PMCID         = {7591751},
+  PMID          = {33154718},
+  doi           = {10.3389/fncom.2020.00071},
+  journal       = {Frontiers in Computational Neuroscience},
+  code          = {https://github.com/catniplab/vjf.git}
+}
+
+@Article{Zhao2016a,
+  author               = {Zhao, Yuan and Park, Il Memming},
+  title                = {Variational Latent {G}aussian Process for Recovering Single-Trial Dynamics from Population Spike Trains},
+  journal              = {Neural Computation},
+  year                 = {2017},
+  volume               = {29},
+  number               = {5},
+  month                = may,
+  abstract             = {When governed by underlying low-dimensional dynamics, the interdependence of simultaneously recorded populations of neurons can be explained by a small number of shared factors, or a low-dimensional trajectory. Recovering these latent trajectories, particularly from single-trial population recordings, may help us understand the dynamics that drive neural computation. However, due to the biophysical constraints and noise in the spike trains, inferring trajectories from data is a challenging statistical problem in general. Here, we propose a practical and efficient inference method, the variational latent gaussian process (vLGP). The vLGP combines a generative model with a history-dependent point process observation, together with a smoothness prior on the latent trajectories. The vLGP improves on earlier methods for recovering latent trajectories, which assume either observation models inappropriate for point processes or linear dynamics. We compare and validate vLGP on both simulated data sets and population recordings from the primary visual cortex. In the V1 data set, we find that vLGP achieves substantially higher performance than previous methods for predicting omitted spike trains, as well as capturing both the toroidal topology of visual stimuli space and the noise correlation. These results show that vLGP is a robust method with the potential to reveal hidden neural dynamics from large-scale neural recordings.},
+  archiveprefix        = {arXiv},
+  citeulike-article-id = {14025142},
+  citeulike-linkout-0  = {http://arxiv.org/abs/1604.03053},
+  day                  = {22},
+  doi                  = {10.1162/NECO_a_00953},
+  eprint               = {1604.03053},
+  keywords             = {bayesian, computational-neuroscience, gaussian-process, glm, latent-dynamics, latent-variable, spike-train, statistical-neuroscience, statistics, torus, variational-bayes},
+  posted-at            = {2016-04-30 16:02:05},
+  primaryclass         = {stat.ML},
+  youtube              = {https://www.youtube.com/watch?v=CrY5AfNH1ik},
+  code                 = {https://github.com/catniplab/vlgp},
+}
+
+@ARTICLE{Graf2011-si,
+  title     = "Decoding the activity of neuronal populations in macaque primary
+               visual cortex",
+  author    = "Graf, Arnulf B A and Kohn, Adam and Jazayeri, Mehrdad and
+               Movshon, J Anthony",
+  journal   = "Nature neuroscience",
+  publisher = "Nature Publishing Group",
+  volume    =  14,
+  number    =  2,
+  pages     = "239--245",
+  abstract  = "Visual function depends on the accuracy of signals carried by
+               visual cortical neurons. Combining information across neurons
+               should improve this accuracy because single neuron activity is
+               variable. We examined the reliability of information inferred
+               from populations of simultaneously recorded neurons in macaque
+               primary visual cortex. We considered a decoding framework that
+               computes the likelihood of visual stimuli from a pattern of
+               population activity by linearly combining neuronal responses and
+               tested this framework for orientation estimation and
+               discrimination. We derived a simple parametric decoder assuming
+               neuronal independence and a more sophisticated empirical decoder
+               that learned the structure of the measured neuronal response
+               distributions, including their correlated variability. The
+               empirical decoder used the structure of these response
+               distributions to perform better than its parametric variant,
+               indicating that their structure contains critical information for
+               sensory decoding. These results show how neuronal responses can
+               best be used to inform perceptual decision-making.",
+  month     =  jan,
+  year      =  2011,
+  url       = "http://dx.doi.org/10.1038/nn.2733",
+  keywords  = "decision, neuroscience, visual-system",
+  doi       = "10.1038/nn.2733",
+  pmid      =  21217762,
+  issn      = "1097-6256"
+}
