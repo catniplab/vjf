@@ -36,9 +36,14 @@ from experiments.v1_graf.figstyle import set_style, FW
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "report_m1", "figs")
-OUT = os.path.join(HERE, "rollout_study_results.json")
-TEX = os.path.join(HERE, "report_m1", "rollout_study_table.tex")
-SEEDS = [20260609, 20260610, 20260611]
+# Direction + seeds are env-parameterized for the GCP fleet (one VM per direction); outputs are
+# direction-tagged so a fleet does not clobber. Defaults reproduce the in-report dir-225 study.
+DIRECTION = float(os.environ.get("ROLLOUT_DIR", "225"))
+SEEDS = [int(s) for s in os.environ.get("ROLLOUT_SEEDS", "20260609,20260610,20260611").split(",")]
+_TAG = f"_d{int(DIRECTION)}" if os.environ.get("ROLLOUT_DIR") else ""
+OUT = os.path.join(HERE, f"rollout_study_results{_TAG}.json")
+TEX = os.path.join(HERE, "report_m1", f"rollout_study_table{_TAG}.tex")
+FIG_NAME = f"forecast_vs_horizon{_TAG}.png"
 HORIZONS = (8, 16, 24, 32, 48, 64, 96)          # bins (0.5 .. 6 cycles)
 RADII = np.linspace(0.2, 2.3, 9)                # initial radii for the return map
 N_CYC = 300
@@ -82,7 +87,8 @@ def evaluate(model, ro, test, psth, W, ctr, off, data_amp):
 
 def main():
     torch.set_default_dtype(torch.float32)
-    data = prepare_single_dir_data(direction=225.0, n_val=10)
+    print(f"=== direction {DIRECTION:.0f}, seeds {SEEDS} ===", flush=True)
+    data = prepare_single_dir_data(direction=DIRECTION, n_val=10)
     test, psth = data["test_trials"], data["psth_counts"]
     ybar = float(data["test_counts"].mean())
     runs = {lab: [] for lab, *_ in STRATEGIES}
@@ -175,10 +181,10 @@ def main():
         a.set_ylabel(f"forecast accuracy vs {base}")
     ax[0].legend(fontsize=5, loc="best"); ax[0].set_title("vs persistence", fontsize=8)
     ax[1].set_title("vs PSTH (near-oracle)", fontsize=8)
-    fig.savefig(os.path.join(FIGS, "forecast_vs_horizon.png"), dpi=200)
-    fig.savefig(os.path.join(FIGS, "forecast_vs_horizon.pdf"))
+    fig.savefig(os.path.join(FIGS, FIG_NAME), dpi=200)
+    fig.savefig(os.path.join(FIGS, FIG_NAME.replace(".png", ".pdf")))
     plt.close(fig)
-    print(f"\n-> {OUT}\n-> {TEX}\n-> {FIGS}/forecast_vs_horizon.png", flush=True)
+    print(f"\n-> {OUT}\n-> {TEX}\n-> {FIGS}/{FIG_NAME}", flush=True)
 
 
 if __name__ == "__main__":
