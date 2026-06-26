@@ -109,11 +109,15 @@ def main():
         data_amp = float(cycle_amplitude(project(xbar, W, ctr)).mean())
         off = filtered_path(model0, ro, test[0])[0][T0] - ctr
         for lab, tm, lad, clip in STRATEGIES:
-            m = copy.deepcopy(model0)
-            if tm is not None:
-                rollout_finetune(m, ro, data["train_trials"], epochs=EP[tm], k_ladder=lad,
-                                 target_mode=tm, clip=clip, lr=1e-3, seed=sd + 1)
-            r = evaluate(m, ro, test, psth, W, ctr, off, data_amp)
+            try:
+                m = copy.deepcopy(model0)
+                if tm is not None:
+                    rollout_finetune(m, ro, data["train_trials"], epochs=EP[tm], k_ladder=lad,
+                                     target_mode=tm, clip=clip, lr=1e-3, seed=sd + 1)
+                r = evaluate(m, ro, test, psth, W, ctr, off, data_amp)
+            except Exception as e:                          # a divergent rollout NaNs the eval filter;
+                print(f"  {lab:24s} DIVERGED ({type(e).__name__}) -- skipped", flush=True)
+                continue                                    # skip this strategy-seed, keep the rest
             runs[lab].append(r)
             print(f"  {lab:24s} S {r['S']:+.4f} | vsPSTH k8 {r['vq'][8]:+.3f} k96 {r['vq'][96]:+.3f} "
                   f"| ring {r['ring_data']:.2f}x | rho {r['rho']:.3f} | {r['verdict']}", flush=True)
