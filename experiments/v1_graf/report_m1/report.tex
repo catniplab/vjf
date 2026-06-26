@@ -49,7 +49,7 @@ most contractive flow reaches parity near one cycle, but every flow falls increa
 PSTH at longer horizons -- the PSTH knows the absolute phase a free-run must propagate. On the
 short-horizon selection score $S$, forecast accuracy is opposed to sustained oscillation: the only
 configuration that consistently beats persistence is the most \emph{contractive} flow
-($S\!\approx\!{+}0.015$), which regresses toward the mean orbit, while every flow that enlarges or
+($S\!\approx\!{+}0.012$), which regresses toward the mean orbit, while every flow that enlarges or
 sustains the oscillation scores worse (at long horizons, where persistence itself is very weak,
 the ranking is preserved but most flows approach it). A multi-step rollout objective trades one
 axis for the other; the oscillation amplitude itself is only weakly identified from $\sim$8-cycle
@@ -405,7 +405,7 @@ the absolute phase at every future bin, whereas an autonomous free-run propagate
 $t_0$ and accumulates phase error. Against persistence the picture is a trade-off
 (\cref{tab:rollout}). On the short-horizon selection score $S$, the only configuration that
 consistently beats persistence is the most \emph{contractive} one -- the single-trial rollout
-($S{=}{+}0.015\!\pm\!0.002$), whose flow hugs the trial-average orbit and shrinks single-trial
+($S{=}{+}0.012\!\pm\!0.003$), whose flow hugs the trial-average orbit and shrinks single-trial
 variance -- and it is also the least-bad against the PSTH ($a_8{\approx}{-}0.001$). Every
 configuration that \emph{enlarges or sustains} the oscillation (the one-step flow, and the
 periodic/long-horizon rollouts) scores \emph{worse} on $S$. The ranking is preserved across
@@ -417,8 +417,8 @@ sustaining the oscillation.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{forecast_vs_horizon.png}
-  \caption{Held-out forecast accuracy vs horizon (mean$\pm$s.d.\ over 3 seeds), from half a cycle
-    to six. \textbf{Left, vs persistence:} the most contractive flow (single-trial rollout) leads
+  \caption{Held-out forecast accuracy vs horizon (dir \ang{225}, mean$\pm$s.d.\ over \num{8} fit
+    seeds), from half a cycle to six. \textbf{Left, vs persistence:} the most contractive flow (single-trial rollout) leads
     at every horizon; the one-step flow and the periodic/long-horizon rollouts -- those that
     sustain the oscillation -- trail it, dipping below persistence at short horizons and rising
     toward it as persistence weakens at long horizons. \textbf{Right, vs the near-oracle PSTH:} no
@@ -431,13 +431,13 @@ sustaining the oscillation.
 \paragraph{A systematic rollout study: two orthogonal axes.}
 We fine-tune the one-step flow with the rollout objective (\cref{eq:roll}) and scan its target,
 horizon ladder, and gradient clip over three fit seeds (\cref{tab:rollout}). Two axes separate.
-\emph{Forecasting:} only the short-horizon single-trial target beats persistence; the
-trial-average target ties it, and the periodic targets -- which sustain the cycle most strongly
--- forecast worse as the horizon grows. \emph{Dynamics:} the rollout reshapes the attractor, but
-its amplitude and stability are weakly identified from $\sim$8-cycle trials. The long-horizon
-periodic target, which most directly penalizes amplitude decay, tends to enlarge the ring toward
-the data orbit, but unreliably -- ring/data is $0.72\!\pm\!0.39$ across seeds (range
-$0.18$--$1.18$), and the center spectral radius $\rho$ straddles $1$ -- and at a forecast cost.
+\emph{Forecasting:} only the short-horizon single-trial target consistently beats persistence;
+the trial-average target is marginally positive, and the periodic targets -- which sustain the
+cycle most strongly -- score worse as the horizon grows. \emph{Dynamics:} the rollout reshapes the
+attractor, but its amplitude and stability are weakly identified from $\sim$8-cycle trials. The
+long-horizon periodic target, which most directly penalizes amplitude decay, tends to enlarge the
+ring toward the data orbit, but unreliably -- ring/data spans $\approx\!0.2$--$1.2$ across the
+\num{8} seeds and the center spectral radius $\rho$ straddles $1$ -- and at a forecast cost.
 Capacity is not the lever either: in the validation search the best forecast accuracy is flat
 across latent dimension $L{=}3$--$5$ and \emph{drops} at $L{=}6$, with no gain past $E{=}100$
 training epochs (\cref{tab:capacity}). The two goals -- a sustained oscillation and a good
@@ -446,26 +446,26 @@ single-trial forecast -- pull in opposite directions, and the rollout trades bet
 \begin{table}[t]
   \centering
   \caption{Multi-step rollout study (dir \ang{225}, $L{=}4$, \num{1600} RBF; held-out test,
-    mean$\pm$s.d.\ over 3 fit seeds). Forecasting and sustained oscillation are opposed: the only
-    consistent persistence-beater ($S{>}0$, \textbf{bold}) is the most contractive flow
+    \num{8} fit seeds -- 3 local + 5 on GCP). Forecasting and sustained oscillation are opposed:
+    the only consistent persistence-beater ($S{>}0$, \textbf{bold}) is the most contractive flow
     (single-trial target), while the flows that enlarge/sustain the oscillation (one-step,
-    periodic, long horizon) forecast worse; none beats the phase-locked PSTH ($a_k$ vs PSTH
+    periodic, long horizon) score worse; none beats the phase-locked PSTH ($a_k$ vs PSTH
     ${<}0$) at any horizon. Ring amplitude (relative to the data orbit) and the center spectral
     radius $\rho$ (a true limit cycle would have $\rho{>}1$) are weakly identified and
-    near-marginal across seeds -- $\rho$ straddles $1$ (per-seed range $\approx\!0.7$--$2.4$).
-    $S$ and ring/data are mean$\pm$s.d.; $a_8$, $a_{96}$, and $\rho$ are seed means. $k_{\max}$ in
-    bins (16/cycle).}
+    near-marginal -- across the \num{8} seeds the one-step $\rho$ spans $0.65$--$2.02$ (three
+    below $1$, five above), so the focus/limit-cycle label flips fit-to-fit. $S$ and ring/data are
+    mean$\pm$s.d.; $a_8$, $a_{96}$, and $\rho$ are seed means. $k_{\max}$ in bins (16/cycle).}
   \label{tab:rollout}
   \begin{tabular}{lccrrrcc}
     \toprule
     rollout target & $k_{\max}$ & clip & $S$ vs persist & $a_8$ PSTH & $a_{96}$ PSTH & ring/data & $\rho$ \\
     \midrule
-    none (one-step)  & --  & --  & $-0.021{\scriptstyle\pm.012}$           & $-0.036$ & $-0.043$ & $0.74{\scriptstyle\pm.29}$ & $1.6$ \\
-    single-trial     & 48  & 1   & $\mathbf{+0.015{\scriptstyle\pm.002}}$  & $-0.001$ & $-0.018$ & $0.52{\scriptstyle\pm.12}$ & $1.0$ \\
-    trial-average    & 48  & 1   & $+0.001{\scriptstyle\pm.005}$           & $-0.015$ & $-0.023$ & $0.59{\scriptstyle\pm.08}$ & $1.7$ \\
-    periodic         & 48  & 1   & $-0.009{\scriptstyle\pm.008}$           & $-0.025$ & $-0.035$ & $0.52{\scriptstyle\pm.13}$ & $1.1$ \\
-    periodic         & 96  & 10  & $-0.015{\scriptstyle\pm.011}$           & $-0.031$ & $-0.039$ & $0.72{\scriptstyle\pm.38}$ & $1.5$ \\
-    periodic         & 160 & 10  & $-0.020{\scriptstyle\pm.006}$           & $-0.034$ & $-0.042$ & $0.72{\scriptstyle\pm.39}$ & $1.4$ \\
+    none (one-step)  & --  & --  & $-0.008{\scriptstyle\pm0.014}$          & $-0.023$ & $-0.032$ & $0.55{\scriptstyle\pm0.26}$ & $1.30$ \\
+    single-trial     & 48  & 1   & $\mathbf{+0.012{\scriptstyle\pm0.003}}$ & $-0.003$ & $-0.019$ & $0.39{\scriptstyle\pm0.17}$ & $0.89$ \\
+    trial-average    & 48  & 1   & $+0.006{\scriptstyle\pm0.006}$          & $-0.010$ & $-0.021$ & $0.56{\scriptstyle\pm0.17}$ & $1.42$ \\
+    periodic         & 48  & 1   & $-0.001{\scriptstyle\pm0.009}$          & $-0.017$ & $-0.027$ & $0.53{\scriptstyle\pm0.13}$ & $1.22$ \\
+    periodic         & 96  & 10  & $-0.004{\scriptstyle\pm0.011}$          & $-0.019$ & $-0.030$ & $0.57{\scriptstyle\pm0.27}$ & $1.28$ \\
+    periodic         & 160 & 10  & $-0.007{\scriptstyle\pm0.010}$          & $-0.022$ & $-0.032$ & $0.60{\scriptstyle\pm0.27}$ & $1.44$ \\
     \bottomrule
   \end{tabular}
 \end{table}
