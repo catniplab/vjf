@@ -44,16 +44,15 @@ that ring is a true attracting limit cycle or a very slowly decaying focus is ne
 though -- the flow map's eigenvalues lie near the unit circle and the classification flips across
 fits -- and the ring amplitude is weakly identified from $\sim$8-cycle trials. The familiar look
 of a single free-run ``decaying'' is the high-amplitude filtered start relaxing inward toward
-that ring. Second, no autonomous free-run \emph{consistently} beats the phase-locked PSTH: the
-most contractive flow reaches parity near one cycle, but every flow falls increasingly below the
-PSTH at longer horizons -- the PSTH knows the absolute phase a free-run must propagate. On the
-short-horizon selection score $S$, forecast accuracy is opposed to sustained oscillation: the only
-configuration that consistently beats persistence is the most \emph{contractive} flow
-($S\!\approx\!{+}0.012$), which regresses toward the mean orbit, while every flow that enlarges or
-sustains the oscillation scores worse (at long horizons, where persistence itself is very weak,
-the ranking is preserved but most flows approach it). A multi-step rollout objective trades one
-axis for the other; the oscillation amplitude itself is only weakly identified from $\sim$8-cycle
-trials. The loop runs in real time (\SI{0.3}{ms}/bin).
+that ring. Second, forecast accuracy is opposed to sustained oscillation: the only consistent
+persistence-beater is the most \emph{contractive} flow ($S\!\approx\!{+}0.012$), which regresses
+toward the mean orbit, while flows that sustain the oscillation score worse, and a multi-step
+rollout objective trades one axis for the other. Whether the free-run beats the stimulus-locked
+PSTH is \emph{direction-dependent}: on the strongest, cleanest direction the PSTH is a near-perfect
+phase-locked oracle and is not beaten, but on three noisier directions the free-run beats it at
+most horizons -- the learned dynamics add forecast value over trial-averaging where single trials
+carry structure the average washes out. The oscillation amplitude itself is only weakly identified
+from $\sim$8-cycle trials. The loop runs in real time (\SI{0.3}{ms}/bin).
 \end{abstract}
 
 \section{Introduction}
@@ -443,6 +442,34 @@ across latent dimension $L{=}3$--$5$ and \emph{drops} at $L{=}6$, with no gain p
 training epochs (\cref{tab:capacity}). The two goals -- a sustained oscillation and a good
 single-trial forecast -- pull in opposite directions, and the rollout trades between them.
 
+\paragraph{Generality across grating directions.}
+To test whether these findings are specific to the strongest direction, we repeat the multi-seed
+study (three seeds, with the divergence-prone long-horizon rollouts guarded) on three further
+directions (\ang{45}, \ang{105}, \ang{295}; PSTH-ceiling PLL \num{0.62}/\num{0.66}/\num{0.58}, all
+weaker than \ang{225}'s \num{0.73}). Two of the three findings generalize cleanly: the single-trial
+(contractive) rollout is again the best or tied-best forecaster, and the dynamics remain
+near-marginal ($\rho$ straddles $1$ on every direction). The PSTH result, however, is
+\emph{direction-dependent} (\cref{fig:generality}). On \ang{225} no free-run beats the near-oracle
+PSTH at any horizon; but on the three noisier directions the single-trial free-run \emph{beats} it
+-- on \ang{105} at every horizon ($a_8\!\approx\!{+}0.06$, $a_{96}\!\approx\!{+}0.04$), on \ang{295}
+and \ang{45} at the longer horizons. Where the response is strong and stereotyped (\ang{225}) the
+stimulus-locked average is a near-perfect phase-locked predictor an autonomous free-run cannot
+beat; where single trials carry structure the average washes out (the noisier directions), the
+free-run -- launched from the trial-specific $t_0$ state -- adds genuine forecast value over
+trial-averaging.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{generality.png}
+  \caption{Generality across four grating directions: held-out forecast accuracy of the
+    single-trial rollout vs horizon (mean$\pm$s.d.\ over seeds), against persistence (left) and the
+    near-oracle PSTH (right). \textbf{Right:} only the strongest, cleanest direction (\ang{225},
+    PLL \num{0.73}) stays below the PSTH at all horizons; the three noisier directions
+    (\ang{105}/\ang{295}/\ang{45}) beat it -- most on \ang{105}, at every horizon. The autonomous
+    dynamics add forecast value over trial-averaging where the PSTH is a weaker oracle.}
+  \label{fig:generality}
+\end{figure}
+
 \begin{table}[t]
   \centering
   \caption{Multi-step rollout study (dir \ang{225}, $L{=}4$, \num{1600} RBF; held-out test,
@@ -501,16 +528,18 @@ range of initial conditions settles toward a nonzero ring, so the free-run does 
 the mean -- what looks like decay in a single trace is the high-amplitude filtered start relaxing
 onto that ring. Whether the ring is a true attracting limit cycle or a slowly decaying focus is
 near-marginal -- the flow-map eigenvalues lie near the unit circle and the classification varies
-across fits -- and the amplitude is weakly identified from $\sim$8-cycle trials. And yet, robustly,
-\emph{single-trial forecast accuracy does not reward sustaining the oscillation}. No autonomous
-free-run beats the phase-locked PSTH at any horizon -- the PSTH carries absolute-phase information
-a free-run must propagate and lose -- and against persistence the best forecaster is the most
-contractive flow, because under single-trial noise and phase drift the minimum-deviance prediction
-regresses toward the mean orbit. The multi-step rollout makes the trade-off explicit: short-horizon,
-single-trial targets buy forecast accuracy by contracting; long-horizon periodic targets sustain
-the oscillation but forecast worse. Beating the PSTH was never the attainable bar for an autonomous
-model; the attainable bar -- dynamics that sustain the oscillation rather than collapsing to the
-mean -- is met, and is best read off the dynamics directly, not off the forecast score.
+across fits -- and the amplitude is weakly identified from $\sim$8-cycle trials. On the other axis,
+\emph{single-trial forecast accuracy does not reward sustaining the oscillation}: against
+persistence the best forecaster is the most contractive flow, because under single-trial noise and
+phase drift the minimum-deviance prediction regresses toward the mean orbit, and the multi-step
+rollout makes the trade-off explicit (short-horizon single-trial targets buy accuracy by
+contracting; long-horizon periodic targets sustain the oscillation but forecast worse). Whether the
+free-run beats the near-oracle PSTH is direction-dependent and, encouragingly, mostly favorable: on
+the strongest, cleanest direction (\ang{225}) the stimulus-locked average is a near-perfect
+phase-locked predictor an autonomous free-run cannot beat, but on three noisier directions the
+free-run beats it at most horizons -- the learned dynamics add forecast value over trial-averaging
+precisely where single trials depart from the average. So the autonomous model is not merely
+re-deriving the PSTH: it captures trial-specific dynamics that trial-averaging discards.
 
 \paragraph{Limitations and next steps.} The oscillation's amplitude and stability are weakly
 identified from $\sim$8-cycle trials (ring/data spans $0.18$--$1.18$ across seeds and $\rho$
