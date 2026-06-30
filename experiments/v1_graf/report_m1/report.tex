@@ -354,14 +354,17 @@ down by these short trials.
 \begin{figure}[t]
   \centering
   \includegraphics[width=\textwidth]{forecast_time.png}
-  \caption{Held-out free-run of the learned flow over one test trial, each VJF factor ordered by
-    the decoded-log-rate variance it explains (\cref{eq:rot}; \% in each panel). \textbf{Gold:}
-    the trial-averaged latent (the high-SNR reference cycle). \textbf{Teal:} the single-trial
-    filtered latent (with spikes). \textbf{Crimson:} the autonomous free-run launched at the end
-    of the second cycle (dashed line; past the onset transient), with \emph{no} observations
-    after $t_0$. Over the trial the free-run loses amplitude -- but this is the high-amplitude
-    single-trial start relaxing onto the sustained oscillation, not a collapse to the mean
-    (\cref{fig:limitcycle}).}
+  \caption{Held-out free-run of the learned flow on one test trial, the two leading
+    decoded-variance factors (rows; \cref{eq:rot}), for two directions. \textbf{Gold:} the
+    trial-averaged latent -- the \emph{PSTH-equivalent} predictor (decoding it gives $\approx$ the
+    PSTH rate). \textbf{Teal:} the single-trial filtered latent. \textbf{Crimson:} the autonomous
+    free-run launched at the end of the second cycle (dashed; no observations after $t_0$).
+    \textbf{Left, \ang{225}} (strongest, cleanest): the gold trial-average tracks the single trial
+    markedly better than the free-run, which loses amplitude over the trial -- this is the one
+    direction where the PSTH is unbeaten (\cref{fig:generality}); whether the free-run settles onto
+    a ring or a point is near-marginal (\cref{fig:limitcycle}). \textbf{Right, \ang{105}}
+    (noisier): the free-run tracks the single trial about as well as the trial-average -- here it
+    \emph{beats} the near-oracle PSTH at every horizon (\cref{fig:generality}).}
   \label{fig:freerun}
 \end{figure}
 
